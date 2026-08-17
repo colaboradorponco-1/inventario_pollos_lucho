@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iniciar sesión - Pollos Lucho</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; }
+        body {
+            font-family: 'Jost', 'Segoe UI', sans-serif;
+            display: flex;
+            min-height: 100vh;
+            background: #0C0908;
+            color: #FFFFFF;
+        }
+
+        /* Panel de la marca (izquierda) - colores principales: amarillo, blanco, negro */
+        .brand-panel {
+            flex: 1 1 55%;
+            background: linear-gradient(160deg, #FCC302 0%, #E3B001 55%, #0C0908 100%);
+            color: #0C0908;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 28px;
+            padding: 40px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .brand-panel::before {
+            content: '';
+            position: absolute; inset: 0;
+            background: radial-gradient(circle at center, rgba(252,195,2,.1), transparent 55%);
+            pointer-events: none;
+        }
+        .brand-panel .content { position: relative; z-index: 1; }
+        .brand-panel .logo-img {
+            width: clamp(120px, 16vw, 210px);
+            height: auto;
+            margin: 0 auto 6px;
+            display: block;
+        }
+        .brand-panel h1 {
+            font-family: 'Passione One', 'Arial Black', sans-serif;
+            font-size: clamp(30px, 4.2vw, 52px);
+            letter-spacing: .02em;
+            color: #0C0908;
+            text-shadow: 0 2px 14px rgba(255,255,255,.25);
+        }
+        .brand-panel p.tagline {
+            font-size: clamp(14px, 1.6vw, 18px);
+            opacity: .85;
+            max-width: 380px;
+            margin: 0 auto;
+            line-height: 1.5;
+            color: #0C0908;
+        }
+        .brand-panel .foot {
+            position: absolute; bottom: 22px; left: 0; right: 0;
+            font-size: 12px; opacity: .6;
+            color: #0C0908;
+        }
+
+        /* Panel del formulario (derecha) */
+        .form-panel {
+            flex: 1 1 45%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px 24px;
+            background: #ffffff;
+        }
+        .login-box { width: 100%; max-width: 400px; }
+        .form-head { margin-bottom: 26px; text-align: center; }
+        .form-head .mini-logo { font-size: 34px; line-height: 1; }
+        .form-head h2 {
+            font-family: 'Passione One', 'Arial Black', sans-serif;
+            font-size: 26px; margin-top: 8px; color: #0C0908;
+        }
+        .form-head p.sub { color: #424243; font-size: 13px; margin-top: 4px; }
+
+        .field { margin-bottom: 16px; }
+        .field label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #424243; }
+        .field input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1.5px solid #E5E0DA;
+            border-radius: 10px;
+            font-size: 15px;
+            font-family: inherit;
+            background: #FAFAF8;
+            transition: border-color .2s, box-shadow .2s, background .2s;
+            color: #0C0908;
+        }
+        .field input:focus {
+            outline: none;
+            border-color: #FCC302;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(252,195,2,.18);
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 13px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-family: 'Passione One', 'Arial Black', sans-serif;
+            letter-spacing: .04em;
+            color: #0C0908;
+            background: #FCC302;
+            cursor: pointer;
+            transition: transform .15s, box-shadow .2s, background .15s;
+            box-shadow: 0 4px 14px rgba(0,0,0,.2);
+        }
+        .btn-login:hover { transform: translateY(-1px); background: #e5b900; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+        .btn-login:active { transform: translateY(0); }
+
+        #login-error {
+            display: none;
+            background: #fdecea;
+            color: #CF141D;
+            border: 1px solid rgba(207,20,29,.35);
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-size: 13px;
+            margin-bottom: 14px;
+        }
+        .form-foot { text-align: center; margin-top: 22px; font-size: 12px; color: #424243; }
+        .ip-box {
+            margin-top: 18px;
+            background: #FFF6DC;
+            border: 1px dashed #FCC302;
+            border-radius: 10px;
+            padding: 12px 14px;
+            font-size: 12.5px;
+            color: #424243;
+            line-height: 1.6;
+            text-align: center;
+        }
+        .ip-box strong { display: block; color: #0C0908; font-size: 13px; margin-bottom: 3px; }
+        .ip-box b { color: #0C0908; }
+
+        /* Escalable: en pantallas pequeñas el panel de marca pasa arriba */
+        @media (max-width: 860px) {
+            body { flex-direction: column; }
+            .brand-panel {
+                flex: none;
+                min-height: 34vh;
+                padding: 26px 20px;
+                gap: 12px;
+            }
+            .brand-panel .logo-img { width: 110px; }
+            .brand-panel h1 { font-size: 28px; }
+            .brand-panel p.tagline { font-size: 13px; }
+            .brand-panel::before { background-size: auto 60%; }
+            .brand-panel .foot { display: none; }
+            .form-panel { padding: 30px 20px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="brand-panel">
+        <div class="content">
+            <img class="logo-img" src="/static/logos/logo_p22_61.png" alt="Pollos Lucho">
+            <h1>POLLOS LUCHO</h1>
+            <p class="tagline">Sistema de inventario: controla productos, entradas, salidas y reportes desde un solo lugar.</p>
+        </div>
+        <div class="foot">© Pollos Lucho · Sistema de Inventario</div>
+    </div>
+
+    <div class="form-panel">
+        <div class="login-box">
+            <div class="form-head">
+                <h2>Iniciar sesión</h2>
+                <p class="sub">Ingresa tus credenciales para continuar</p>
+            </div>
+            <div id="login-error">Usuario o contraseña incorrectos</div>
+            <form id="form-login">
+                <div class="field">
+                    <label for="login-usuario">Usuario</label>
+                    <input type="text" id="login-usuario" placeholder="admin" autocomplete="username" required autofocus>
+                </div>
+                <div class="field">
+                    <label for="login-password">Contraseña</label>
+                    <input type="password" id="login-password" placeholder="••••••" autocomplete="current-password" required>
+                </div>
+                <button type="submit" class="btn-login">ENTRAR</button>
+            </form>
+            <div class="form-foot">Usa el usuario <b>admin</b> y la contraseña configurada</div>
+            {% if ip %}
+            <div class="ip-box">
+                <strong>Acceso desde tu celular</strong>
+                <span>Abre el navegador y entra a: <b>http://{{ ip }}:5000</b></span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('form-login').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    usuario: document.getElementById('login-usuario').value,
+                    password: document.getElementById('login-password').value,
+                }),
+            });
+            const json = await res.json();
+            if (json.ok) {
+                window.location.href = '/';
+            } else {
+                const err = document.getElementById('login-error');
+                err.textContent = json.message;
+                err.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

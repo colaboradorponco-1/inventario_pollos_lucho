@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventario Pollos Lucho</title>
+    <link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+    <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <aside class="sidebar" id="sidebar">
+        <div class="brand">
+            <img class="logo-img" src="/static/logos/logo_p22_61.png" alt="Pollos Lucho">
+            <div class="brand-text">
+                <h1>Pollos Lucho</h1>
+                <span class="subtitle">Sistema de Inventario</span>
+            </div>
+        </div>
+        <nav class="menu">
+            <button class="menu-btn active" data-view="dashboard">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                Inicio
+            </button>
+            <button class="menu-btn" data-view="productos">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                Productos
+            </button>
+            <button class="menu-btn" data-view="movimientos">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                Entradas / Salidas
+            </button>
+            <button class="menu-btn" data-view="proveedores">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Proveedores
+            </button>
+            <button class="menu-btn" data-view="gastos">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+                Gastos
+            </button>
+            <button class="menu-btn" data-view="ventas">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                Ventas
+            </button>
+            <button class="menu-btn" data-view="repartos">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                Repartos
+            </button>
+            <button class="menu-btn" data-view="fiados">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                Fiados
+            </button>
+            <button class="menu-btn" data-view="reportes">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                Reportes
+            </button>
+            <button class="menu-btn" data-view="usuarios">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Usuarios
+            </button>
+            <button class="menu-btn" data-view="auditoria">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                Auditoría
+            </button>
+            <button class="menu-btn" data-view="respaldo">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Respaldo
+            </button>
+        </nav>
+        <div class="sidebar-footer">
+            <button class="menu-btn" id="btn-cambiar-pass">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Cambiar contraseña
+            </button>
+            <button class="menu-btn" id="btn-salir">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Salir
+            </button>
+        </div>
+    </aside>
+
+    <main id="app">
+
+        <!-- DASHBOARD -->
+        <section id="view-dashboard" class="view active">
+            <div class="dash-head">
+                <div>
+                    <h1>Panel de control</h1>
+                    <p class="dash-welcome" id="dash-welcome">Bienvenido al sistema de inventario</p>
+                </div>
+                <span class="dash-date" id="dash-date"></span>
+            </div>
+
+            <div class="kpi-grid">
+                <div class="kpi kpi-yellow">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Productos</span>
+                        <span class="kpi-value" id="stat-productos">0</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-dark">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Productos con stock</span>
+                        <span class="kpi-value" id="stat-stock">0</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-yellow">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Valor inventario</span>
+                        <span class="kpi-value" id="stat-valor">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-dark">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Ventas del mes</span>
+                        <span class="kpi-value" id="stat-ventas">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-yellow">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Ventas del año</span>
+                        <span class="kpi-value" id="stat-ventas-anio">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-red">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Ventas de hoy</span>
+                        <span class="kpi-value" id="stat-ventas-hoy">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-red">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Gastos del mes</span>
+                        <span class="kpi-value" id="stat-gastos">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-red">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Gastos del año</span>
+                        <span class="kpi-value" id="stat-gastos-anio">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-dark">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Repartos del mes</span>
+                        <span class="kpi-value" id="stat-repartos">0</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-green">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Ganancia del mes</span>
+                        <span class="kpi-value" id="stat-utilidad">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-red">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Por cobrar (fiados)</span>
+                        <span class="kpi-value" id="stat-por-cobrar">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-green">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Entradas del mes</span>
+                        <span class="kpi-value" id="stat-entradas-mes">0</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-red">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Salidas del mes</span>
+                        <span class="kpi-value" id="stat-salidas-mes">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dash-charts">
+                <div class="panel">
+                    <h2>Ventas vs Gastos (6 meses)</h2>
+                    <div id="graf-ventas-gastos" class="chart-box"></div>
+                    <div class="chart-leyenda"><span class="lg lg-yellow">Ventas</span><span class="lg lg-red">Gastos</span></div>
+                </div>
+                <div class="panel">
+                    <h2>Ganancias por mes</h2>
+                    <div id="graf-utilidad" class="chart-box"></div>
+                </div>
+            </div>
+            <div class="dash-charts">
+                <div class="panel">
+                    <h2>Top productos vendidos</h2>
+                    <div id="graf-top-productos" class="chart-box"></div>
+                </div>
+                <div class="panel">
+                    <h2>Reparto por sucursal (top 5)</h2>
+                    <div id="graf-top-repartos" class="chart-box"></div>
+                </div>
+            </div>
+            <div class="dash-charts">
+                <div class="panel">
+                    <h2>Productos con más entradas</h2>
+                    <div id="graf-top-entradas" class="chart-box"></div>
+                </div>
+                <div class="panel">
+                    <h2>Productos con más salidas</h2>
+                    <div id="graf-top-salidas" class="chart-box"></div>
+                </div>
+            </div>
+
+            <div class="dash-cols">
+                <div class="panel">
+                    <h2>Movimientos recientes</h2>
+                    <table class="data-table">
+                        <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr></thead>
+                        <tbody id="dash-movimientos"></tbody>
+                    </table>
+                </div>
+
+                <div class="panel">
+                    <h2>Alertas</h2>
+                    <div class="alerts-list" id="dash-alertas"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- PRODUCTOS -->
+        <section id="view-productos" class="view">
+            <div class="toolbar">
+                <input type="text" id="prod-filtro" placeholder="Buscar producto, código, proveedor...">
+                <select id="prod-categoria"></select>
+                <select id="prod-filtro-proveedor"></select>
+                <select id="prod-estado">
+                    <option value="">Todos los estados</option>
+                    <option value="con-stock">Con stock</option>
+                    <option value="agotado">Agotados</option>
+                    <option value="stock-bajo">Stock bajo</option>
+                    <option value="por-vencer">Por vencer</option>
+                </select>
+                <button class="btn" id="btn-etiquetas">Etiquetas</button>
+                <button class="btn btn-primary" id="btn-nuevo-producto">+ Nuevo producto</button>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Código</th><th>Producto</th><th>Categoría</th><th>Almacén</th>
+                            <th>Stock</th><th>Mínimo</th><th>Unidad</th><th>Costo</th>
+                            <th>Vence</th><th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="productos-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- MOVIMIENTOS -->
+        <section id="view-movimientos" class="view">
+            <div class="grid-2">
+                <div class="panel">
+                    <h2>Registrar movimiento</h2>
+                    <label class="scan-input">
+                        <span class="scan-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg></span>
+                        <input type="text" id="mov-escaneo" placeholder="Escanea el código de barras del producto..." autocomplete="off">
+                    </label>
+                    <p class="scan-hint">Con el lector: escanea y el producto se selecciona solo. También puedes elegirlo a mano.</p>
+                    <form id="form-movimiento">
+                        <label>Producto
+                            <select id="mov-producto" required></select>
+                        </label>
+                        <label>Tipo
+                            <select id="mov-tipo" required>
+                                <option value="entrada">Entrada (compra / ingreso)</option>
+                                <option value="salida">Salida (consumo / venta)</option>
+                            </select>
+                        </label>
+                        <label>Cantidad
+                            <input type="number" id="mov-cantidad" step="any" min="0" required>
+                        </label>
+                        <label>Precio unitario (S/)
+                            <input type="number" id="mov-precio" step="any" min="0">
+                        </label>
+                        <label>Fecha
+                            <input type="date" id="mov-fecha">
+                        </label>
+                        <label>Almacén
+                            <select id="mov-almacen"></select>
+                        </label>
+                        <label>Nota
+                            <input type="text" id="mov-nota" placeholder="Ej: compra a proveedor, consumo diario...">
+                        </label>
+                        <button type="submit" class="btn btn-primary">Registrar</button>
+                    </form>
+                </div>
+                <div class="panel">
+                    <h2>Historial de movimientos</h2>
+                    <div class="toolbar small">
+                        <input type="text" id="mov-filtro" placeholder="Buscar producto, nota, usuario...">
+                        <input type="date" id="mov-desde">
+                        <input type="date" id="mov-hasta">
+                        <select id="mov-filtro-tipo">
+                            <option value="">Todos</option>
+                            <option value="entrada">Entradas</option>
+                            <option value="salida">Salidas</option>
+                        </select>
+                        <button class="btn" id="btn-filtrar-mov">Filtrar</button>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Precio</th><th>Almacén</th><th>Nota</th></tr></thead>
+                        <tbody id="movimientos-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- PROVEEDORES -->
+        <section id="view-proveedores" class="view">
+            <div class="toolbar">
+                <h2>Proveedores</h2>
+                <input type="text" id="proveedor-filtro" placeholder="Buscar nombre, teléfono, email...">
+                <button class="btn btn-primary" id="btn-nuevo-proveedor">+ Nuevo proveedor</button>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th></th></tr></thead>
+                    <tbody id="proveedores-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- GASTOS -->
+        <section id="view-gastos" class="view">
+            <div class="grid-2">
+                <div class="panel">
+                    <h2>Registrar gasto</h2>
+                    <form id="form-gasto">
+                        <label>Categoría
+                            <input type="text" id="gasto-categoria" list="gasto-categorias" required>
+                            <datalist id="gasto-categorias">
+                                <option>Limpieza</option><option>Administración</option>
+                                <option>Servicios (agua, luz)</option><option>Alquiler</option>
+                                <option>Sueldos</option><option>Transporte</option>
+                                <option>Mantenimiento</option><option>Otros</option>
+                            </datalist>
+                        </label>
+                        <label>Descripción
+                            <input type="text" id="gasto-descripcion">
+                        </label>
+                        <label>Monto (S/)
+                            <input type="number" id="gasto-monto" step="any" min="0" required>
+                        </label>
+                        <label>Fecha
+                            <input type="date" id="gasto-fecha">
+                        </label>
+                        <label>Proveedor
+                            <select id="gasto-proveedor"></select>
+                        </label>
+                        <button type="submit" class="btn btn-primary">Registrar</button>
+                    </form>
+                </div>
+                <div class="panel">
+                    <h2>Lista de gastos</h2>
+                    <div class="toolbar small">
+                        <input type="text" id="gasto-filtro" placeholder="Buscar categoría, descripción, proveedor...">
+                        <input type="date" id="gasto-desde">
+                        <input type="date" id="gasto-hasta">
+                        <button class="btn" id="btn-filtrar-gastos">Filtrar</button>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Fecha</th><th>Categoría</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
+                        <tbody id="gastos-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- REPORTES -->
+        <section id="view-reportes" class="view">
+            <div class="toolbar">
+                <h2>Reportes</h2>
+                <input type="date" id="rep-desde">
+                <input type="date" id="rep-hasta">
+                <button class="btn" id="btn-generar-reporte">Generar</button>
+                <button class="btn btn-primary" id="btn-imprimir-reporte">Imprimir / PDF</button>
+            </div>
+            <div class="panel">
+                <h2>Consumo por producto (entradas / salidas)</h2>
+                <table class="data-table">
+                    <thead><tr><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Total (S/)</th></tr></thead>
+                    <tbody id="rep-consumo"></tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h2>Valorización del inventario</h2>
+                <table class="data-table">
+                    <thead><tr><th>Producto</th><th>Stock</th><th>Costo prom.</th><th>Valor (S/)</th></tr></thead>
+                    <tbody id="rep-valorizacion"></tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h2>Vencimientos</h2>
+                <table class="data-table">
+                    <thead><tr><th>Producto</th><th>Vence</th><th>Stock</th></tr></thead>
+                    <tbody id="rep-vencimientos"></tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h2>Reparto por sucursal</h2>
+                <div class="toolbar small">
+                    <button class="btn" id="btn-exportar-rep-sucursal">Exportar</button>
+                </div>
+                <table class="data-table">
+                    <thead><tr><th>Sucursal</th><th>Tipo</th><th>Repartos</th><th>Total repartido (S/)</th></tr></thead>
+                    <tbody id="rep-repartos"></tbody>
+                </table>
+            </div>
+            <div class="panel">
+                <h2>Ganancias por producto</h2>
+                <div class="toolbar small">
+                    <button class="btn" id="btn-exportar-ganancias">Exportar</button>
+                </div>
+                <table class="data-table">
+                    <thead><tr><th>Producto</th><th>Cant. vendida</th><th>Ventas (S/)</th><th>Costo (S/)</th><th>Ganancia (S/)</th></tr></thead>
+                    <tbody id="rep-ganancias"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- VENTAS -->
+        <section id="view-ventas" class="view">
+            <div class="grid-2">
+                <div class="panel">
+                    <h2>Nueva venta</h2>
+                    <label class="scan-input">
+                        <span class="scan-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg></span>
+                        <input type="text" id="venta-escaneo" placeholder="Escanea el código de barras del producto..." autocomplete="off">
+                    </label>
+                    <p class="scan-hint">Escanea y agrega los productos; al final solo presionas "Registrar venta".</p>
+                    <form id="form-venta">
+                        <label>Fecha <input type="date" id="venta-fecha"></label>
+                        <div class="venta-item">
+                            <div class="toolbar small">
+                                <select id="venta-producto"></select>
+                                <input type="number" id="venta-cantidad" placeholder="Cant." step="any" min="0" style="width:90px">
+                                <input type="number" id="venta-precio" placeholder="Precio S/" step="any" min="0" style="width:110px">
+                                <button type="button" class="btn" id="btn-agregar-item">Agregar</button>
+                            </div>
+                        </div>
+                        <table class="data-table">
+                            <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead>
+                            <tbody id="venta-items-tbody"></tbody>
+                        </table>
+                        <div class="venta-total">Total: <strong id="venta-total">S/ 0.00</strong></div>
+                        <label class="chk chk-fiado"><input type="checkbox" id="venta-fiado"> Venta al fiado (a crédito)</label>
+                        <div id="campo-fiado" style="display:none">
+                            <div class="grid-2">
+                                <label>Cliente <input type="text" id="venta-cliente" placeholder="Nombre del cliente"></label>
+                                <label>Teléfono <input type="text" id="venta-telefono" placeholder="Opcional"></label>
+                            </div>
+                        </div>
+                        <label>Nota <input type="text" id="venta-nota" placeholder="Ej: venta mostrador, delivery..."></label>
+                        <button type="submit" class="btn btn-primary">Registrar venta</button>
+                    </form>
+                </div>
+                <div class="panel">
+                    <h2>Historial de ventas</h2>
+                    <div class="toolbar small">
+                        <input type="text" id="venta-filtro" placeholder="Buscar #venta, usuario, nota...">
+                        <input type="date" id="venta-desde">
+                        <input type="date" id="venta-hasta">
+                        <button class="btn" id="btn-filtrar-ventas">Filtrar</button>
+                        <button class="btn" id="btn-exportar-ventas">Exportar</button>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Nº</th><th>Fecha</th><th>Items</th><th>Total</th><th>Usuario</th><th></th></tr></thead>
+                        <tbody id="ventas-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- REPARTOS -->
+        <section id="view-repartos" class="view">
+            <div class="toolbar">
+                <h2>Reparto a sucursales</h2>
+                <span class="respaldo-txt" id="repartos-info"></span>
+                <button class="btn btn-primary" id="btn-gestionar-sucursales" style="display:none">Gestionar sucursales</button>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <h2>Nuevo reparto</h2>
+                    <label class="scan-input">
+                        <span class="scan-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg></span>
+                        <input type="text" id="reparto-escaneo" placeholder="Escanea el código de barras del producto..." autocomplete="off">
+                    </label>
+                    <p class="scan-hint">Escanea y agrega los productos; al final solo presionas "Registrar reparto".</p>
+                    <form id="form-reparto">
+                        <div class="grid-2">
+                            <label>Fecha <input type="date" id="reparto-fecha"></label>
+                            <label>Sucursal <select id="reparto-sucursal"></select></label>
+                        </div>
+                        <div class="toolbar small">
+                            <select id="reparto-producto"></select>
+                            <input type="number" id="reparto-cantidad" placeholder="Cant." step="any" min="0" style="width:90px">
+                            <input type="number" id="reparto-costo" placeholder="Costo S/" step="any" min="0" style="width:110px">
+                            <button type="button" class="btn" id="btn-agregar-item-reparto">Agregar</button>
+                        </div>
+                        <table class="data-table">
+                            <thead><tr><th>Producto</th><th>Cant.</th><th>Costo</th><th>Subtotal</th><th></th></tr></thead>
+                            <tbody id="reparto-items-tbody"></tbody>
+                        </table>
+                        <div class="venta-total">Total: <strong id="reparto-total">S/ 0.00</strong></div>
+                        <label>Nota <input type="text" id="reparto-nota" placeholder="Ej: reparto semanal, pedido especial..."></label>
+                        <button type="submit" class="btn btn-primary">Registrar reparto</button>
+                    </form>
+                </div>
+                <div class="panel">
+                    <h2>Historial de repartos</h2>
+                    <div class="toolbar small">
+                        <input type="text" id="reparto-filtro" placeholder="Buscar sucursal, usuario, nota...">
+                        <input type="date" id="reparto-desde">
+                        <input type="date" id="reparto-hasta">
+                        <button class="btn" id="btn-filtrar-repartos">Filtrar</button>
+                        <button class="btn" id="btn-exportar-repartos">Exportar</button>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Nº</th><th>Fecha</th><th>Sucursal</th><th>Items</th><th>Total</th><th>Usuario</th><th></th></tr></thead>
+                        <tbody id="repartos-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- FIADOS -->
+        <section id="view-fiados" class="view">
+            <div class="kpi-grid">
+                <div class="kpi kpi-red">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Por cobrar</span>
+                        <span class="kpi-value" id="fiado-por-cobrar">S/ 0.00</span>
+                    </div>
+                </div>
+                <div class="kpi kpi-green">
+                    <div class="kpi-icon">
+                        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    </div>
+                    <div class="kpi-info">
+                        <span class="kpi-label">Cobrado (histórico)</span>
+                        <span class="kpi-value" id="fiado-cobrado">S/ 0.00</span>
+                    </div>
+                </div>
+            </div>
+            <div class="toolbar">
+                <h2>Ventas al fiado pendientes</h2>
+                <input type="text" id="fiado-filtro" placeholder="Buscar cliente o teléfono...">
+                <button class="btn" id="btn-refrescar-fiados">Actualizar</button>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead><tr><th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Venta</th><th>Saldo</th><th>Usuario</th><th></th></tr></thead>
+                    <tbody id="fiados-tbody"></tbody>
+                </table>
+            </div>
+            <div class="toolbar">
+                <h2>Pagadas</h2>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead><tr><th>Fecha</th><th>Cliente</th><th>Venta</th><th>Pagado</th><th>Usuario</th></tr></thead>
+                    <tbody id="fiados-pagados-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- USUARIOS -->
+        <section id="view-usuarios" class="view">
+            <div class="toolbar">
+                <h2>Usuarios del sistema</h2>
+                <button class="btn btn-primary" id="btn-nuevo-usuario">+ Nuevo usuario</button>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+                    <tbody id="usuarios-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- AUDITORÍA -->
+        <section id="view-auditoria" class="view">
+            <div class="toolbar">
+                <h2>Auditoría del sistema</h2>
+                <button class="btn" id="btn-refrescar-auditoria">Actualizar</button>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead>
+                    <tbody id="auditoria-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- RESPALDO -->
+        <section id="view-respaldo" class="view">
+            <div class="grid-2">
+                <div class="panel">
+                    <h2>Crear copia de seguridad</h2>
+                    <p class="respaldo-txt">Descarga toda la base de datos (productos, movimientos, ventas, usuarios). Guárdala en un lugar seguro (USB, Drive, etc.).</p>
+                    <button class="btn btn-primary" id="btn-backup">Descargar respaldo</button>
+                </div>
+                <div class="panel">
+                    <h2>Restaurar respaldo</h2>
+                    <p class="respaldo-txt">Selecciona un archivo <b>.db</b> previamente respaldado. La base actual se guardará como copia de seguridad automática antes de restaurar.</p>
+                    <input type="file" id="archivo-restaurar" accept=".db">
+                    <button class="btn btn-primary" id="btn-restaurar">Restaurar base de datos</button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MODAL PRODUCTO -->
+    <div id="modal-producto" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-producto">&times;</span>
+            <h2 id="modal-producto-title">Nuevo producto</h2>
+            <form id="form-producto">
+                <input type="hidden" id="prod-id">
+                <label>Código de barras <input type="text" id="prod-codigo" placeholder="Escanéalo o déjalo vacío para autogenerar"></label>
+                <label>Nombre <input type="text" id="prod-nombre" required></label>
+                <div class="grid-2">
+                    <label>Categoría <select id="prod-categoria-form"></select></label>
+                    <label>Almacén <select id="prod-almacen"></select></label>
+                </div>
+                <div class="grid-2">
+                    <label>Unidad <select id="prod-unidad">
+                        <option>unidad</option><option>kg</option><option>g</option>
+                        <option>litro</option><option>bolsa</option><option>caja</option>
+                        <option>paquete</option><option>docena</option>
+                    </select></label>
+                    <label>Stock mínimo <input type="number" id="prod-minimo" step="any" min="0"></label>
+                </div>
+                <div class="grid-2">
+                    <label>Costo promedio (S/) <input type="number" id="prod-costo" step="any" min="0"></label>
+                    <label>Precio de venta (S/) <input type="number" id="prod-precio-venta" step="any" min="0"></label>
+                </div>
+                <div class="grid-2">
+                    <label>Vencimiento <input type="date" id="prod-vencimiento"></label>
+                </div>
+                <label>Proveedor <select id="prod-proveedor"></select></label>
+                <label id="campo-stock-inicial">Stock inicial <input type="number" id="prod-stock-inicial" step="any" min="0"></label>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL PROVEEDOR -->
+    <div id="modal-proveedor" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-proveedor">&times;</span>
+            <h2>Nuevo proveedor</h2>
+            <form id="form-proveedor">
+                <input type="hidden" id="prov-id">
+                <label>Nombre <input type="text" id="prov-nombre" required></label>
+                <label>Teléfono <input type="text" id="prov-telefono"></label>
+                <label>Email <input type="text" id="prov-email"></label>
+                <label>Dirección <input type="text" id="prov-direccion"></label>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL PAGO FIADO -->
+    <div id="modal-pago" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-pago">&times;</span>
+            <h2>Registrar pago</h2>
+            <p id="pago-info" class="respaldo-txt"></p>
+            <form id="form-pago">
+                <input type="hidden" id="pago-credito-id">
+                <label>Monto del pago (S/) <input type="number" id="pago-monto" step="any" min="0.01" required></label>
+                <label>Fecha <input type="date" id="pago-fecha"></label>
+                <button type="submit" class="btn btn-primary">Registrar pago</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL SUCURSALES -->
+    <div id="modal-sucursales" class="modal">
+        <div class="modal-content modal-wide">
+            <span class="close" data-close="modal-sucursales">&times;</span>
+            <h2>Gestionar sucursales</h2>
+            <div class="toolbar">
+                <input type="text" id="suc-nombre" placeholder="Nombre de la sucursal">
+                <input type="text" id="suc-direccion" placeholder="Dirección (opcional)">
+                <label class="chk"><input type="checkbox" id="suc-principal"> Principal</label>
+                <button class="btn btn-primary" id="btn-guardar-sucursal">Guardar</button>
+            </div>
+            <table class="data-table">
+                <thead><tr><th>Sucursal</th><th>Dirección</th><th>Tipo</th><th>Repartos</th><th>Total repartido</th><th></th></tr></thead>
+                <tbody id="sucursales-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- MODAL USUARIO -->
+    <div id="modal-usuario" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-usuario">&times;</span>
+            <h2 id="modal-usuario-title">Nuevo usuario</h2>
+            <form id="form-usuario">
+                <input type="hidden" id="user-id">
+                <label>Usuario <input type="text" id="user-usuario" required></label>
+                <label>Nombre completo <input type="text" id="user-nombre"></label>
+                <div class="grid-2">
+                    <label>Rol <select id="user-rol">
+                        <option value="encargado">Encargado</option>
+                        <option value="admin">Administrador</option>
+                    </select></label>
+                    <label>Estado <select id="user-activo">
+                        <option value="1">Activo</option>
+                        <option value="0">Inactivo</option>
+                    </select></label>
+                </div>
+                <label>Contraseña <input type="password" id="user-password" placeholder="Mínimo 4 caracteres"></label>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL CAMBIAR CONTRASEÑA -->
+    <div id="modal-password" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-password">&times;</span>
+            <h2>Cambiar contraseña</h2>
+            <form id="form-password">
+                <label>Contraseña actual
+                    <input type="password" id="pass-actual" required>
+                </label>
+                <label>Nueva contraseña
+                    <input type="password" id="pass-nueva" required minlength="4">
+                </label>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="/static/app.js?v=2"></script>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Etiquetas - Pollos Lucho</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Jost', 'Segoe UI', sans-serif; background: #f4f2ed; color: #0C0908; padding: 20px; }
+        .topbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+        .topbar h1 { font-size: 20px; }
+        .btn {
+            padding: 9px 16px; border-radius: 8px; border: 1px solid #d8d4cc; background: #fff;
+            cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 600; color: #0C0908;
+        }
+        .btn-primary { background: #FCC302; border-color: #FCC302; }
+        .btn-primary:hover { background: #e5b900; }
+        #filtro { padding: 9px 12px; border: 1.5px solid #d8d4cc; border-radius: 8px; font-size: 14px; min-width: 260px; }
+        .layout { display: grid; grid-template-columns: 380px 1fr; gap: 18px; align-items: start; }
+        @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+        .panel { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.07); }
+        .panel h2 { font-size: 15px; margin-bottom: 12px; }
+        .sel-list { max-height: 460px; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; }
+        .sel-item { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f2f0ea; }
+        .sel-item:hover { background: #fdf9ec; }
+        .sel-item .info { flex: 1; min-width: 0; }
+        .sel-item .info .n { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sel-item .info .c { font-size: 11px; color: #8a8a8a; }
+        .sel-item .cant { width: 52px; padding: 5px 6px; border: 1.5px solid #d8d4cc; border-radius: 6px; text-align: center; }
+        .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .acciones { margin-top: 12px; display: flex; gap: 10px; }
+
+        .etiqueta {
+            width: 5.7cm; height: 4.2cm; border: 1px dashed #c9c5bd;
+            background: #fff; padding: 8px 9px; display: flex; flex-direction: column;
+            align-items: center; justify-content: space-between; text-align: center;
+            page-break-inside: avoid;
+        }
+        .et-nombre { font-size: 13px; font-weight: 700; line-height: 1.15; height: 30px; display: flex; align-items: center; }
+        .et-barcode svg { display: block; margin: 0 auto; }
+        .et-codigo { font-size: 10px; letter-spacing: 2px; color: #555; margin-top: 2px; }
+        .et-precio { font-size: 12px; font-weight: 700; color: #0C0908; }
+        .grid-etiquetas { display: grid; grid-template-columns: repeat(auto-fill, 5.7cm); gap: 10px; justify-content: start; margin-top: 12px; }
+
+        @media print {
+            body { background: #fff; padding: 0; }
+            #panel-seleccion, .topbar .btn, #filtro, #resumen { display: none !important; }
+            .layout { display: block; }
+            .panel { box-shadow: none; padding: 0; }
+            .grid-etiquetas { gap: 6px; }
+            .etiqueta { border: 1px solid #bbb; }
+            @page { margin: 0.6cm; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Etiquetas con código de barras</h1>
+        <input type="text" id="filtro" placeholder="Buscar producto o código...">
+        <button class="btn btn-primary" id="btn-generar">Generar etiquetas</button>
+        <button class="btn" id="btn-imprimir">Imprimir</button>
+        <button class="btn" onclick="location.href='/'">Volver al sistema</button>
+        <span id="resumen" style="font-size:13px;color:#666"></span>
+    </div>
+
+    <div class="layout">
+        <div class="panel" id="panel-seleccion">
+            <h2>Selecciona productos y cantidad de etiquetas</h2>
+            <div class="sel-list" id="sel-lista"></div>
+            <div class="acciones">
+                <button class="btn" id="btn-todos">Marcar todos</button>
+                <button class="btn" id="btn-nada">Desmarcar todos</button>
+            </div>
+        </div>
+        <div class="panel">
+            <h2>Vista previa (se imprime así)</h2>
+            <div class="grid-etiquetas" id="grid-etiquetas"></div>
+        </div>
+    </div>
+
+    <script>
+        let productos = [];
+
+        const PAT = {
+            0:'212222',1:'222122',2:'222221',3:'121223',4:'121322',5:'131222',6:'122213',7:'122312',
+            8:'132212',9:'221213',10:'221312',11:'231212',12:'112232',13:'122132',14:'122231',15:'113222',
+            16:'123122',17:'123221',18:'223211',19:'221132',20:'221231',21:'213212',22:'223112',23:'312131',
+            24:'311222',25:'321122',26:'321221',27:'312212',28:'322112',29:'322211',30:'212123',31:'212321',
+            32:'232121',33:'111323',34:'131123',35:'131321',36:'112313',37:'132113',38:'132311',39:'211313',
+            40:'231113',41:'231311',42:'112133',43:'112331',44:'132131',45:'113123',46:'113321',47:'133121',
+            48:'313121',49:'211331',50:'231131',51:'213113',52:'213311',53:'213131',54:'311123',55:'311321',
+            56:'331121',57:'312113',58:'312311',59:'332111',60:'314111',61:'221411',62:'431111',63:'111224',
+            64:'111422',65:'121124',66:'121421',67:'141122',68:'141221',69:'112214',70:'112412',71:'122114',
+            72:'122411',73:'142112',74:'142211',75:'241211',76:'221114',77:'413111',78:'241112',79:'134111',
+            80:'111242',81:'121142',82:'121241',83:'114212',84:'124112',85:'124211',86:'411212',87:'421112',
+            88:'421211',89:'212141',90:'214121',91:'412121',92:'111143',93:'111341',94:'131141',95:'114113',
+            96:'114311',97:'411113',98:'411311',99:'113141',100:'114131',101:'311141',102:'411131',103:'211412',
+            104:'211214',105:'211232',106:'2331112'
+        };
+
+        function barcodeSVG(texto) {
+            if (!texto) return '';
+            const data = [];
+            for (const ch of texto) {
+                const v = ch.charCodeAt(0) - 32;
+                if (v < 0 || v > 94) return '<div style="color:red;font-size:10px">Código inválido</div>';
+                data.push(v);
+            }
+            const chk = (104 + data.reduce((s, v, i) => s + v * (i + 1), 0)) % 103;
+            const seq = [104].concat(data, [chk]);
+            const mod = 1.5;
+            let x = 0, out = '', bar = true;
+            const emit = (n, isBar) => {
+                if (isBar) out += `<rect x="${x.toFixed(2)}" y="0" width="${(n * mod).toFixed(2)}" height="42" fill="#0C0908"/>`;
+                x += n * mod;
+            };
+            for (const v of seq) {
+                const pat = PAT[v];
+                for (const d of String(pat)) { emit(+d, bar); bar = !bar; }
+            }
+            for (const d of String(PAT[106])) { emit(+d, bar); bar = !bar; }
+            emit(2, bar);
+            return `<svg viewBox="0 0 ${x.toFixed(2)} 42" style="height:42px;width:auto">${out}</svg>`;
+        }
+
+        const fmtNum = (n) => Number(n ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        async function cargar() {
+            const res = await fetch('/api/productos');
+            const json = await res.json();
+            if (!json.ok) { document.getElementById('sel-lista').innerHTML = '<p>Error al cargar productos</p>'; return; }
+            productos = json.data;
+            pintarLista('');
+        }
+
+        function pintarLista(filtro) {
+            const lista = productos.filter((p) =>
+                !filtro || p.nombre.toLowerCase().includes(filtro.toLowerCase()) ||
+                (p.codigo && p.codigo.includes(filtro)));
+            document.getElementById('sel-lista').innerHTML = lista.length ? lista.map((p) => `
+                <div class="sel-item">
+                    <input type="checkbox" data-id="${p.id}">
+                    <div class="info"><div class="n">${p.nombre}</div><div class="c">${p.codigo || 'sin código'} · S/ ${fmtNum(p.precio_venta)}</div></div>
+                    <input type="number" class="cant" value="1" min="1" step="1">
+                </div>`).join('')
+                : '<p style="padding:14px;color:#888">Sin productos con ese filtro</p>';
+        }
+
+        document.getElementById('filtro').addEventListener('input', (e) => pintarLista(e.target.value));
+        document.getElementById('btn-todos').addEventListener('click', () => document.querySelectorAll('.sel-item input[type=checkbox]').forEach((c) => c.checked = true));
+        document.getElementById('btn-nada').addEventListener('click', () => document.querySelectorAll('.sel-item input[type=checkbox]').forEach((c) => c.checked = false));
+
+        document.getElementById('btn-generar').addEventListener('click', () => {
+            const elegidos = [];
+            document.querySelectorAll('.sel-item').forEach((item) => {
+                const chk = item.querySelector('input[type=checkbox]');
+                if (!chk.checked) return;
+                const id = +chk.dataset.id;
+                const p = productos.find((x) => x.id === id);
+                const cant = Math.max(1, +item.querySelector('.cant').value || 1);
+                elegidos.push({ p, cant });
+            });
+            if (!elegidos.length) { alert('Selecciona al menos un producto'); return; }
+            let total = 0;
+            let html = '';
+            elegidos.forEach(({ p, cant }) => {
+                total += cant;
+                for (let i = 0; i < cant; i++) {
+                    html += `
+                        <div class="etiqueta">
+                            <div class="et-nombre">${p.nombre}</div>
+                            <div class="et-barcode">${barcodeSVG(p.codigo)}</div>
+                            <div class="et-codigo">${p.codigo || ''}</div>
+                            <div class="et-precio">S/ ${fmtNum(p.precio_venta)}</div>
+                        </div>`;
+                }
+            });
+            document.getElementById('grid-etiquetas').innerHTML = html;
+            document.getElementById('resumen').textContent = `${elegidos.length} productos · ${total} etiquetas`;
+        });
+
+        document.getElementById('btn-imprimir').addEventListener('click', () => window.print());
+        cargar();
+    </script>
+</body>
+</html>

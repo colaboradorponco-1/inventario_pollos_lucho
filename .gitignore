@@ -1,0 +1,33 @@
+# Entorno Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+
+# Base de datos local
+*.db
+*.sqlite3
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Paquetes / builds
+build/
+dist/
+*.egg-info/
+
+# Archivos temporales
+*.tmp
+*.bak
