@@ -140,7 +140,7 @@
             document.getElementById('sel-lista').innerHTML = lista.length ? lista.map((p) => `
                 <div class="sel-item">
                     <input type="checkbox" data-id="${p.id}">
-                    <div class="info"><div class="n">${p.nombre}</div><div class="c">${p.codigo || 'sin código'} · S/ ${fmtNum(p.precio_venta)}</div></div>
+                    <div class="info"><div class="n">${p.nombre}</div><div class="c">${p.codigo || 'sin código'} · Bs ${fmtNum(p.precio_venta)}</div></div>
                     <input type="number" class="cant" value="1" min="1" step="1">
                 </div>`).join('')
                 : '<p style="padding:14px;color:#888">Sin productos con ese filtro</p>';
@@ -171,7 +171,7 @@
                             <div class="et-nombre">${p.nombre}</div>
                             <div class="et-barcode">${barcodeSVG(p.codigo)}</div>
                             <div class="et-codigo">${p.codigo || ''}</div>
-                            <div class="et-precio">S/ ${fmtNum(p.precio_venta)}</div>
+                            <div class="et-precio">Bs ${fmtNum(p.precio_venta)}</div>
                         </div>`;
                 }
             });

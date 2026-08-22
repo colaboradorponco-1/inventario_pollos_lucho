@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import datetime
 
 from flask import Blueprint, request, session
 
@@ -14,15 +14,9 @@ def ventas():
     conn = get_conn()
     if request.method == "POST":
         data = request.get_json() or {}
-        fecha = data.get("fecha") or date.today().isoformat()
+        fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         nota = data.get("nota", "")
         detalle = data.get("detalle", [])
-        es_fiado = 1 if data.get("fiado") else 0
-        cliente = (data.get("cliente") or "").strip()
-        telefono = (data.get("telefono") or "").strip()
-        if es_fiado and not cliente:
-            conn.close()
-            return err("Ingresa el nombre del cliente para la venta al fiado")
         if not detalle:
             conn.close()
             return err("La venta no tiene productos")
@@ -64,16 +58,8 @@ def ventas():
                                  f"Venta #{venta_id}", session.get("usuario", ""))
         conn.commit()
 
-        if es_fiado:
-            conn.execute("""
-                INSERT INTO creditos (venta_id, cliente, telefono, monto, saldo, fecha, estado, usuario)
-                VALUES (?, ?, ?, ?, ?, ?, 'pendiente', ?)
-            """, (venta_id, cliente, telefono, round(total, 2), round(total, 2), fecha,
-                  session.get("usuario", "")))
-            conn.commit()
-
         conn.close()
-        registrar_auditoria("Venta registrada", f"Venta #{venta_id} por S/ {round(total, 2)}")
+        registrar_auditoria("Venta registrada", f"Venta #{venta_id} por Bs {round(total, 2)}")
         return ok({"id": venta_id, "total": round(total, 2)}, message="Venta registrada")
 
     desde = request.args.get("desde", "")
@@ -81,7 +67,9 @@ def ventas():
     filtro = request.args.get("filtro", "").strip()
     q = """
         SELECT v.*,
-               (SELECT COUNT(*) FROM venta_detalle d WHERE d.venta_id = v.id) AS num_items
+               (SELECT COUNT(*) FROM venta_detalle d WHERE d.venta_id = v.id) AS num_items,
+               (SELECT GROUP_CONCAT(d.producto_nombre || ' (' || d.cantidad || ')' , ', ')
+                FROM venta_detalle d WHERE d.venta_id = v.id) AS items_detalle
         FROM ventas v WHERE 1=1
     """
     params = []
@@ -118,87 +106,13 @@ def venta_detalle(venta_id):
 @login_requerido
 def venta_eliminar(venta_id):
     conn = get_conn()
-    credito = conn.execute(
-        "SELECT * FROM creditos WHERE venta_id = ?", (venta_id,)).fetchone()
-    if credito:
-        pagos = conn.execute(
-            "SELECT COUNT(*) c FROM pagos_credito WHERE credito_id = ?", (credito["id"],)).fetchone()["c"]
-        if pagos:
-            conn.close()
-            return err("No se puede anular: la venta tiene pagos de fiado registrados")
     detalle = conn.execute("SELECT * FROM venta_detalle WHERE venta_id = ?", (venta_id,)).fetchall()
     for d in detalle:
         registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], d["precio_unitario"],
-                             date.today().isoformat(), f"Anulación venta #{venta_id}",
+                             datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"Anulación venta #{venta_id}",
                              session.get("usuario", ""))
-    if credito:
-        conn.execute("DELETE FROM creditos WHERE id = ?", (credito["id"],))
     conn.execute("DELETE FROM ventas WHERE id = ?", (venta_id,))
     conn.commit()
     conn.close()
     registrar_auditoria("Venta anulada", f"Venta #{venta_id}")
     return ok(message="Venta anulada y stock repuesto")
-
-
-# --------------------------------------------------------------------------
-# Fiados / cuentas por cobrar
-# --------------------------------------------------------------------------
-@ventas_bp.route("/api/creditos")
-@login_requerido
-def creditos():
-    conn = get_conn()
-    estado = request.args.get("estado", "").strip()
-    filtro = request.args.get("filtro", "").strip()
-    q = "SELECT * FROM creditos WHERE 1=1"
-    params = []
-    if estado:
-        q += " AND estado = ?"
-        params.append(estado)
-    if filtro:
-        q += " AND (cliente LIKE ? OR telefono LIKE ?)"
-        params += [f"%{filtro}%"] * 2
-    q += " ORDER BY CASE estado WHEN 'pendiente' THEN 0 ELSE 1 END, fecha DESC, id DESC LIMIT 300"
-    rows = conn.execute(q, params).fetchall()
-    pendiente = conn.execute(
-        "SELECT COALESCE(SUM(saldo), 0) AS t FROM creditos WHERE estado = 'pendiente'").fetchone()["t"]
-    cobrado = conn.execute(
-        "SELECT COALESCE(SUM(monto), 0) AS t FROM pagos_credito").fetchone()["t"]
-    conn.close()
-    return ok({
-        "lista": [dict(r) for r in rows],
-        "total_pendiente": round(pendiente, 2),
-        "total_cobrado": round(cobrado, 2),
-    })
-
-
-@ventas_bp.route("/api/creditos/<int:credito_id>/pago", methods=["POST"])
-@login_requerido
-def registrar_pago(credito_id):
-    data = request.get_json() or {}
-    monto = float(data.get("monto", 0) or 0)
-    if monto <= 0:
-        return err("El monto del pago debe ser mayor a cero")
-    conn = get_conn()
-    credito = conn.execute("SELECT * FROM creditos WHERE id = ?", (credito_id,)).fetchone()
-    if not credito:
-        conn.close()
-        return err("Crédito no encontrado", 404)
-    if credito["estado"] == "pagado":
-        conn.close()
-        return err("Este crédito ya está pagado")
-    if monto > credito["saldo"]:
-        conn.close()
-        return err(f"El pago supera el saldo pendiente ({credito['saldo']})")
-    fecha = data.get("fecha") or date.today().isoformat()
-    nuevo_saldo = credito["saldo"] - monto
-    estado = "pagado" if nuevo_saldo <= 0.001 else "pendiente"
-    conn.execute("""
-        INSERT INTO pagos_credito (credito_id, monto, fecha, usuario) VALUES (?, ?, ?, ?)
-    """, (credito_id, monto, fecha, session.get("usuario", "")))
-    conn.execute("UPDATE creditos SET saldo = ?, estado = ? WHERE id = ?",
-                 (round(nuevo_saldo, 2), estado, credito_id))
-    conn.commit()
-    conn.close()
-    registrar_auditoria("Pago de crédito registrado",
-                        f"Cliente {credito['cliente']} pagó S/ {round(monto, 2)}")
-    return ok({"saldo": round(nuevo_saldo, 2), "estado": estado}, message="Pago registrado")

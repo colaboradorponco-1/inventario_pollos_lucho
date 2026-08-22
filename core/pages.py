@@ -8,14 +8,13 @@ pages_bp = Blueprint("pages", __name__)
 @pages_bp.route("/login")
 def login_page():
     if "user_id" in session:
-        return redirect("/")
+        return render_template("index.html")
     return render_template("login.html", ip=ip_local())
 
 
 @pages_bp.route("/")
-@login_requerido
 def index():
-    return render_template("index.html")
+    return redirect("/login")
 
 
 @pages_bp.route("/etiquetas")

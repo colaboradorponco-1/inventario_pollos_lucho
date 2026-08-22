@@ -143,28 +143,6 @@ def init_db():
         FOREIGN KEY (producto_id) REFERENCES productos(id)
     );
 
-    CREATE TABLE IF NOT EXISTS creditos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        venta_id INTEGER,
-        cliente TEXT NOT NULL,
-        telefono TEXT DEFAULT '',
-        monto REAL NOT NULL,
-        saldo REAL NOT NULL,
-        fecha TEXT NOT NULL,
-        estado TEXT DEFAULT 'pendiente',
-        usuario TEXT DEFAULT '',
-        FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE SET NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS pagos_credito (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        credito_id INTEGER NOT NULL,
-        monto REAL NOT NULL,
-        fecha TEXT NOT NULL,
-        usuario TEXT DEFAULT '',
-        FOREIGN KEY (credito_id) REFERENCES creditos(id) ON DELETE CASCADE
-    );
-
     CREATE TABLE IF NOT EXISTS stock (
         producto_id INTEGER PRIMARY KEY,
         cantidad REAL NOT NULL DEFAULT 0,
@@ -175,8 +153,6 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_mov_fecha ON movimientos(fecha);
     CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
     CREATE INDEX IF NOT EXISTS idx_venta_detalle_venta ON venta_detalle(venta_id);
-    CREATE INDEX IF NOT EXISTS idx_creditos_estado ON creditos(estado);
-    CREATE INDEX IF NOT EXISTS idx_pagos_credito ON pagos_credito(credito_id);
     CREATE INDEX IF NOT EXISTS idx_repartos_fecha ON repartos(fecha);
     CREATE INDEX IF NOT EXISTS idx_reparto_detalle_reparto ON reparto_detalle(reparto_id);
     CREATE INDEX IF NOT EXISTS idx_auditoria_fecha ON auditoria(fecha);

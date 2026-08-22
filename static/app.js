@@ -3,9 +3,30 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev, fn); };
 const fmtNum = (n) => Number(n ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const fmtDate = (d) => d ? d : '—';
+const fmtDate = (d) => {
+    if (!d) return '—';
+    const parts = d.split(' ');
+    const datePart = parts[0] || '';
+    const timePart = parts[1] || '';
+    const dp = datePart.split('-');
+    if (dp.length !== 3) return d;
+    const formatted = dp[2] + '/' + dp[1] + '/' + dp[0];
+    return timePart ? formatted + ' ' + timePart.substring(0, 5) : formatted;
+};
 
 let catalogos = { almacenes: [], categorias: [], proveedores: [] };
+
+function nowLocal() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + 'T' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+}
+
+function fechaISO(val) {
+    if (!val) return '';
+    return val.replace('T', ' ') + ':00';
+}
+
+const esc = (s) => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
 
 async function request(url, opts = {}) {
     const res = await fetch(url, {
@@ -57,7 +78,6 @@ function loadView(name) {
     if (name === 'reportes') loadReportes();
     if (name === 'ventas') loadVentas();
     if (name === 'repartos') loadRepartos();
-    if (name === 'fiados') loadFiados();
     if (name === 'usuarios') loadUsuarios();
     if (name === 'auditoria') loadAuditoria();
 }
@@ -88,23 +108,25 @@ async function loadDashboard() {
         const d = await request(API + '/dashboard');
         $('#stat-productos').textContent = d.total_productos;
         $('#stat-stock').textContent = d.stock_total;
-        $('#stat-valor').textContent = 'S/ ' + fmtNum(d.valor_inventario);
-        $('#stat-ventas').textContent = 'S/ ' + fmtNum(d.ventas_mes);
-        $('#stat-ventas-anio').textContent = 'S/ ' + fmtNum(d.ventas_anio);
-        $('#stat-ventas-hoy').textContent = 'S/ ' + fmtNum(d.ventas_hoy);
-        $('#stat-gastos').textContent = 'S/ ' + fmtNum(d.gastos_mes);
-        $('#stat-gastos-anio').textContent = 'S/ ' + fmtNum(d.gastos_anio);
+        $('#stat-valor').textContent = 'Bs ' + fmtNum(d.valor_inventario);
+        $('#stat-stock-bajo').textContent = (d.stock_bajo || []).length;
+        $('#stat-ventas-hoy').textContent = 'Bs ' + fmtNum(d.ventas_hoy);
+        $('#stat-gastos-hoy').textContent = 'Bs ' + fmtNum(d.gastos_hoy);
+        $('#stat-utilidad-hoy').textContent = 'Bs ' + fmtNum(d.utilidad_hoy);
+        $('#stat-num-ventas-hoy').textContent = d.num_ventas_hoy || 0;
+        $('#stat-ventas').textContent = 'Bs ' + fmtNum(d.ventas_mes);
+        $('#stat-gastos').textContent = 'Bs ' + fmtNum(d.gastos_mes);
+        $('#stat-utilidad').textContent = 'Bs ' + fmtNum(d.utilidad_mes);
         $('#stat-repartos').textContent = d.repartos_mes || 0;
-        $('#stat-utilidad').textContent = 'S/ ' + fmtNum(d.utilidad_mes);
-        $('#stat-por-cobrar').textContent = 'S/ ' + fmtNum(d.por_cobrar);
-
-        $('#stat-entradas-mes').textContent = d.entradas_mes;
-        $('#stat-salidas-mes').textContent = d.salidas_mes;
+        $('#stat-ventas-anio').textContent = 'Bs ' + fmtNum(d.ventas_anio);
+        $('#stat-gastos-anio').textContent = 'Bs ' + fmtNum(d.gastos_anio);
+        $('#stat-utilidad-anio').textContent = 'Bs ' + fmtNum(d.utilidad_anio);
+        $('#stat-num-ventas-mes').textContent = d.num_ventas_mes || 0;
 
         $('#dash-welcome').textContent = `Resumen del inventario · ${new Date().toLocaleDateString('es-PE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}`;
 
         const t1 = $('#dash-movimientos');
-        t1.innerHTML = d.mov_recientes.length ? d.mov_recientes.map((m) => `
+        t1.innerHTML = (d.mov_recientes || []).length ? (d.mov_recientes || []).map((m) => `
             <tr>
                 <td>${fmtDate(m.fecha)}</td>
                 <td><strong>${m.producto_nombre}</strong></td>
@@ -114,25 +136,66 @@ async function loadDashboard() {
             </tr>`).join('')
             : '<tr><td colspan="5" class="empty">Sin movimientos registrados</td></tr>';
 
-        const alertas = [];
-        d.stock_bajo.forEach((p) => alertas.push(`
-            <div class="alerta alerta-bajo">
-                <div class="alerta-info"><strong>${p.nombre}</strong><span>Stock: ${p.stock} ${p.unidad} · Mínimo: ${p.stock_minimo} ${p.unidad}</span></div>
-            </div>`));
-        d.por_vencer.forEach((p) => alertas.push(`
-            <div class="alerta alerta-vencer">
-                <div class="alerta-info"><strong>${p.nombre}</strong><span>Vence el ${fmtDate(p.vencimiento)} · ${p.stock} ${p.unidad}</span></div>
-            </div>`));
-        $('#dash-alertas').innerHTML = alertas.length
-            ? alertas.join('')
-            : '<p class="empty">No hay alertas pendientes</p>';
+        const stockBajo = d.stock_bajo || [];
+        const porVencer = d.por_vencer || [];
+
+        const tStock = $('#dash-alertas-stock');
+        tStock.innerHTML = stockBajo.length ? stockBajo.map((p) => {
+            const estado = p.stock === 0 ? 'Sin stock' : 'Bajo';
+            return `<tr>
+                <td><strong>${esc(p.nombre)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
+                <td style="font-weight:700;color:${p.stock === 0 ? '#dc2626' : '#d97706'}">${p.stock} ${p.unidad}</td>
+                <td>${p.stock_minimo || 10} ${p.unidad}</td>
+                <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.stock === 0 ? '#dc2626' : '#d97706'};margin-right:6px"></span>${estado}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="4" class="empty">No hay alertas de stock</td></tr>';
+
+        const tVenc = $('#dash-alertas-vencimiento');
+        tVenc.innerHTML = porVencer.length ? porVencer.map((p) => {
+            let estado, color;
+            if (p.estado === 'vencido') { estado = 'VENCIDO'; color = '#dc2626'; }
+            else if (p.estado === 'urgente') { estado = 'Urgente'; color = '#d97706'; }
+            else { estado = 'Proximo'; color = '#ca8a04'; }
+            return `<tr>
+                <td><strong>${esc(p.nombre)}</strong></td>
+                <td style="font-weight:700;color:${color}">${fmtDate(p.vencimiento)}</td>
+                <td>${p.stock} ${p.unidad}</td>
+                <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${estado}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="4" class="empty">No hay productos por vencer</td></tr>';
+
+        const badgeEl = $('#badge-alertas');
+        const totalAlertas = stockBajo.length + porVencer.length;
+        if (badgeEl) {
+            if (totalAlertas > 0) {
+                badgeEl.textContent = totalAlertas;
+                badgeEl.style.display = 'inline-flex';
+            } else {
+                badgeEl.style.display = 'none';
+            }
+        }
+
+        const criticas = porVencer.filter(p => p.estado === 'vencido').length + stockBajo.filter(p => p.stock === 0).length;
+        if (criticas > 0 && !sessionStorage.getItem('notif_v2')) {
+            const banner = document.createElement('div');
+            banner.className = 'notif-banner';
+            var txtCrit = criticas + ' alerta' + (criticas > 1 ? 's' : '') + ' critica' + (criticas > 1 ? 's' : '');
+            banner.innerHTML = '<span class="notif-banner-icon">!</span>' +
+                '<div class="notif-banner-text">' +
+                '<strong>' + txtCrit + '</strong>' +
+                '<span>Hay productos vencidos o sin stock. Revisa las alertas del inventario.</span>' +
+                '</div>' +
+                '<button class="notif-banner-close" onclick="this.parentElement.remove(); sessionStorage.setItem(\'notif_v2\',\'1\')">&#10005;</button>';
+            document.body.prepend(banner);
+            setTimeout(() => { if (banner.parentElement) banner.remove(); sessionStorage.setItem('notif_v2', '1'); }, 15000);
+        }
 
         try {
             const g = await request(API + '/dashboard/graficos');
             graficoVentasGastos(g.meses);
             graficoUtilidad(g.meses);
             graficoHBar('#graf-top-productos', g.top_productos, 'cantidad', 'unid', '#FCC302');
-            graficoHBar('#graf-top-repartos', g.top_repartos, 'total', 'S/ ', '#CF141D');
+            graficoHBar('#graf-top-repartos', g.top_repartos, 'total', 'Bs ', '#CF141D');
         } catch (e) { /* gráficos opcionales */ }
 
         graficoHBar('#graf-top-entradas', d.top_entrada, 'total', ' ', '#2e7d32');
@@ -190,8 +253,8 @@ function graficoVentasGastos(meses) {
         const vh = (m.ventas / max) * innerH;
         const gh = (m.gastos / max) * innerH;
         const yv = padT + innerH - vh, yg = padT + innerH - gh;
-        s += `<rect x="${cx - barW - 1.5}" y="${yv}" width="${barW}" height="${Math.max(vh, 1)}" rx="3" fill="#FCC302"><title>Ventas: S/ ${m.ventas}</title></rect>`;
-        s += `<rect x="${cx + 1.5}" y="${yg}" width="${barW}" height="${Math.max(gh, 1)}" rx="3" fill="#CF141D"><title>Gastos: S/ ${m.gastos}</title></rect>`;
+        s += `<rect x="${cx - barW - 1.5}" y="${yv}" width="${barW}" height="${Math.max(vh, 1)}" rx="3" fill="#FCC302"><title>Ventas: Bs ${m.ventas}</title></rect>`;
+        s += `<rect x="${cx + 1.5}" y="${yg}" width="${barW}" height="${Math.max(gh, 1)}" rx="3" fill="#CF141D"><title>Gastos: Bs ${m.gastos}</title></rect>`;
         s += `<text x="${cx}" y="${h - 8}" text-anchor="middle" class="chart-axis">${m.mes}</text>`;
     });
     s += '</svg>';
@@ -232,25 +295,82 @@ async function loadProductos() {
         if (proveedor) qs.set('proveedor', proveedor);
         if (estado) qs.set('estado', estado);
         const prods = await request(API + '/productos?' + qs.toString());
-        $('#productos-tbody').innerHTML = prods.map((p) => `
-            <tr>
-                <td>${p.codigo || '—'}</td>
-                <td><strong>${p.nombre}</strong></td>
-                <td>${p.categoria_nombre || '—'}</td>
-                <td>${p.almacen_nombre || '—'}</td>
-                <td>${p.stock} ${p.unidad}</td>
-                <td>${p.stock_minimo} ${p.unidad}</td>
-                <td>${p.unidad}</td>
-                <td>S/ ${fmtNum(p.costo_promedio)}</td>
-                <td>${fmtDate(p.vencimiento)}</td>
-                <td>
-                    <button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
-                    <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
-                </td>
-            </tr>`).join('') || '<tr><td colspan="10" class="empty">No hay productos</td></tr>';
+
+        const cats = {};
+        prods.forEach(p => {
+            const cat = p.categoria_nombre || 'Sin categoría';
+            if (!cats[cat]) cats[cat] = [];
+            cats[cat].push(p);
+        });
+
+        const container = $('#productos-por-categoria');
+        container.innerHTML = '';
+
+        Object.keys(cats).sort().forEach(cat => {
+            const items = cats[cat];
+
+            let rows = items.map(p => {
+                let stockColor, stockIcon;
+                if (p.stock === 0) { stockColor = '#dc2626'; stockIcon = '🔴'; }
+                else if (p.stock <= (p.stock_minimo || 10)) { stockColor = '#d97706'; stockIcon = '🟡'; }
+                else { stockColor = '#16a34a'; stockIcon = '🟢'; }
+                return `<tr>
+                    <td><strong>${esc(p.nombre)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
+                    <td>${esc(p.almacen_nombre || '—')}</td>
+                    <td style="color:${stockColor};font-weight:700">${stockIcon} ${p.stock} ${p.unidad}</td>
+                    <td>${p.stock_minimo} ${p.unidad}</td>
+                    <td>${p.unidad}</td>
+                    <td>Bs ${fmtNum(p.costo_promedio)}</td>
+                    <td>Bs ${fmtNum(p.precio_venta)}</td>
+                    <td>${p.proveedor_nombre || '—'}</td>
+                    <td>${p.vencimiento ? fmtDate(p.vencimiento) : '—'}</td>
+                    <td>
+                        ${estado === 'inactivos'
+                            ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>`
+                            : `<button class="btn btn-icon" data-hist-prod="${p.id}" title="Historial"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>
+                        <button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
+                        <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
+                        }
+                    </td>
+                </tr>`;
+            }).join('');
+
+            container.innerHTML += `
+                <div class="categoria-card">
+                    <div class="categoria-header">
+                        <h3>${esc(cat)}</h3>
+                        <span class="badge badge-info">${items.length} producto(s)</span>
+                    </div>
+                    <div class="categoria-table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Producto</th><th>Almacén</th><th>Stock</th>
+                                    <th>Mínimo</th><th>Unidad</th><th>Costo (Bs)</th><th>Precio (Bs)</th>
+                                    <th>Proveedor</th><th>Vence</th><th></th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+        });
+
+        if (!prods.length) {
+            container.innerHTML = '<div class="empty">No hay productos</div>';
+        }
 
         $$('[data-edit-prod]').forEach((b) => b.addEventListener('click', () => openProductoModal(Number(b.dataset.editProd), prods)));
         $$('[data-del-prod]').forEach((b) => b.addEventListener('click', () => delProducto(b.dataset.delProd)));
+        $$('[data-hist-prod]').forEach((b) => b.addEventListener('click', () => verHistorialProducto(Number(b.dataset.histProd))));
+        $$('[data-restaurar-prod]').forEach((b) => b.addEventListener('click', async () => {
+            if (!confirm('¿Restaurar este producto?')) return;
+            try {
+                await request(API + '/productos/' + b.dataset.restaurarProd + '/restaurar', { method: 'POST' });
+                toast('Producto restaurado');
+                loadProductos();
+            } catch (e) { toast(e.message, 'err'); }
+        }));
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -261,6 +381,85 @@ $('#prod-categoria').addEventListener('change', loadProductos);
 on('#prod-filtro-proveedor', 'change', loadProductos);
 on('#prod-estado', 'change', loadProductos);
 $('#btn-nuevo-producto').addEventListener('click', () => openProductoModal());
+
+async function verHistorialProducto(id) {
+    try {
+        const data = await request(API + '/productos/' + id + '/historial');
+        const p = data.producto;
+        $('#hist-prod-title').textContent = 'Historial: ' + p.nombre;
+        $('#hist-prod-codigo').textContent = p.codigo || '—';
+        $('#hist-prod-unidad').textContent = p.unidad;
+        $('#hist-prod-stock').textContent = data.stock + ' ' + p.unidad;
+        $('#hist-prod-costo').textContent = 'Bs ' + fmtNum(p.costo_promedio);
+        $('#hist-prod-movs').innerHTML = data.movimientos.map(m => `
+            <tr>
+                <td>${fmtDate(m.fecha)}</td>
+                <td><span class="badge badge-${m.tipo === 'entrada' ? 'success' : 'warning'}">${m.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
+                <td>${m.tipo === 'entrada' ? '+' : '-'}${m.cantidad}</td>
+                <td>Bs ${fmtNum(m.precio_unitario)}</td>
+                <td>${m.nota || '—'}</td>
+                <td>${m.usuario || '—'}</td>
+            </tr>
+        `).join('') || '<tr><td colspan="6" class="empty">Sin movimientos</td></tr>';
+        $('#modal-hist-producto').classList.add('open');
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+}
+
+$('#btn-exportar-productos').addEventListener('click', exportarProductos);
+
+$('#btn-importar-prod').addEventListener('click', () => {
+    $('#importar-resultado').innerHTML = '';
+    $('#importar-nombre-archivo').textContent = '';
+    $('#importar-archivo').value = '';
+    $('#btn-ejecutar-importar').disabled = true;
+    $('#modal-importar-prod').classList.add('open');
+});
+$('#btn-seleccionar-archivo').addEventListener('click', () => $('#importar-archivo').click());
+$('#importar-archivo').addEventListener('change', () => {
+    const f = $('#importar-archivo').files[0];
+    if (f) {
+        $('#importar-nombre-archivo').textContent = f.name;
+        $('#btn-ejecutar-importar').disabled = false;
+    }
+});
+$('#btn-ejecutar-importar').addEventListener('click', async () => {
+    const archivo = $('#importar-archivo').files[0];
+    if (!archivo) return;
+    const fd = new FormData();
+    fd.append('archivo', archivo);
+    try {
+        const res = await fetch(API + '/productos/importar', {
+            method: 'POST', body: fd
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || data.error || 'Error al importar');
+        let html = '<p style="color:var(--success);font-weight:600;">' + data.message + '</p>';
+        if (data.errores && data.errores.length) {
+            html += '<ul style="color:var(--danger);font-size:13px;margin-top:6px;">';
+            data.errores.forEach(e => html += '<li>' + esc(e) + '</li>');
+            html += '</ul>';
+        }
+        $('#importar-resultado').innerHTML = html;
+        $('#btn-ejecutar-importar').disabled = true;
+        loadProductos();
+        loadDashboard();
+    } catch (e) { toast(e.message, 'err'); }
+});
+
+function exportarProductos() {
+    const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
+    const categoria = ($('#prod-categoria') || {}).value || '';
+    const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
+    const estado = ($('#prod-estado') || {}).value || '';
+    const qs = new URLSearchParams();
+    if (filtro) qs.set('filtro', filtro);
+    if (categoria) qs.set('categoria', categoria);
+    if (proveedor) qs.set('proveedor', proveedor);
+    if (estado) qs.set('estado', estado);
+    window.location.href = API + '/exportar/productos?' + qs.toString();
+}
 
 async function openProductoModal(id, lista) {
     await loadCatalogos();
@@ -354,12 +553,13 @@ async function listarMovimientos() {
     $('#movimientos-tbody').innerHTML = movs.map((m) => `
         <tr>
             <td>${fmtDate(m.fecha)}</td>
-            <td>${m.producto_nombre}</td>
+            <td>${esc(m.producto_nombre)}</td>
             <td><span class="badge badge-${m.tipo}">${m.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
             <td>${m.cantidad} ${m.unidad}</td>
-            <td>S/ ${fmtNum(m.precio_unitario)}</td>
+            <td>${fmtNum(m.precio_unitario)}</td>
             <td>${m.almacen_nombre || '—'}</td>
-            <td>${m.nota || ''}</td>
+            <td>${m.nota || '—'}</td>
+            <td>${m.usuario || '—'}</td>
         </tr>`).join('') || '<tr><td colspan="7" class="empty">Sin movimientos</td></tr>';
 }
 
@@ -370,7 +570,7 @@ $('#form-movimiento').addEventListener('submit', async (e) => {
         tipo: $('#mov-tipo').value,
         cantidad: +$('#mov-cantidad').value,
         precio_unitario: +$('#mov-precio').value || 0,
-        fecha: $('#mov-fecha').value || undefined,
+        fecha: fechaISO($('#mov-fecha').value) || undefined,
         almacen_id: +$('#mov-almacen').value || null,
         nota: $('#mov-nota').value,
     };
@@ -387,6 +587,10 @@ $('#form-movimiento').addEventListener('submit', async (e) => {
 
 $('#btn-filtrar-mov').addEventListener('click', listarMovimientos);
 on('#mov-filtro', 'input', debounce(listarMovimientos, 300));
+$('#mov-filtro-tipo').addEventListener('change', listarMovimientos);
+$('#btn-exportar-mov').addEventListener('click', () => {
+    window.location.href = '/api/exportar/movimientos?desde=' + ($('#mov-desde') || {}).value + '&hasta=' + ($('#mov-hasta') || {}).value + '&tipo=' + ($('#mov-filtro-tipo') || {}).value + '&filtro=' + ($('#mov-filtro') || {}).value;
+});
 vincularEscaneo('#mov-escaneo', '#mov-producto', '#mov-cantidad');
 $('#mov-tipo').addEventListener('change', () => {
     const label = $('#mov-precio');
@@ -394,6 +598,95 @@ $('#mov-tipo').addEventListener('change', () => {
         ? label.closest('label').style.display = 'none'
         : label.closest('label').style.display = 'flex';
 });
+
+// ---------------- Escaneo rápido ----------------
+let qrItems = {};
+
+function actQrItems() {
+    const tbody = $('#qr-items-tbody');
+    const keys = Object.keys(qrItems);
+    if (!keys.length) {
+        tbody.innerHTML = '';
+        $('#qr-empty').style.display = 'block';
+        return;
+    }
+    $('#qr-empty').style.display = 'none';
+    tbody.innerHTML = keys.map((k) => {
+        const it = qrItems[k];
+        return `<tr>
+            <td><strong>${esc(it.nombre)}</strong></td>
+            <td>${esc(it.codigo || '—')}</td>
+            <td>${esc(it.unidad)}</td>
+            <td>
+                <button class="btn btn-icon" onclick="qrCant('${k}', -1)">−</button>
+                <strong style="margin:0 8px">${it.cantidad}</strong>
+                <button class="btn btn-icon" onclick="qrCant('${k}', 1)">+</button>
+            </td>
+            <td><button class="btn btn-icon btn-danger" onclick="qrRemove('${k}')">✕</button></td>
+        </tr>`;
+    }).join('');
+}
+
+window.qrCant = (key, delta) => {
+    if (!qrItems[key]) return;
+    qrItems[key].cantidad = Math.max(1, qrItems[key].cantidad + delta);
+    actQrItems();
+};
+
+window.qrRemove = (key) => {
+    delete qrItems[key];
+    actQrItems();
+};
+
+$('#btn-qr-limpiar').addEventListener('click', () => {
+    qrItems = {};
+    actQrItems();
+});
+
+$('#qr-escaneo').addEventListener('keydown', async (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const codigo = $('#qr-escaneo').value.trim();
+    $('#qr-escaneo').value = '';
+    if (!codigo) return;
+    try {
+        const p = await request(API + '/productos/codigo?codigo=' + encodeURIComponent(codigo));
+        const key = String(p.id);
+        if (qrItems[key]) {
+            qrItems[key].cantidad += 1;
+        } else {
+            qrItems[key] = { producto_id: p.id, nombre: p.nombre, codigo: p.codigo, unidad: p.unidad, cantidad: 1 };
+        }
+        actQrItems();
+        toast(`${p.nombre} → ${qrItems[key].cantidad} ${p.unidad}`);
+    } catch (err) {
+        toast('Código no registrado: ' + codigo, 'err');
+    }
+});
+
+$('#btn-qr-registrar').addEventListener('click', async () => {
+    const keys = Object.keys(qrItems);
+    if (!keys.length) return toast('No hay productos para registrar', 'err');
+    const tipo = $('#qr-tipo').value;
+    const items = keys.map((k) => ({
+        producto_id: qrItems[k].producto_id,
+        cantidad: qrItems[k].cantidad,
+    }));
+    try {
+        const res = await request(API + '/movimientos/lote', {
+            method: 'POST',
+            body: JSON.stringify({ tipo, items }),
+        });
+        toast(res.message || 'Registrado');
+        qrItems = {};
+        actQrItems();
+        listarMovimientos();
+    } catch (err) {
+        toast(err.message, 'err');
+    }
+});
+
+$('#qr-escaneo').addEventListener('click', () => $('#qr-escaneo').select());
 
 // ---------------- Proveedores ----------------
 async function loadProveedores() {
@@ -485,11 +778,12 @@ async function loadGastos() {
         $('#gastos-tbody').innerHTML = gastos.map((g) => `
             <tr>
                 <td>${fmtDate(g.fecha)}</td>
-                <td>${g.categoria}</td>
-                <td>${g.descripcion || '—'}</td>
-                <td><strong>S/ ${fmtNum(g.monto)}</strong></td>
+                <td>${esc(g.categoria)}</td>
+                <td>${esc(g.descripcion) || '—'}</td>
+                <td>${esc(g.proveedor_nombre) || '—'}</td>
+                <td><strong>Bs ${fmtNum(g.monto)}</strong></td>
                 <td><button class="btn btn-icon btn-danger" data-del-gasto="${g.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button></td>
-            </tr>`).join('') || '<tr><td colspan="5" class="empty">Sin gastos registrados</td></tr>';
+            </tr>`).join('') || '<tr><td colspan="6" class="empty">Sin gastos registrados</td></tr>';
         $$('[data-del-gasto]').forEach((b) => b.addEventListener('click', () => delGasto(b.dataset.delGasto)));
     } catch (e) {
         toast(e.message, 'err');
@@ -502,7 +796,7 @@ $('#form-gasto').addEventListener('submit', async (e) => {
         categoria: $('#gasto-categoria').value,
         descripcion: $('#gasto-descripcion').value,
         monto: +$('#gasto-monto').value,
-        fecha: $('#gasto-fecha').value || undefined,
+        fecha: fechaISO($('#gasto-fecha').value) || undefined,
         proveedor_id: +$('#gasto-proveedor').value || null,
     };
     try {
@@ -517,6 +811,9 @@ $('#form-gasto').addEventListener('submit', async (e) => {
 
 $('#btn-filtrar-gastos').addEventListener('click', loadGastos);
 on('#gasto-filtro', 'input', debounce(loadGastos, 300));
+$('#btn-exportar-gastos').addEventListener('click', () => {
+    window.location.href = '/api/exportar/gastos?desde=' + ($('#gasto-desde') || {}).value + '&hasta=' + ($('#gasto-hasta') || {}).value + '&filtro=' + ($('#gasto-filtro') || {}).value;
+});
 
 async function delGasto(id) {
     if (!confirm('¿Eliminar este gasto?')) return;
@@ -541,14 +838,14 @@ async function loadReportes() {
                 <td>${c.nombre}</td>
                 <td><span class="badge badge-${c.tipo}">${c.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
                 <td>${c.cantidad} ${c.unidad}</td>
-                <td>S/ ${fmtNum(c.total)}</td>
+                <td>Bs ${fmtNum(c.total)}</td>
             </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin datos</td></tr>';
 
         const valorizacion = await request(API + '/reportes/valorizacion');
         $('#rep-valorizacion').innerHTML = valorizacion.map((v) => `
             <tr>
                 <td>${v.nombre}</td><td>${v.stock} ${v.unidad}</td>
-                <td>S/ ${fmtNum(v.costo_promedio)}</td><td><strong>S/ ${fmtNum(v.valor)}</strong></td>
+                <td>Bs ${fmtNum(v.costo_promedio)}</td><td><strong>Bs ${fmtNum(v.valor)}</strong></td>
             </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin productos con stock</td></tr>';
 
         const venc = await request(API + '/reportes/vencimientos');
@@ -562,7 +859,7 @@ async function loadReportes() {
                 <td>${r.nombre}${r.principal ? ' <span class="badge badge-bajo">Principal</span>' : ''}</td>
                 <td>${r.principal ? 'Principal' : 'Sucursal'}</td>
                 <td>${r.num_repartos}</td>
-                <td><strong>S/ ${fmtNum(r.total_repartido)}</strong></td>
+                <td><strong>Bs ${fmtNum(r.total_repartido)}</strong></td>
             </tr>`).join('')
             || '<tr><td colspan="4" class="empty">Sin datos</td></tr>';
 
@@ -571,20 +868,20 @@ async function loadReportes() {
         $('#rep-ganancias').innerHTML = ganancias.map((g) => {
             totVenta += g.venta; totCosto += g.costo; totUtil += g.utilidad;
             return `<tr>
-                <td><strong>${g.nombre}</strong></td>
+                <td><strong>${esc(g.nombre)}</strong></td>
                 <td>${g.cantidad}</td>
-                <td>S/ ${fmtNum(g.venta)}</td>
-                <td>S/ ${fmtNum(g.costo)}</td>
-                <td><span class="${g.utilidad < 0 ? 'text-red' : ''}"><strong>S/ ${fmtNum(g.utilidad)}</strong></span></td>
+                <td>Bs ${fmtNum(g.venta)}</td>
+                <td>Bs ${fmtNum(g.costo)}</td>
+                <td><span class="${g.utilidad < 0 ? 'text-red' : ''}"><strong>Bs ${fmtNum(g.utilidad)}</strong></span></td>
             </tr>`;
         }).join('') || '<tr><td colspan="5" class="empty">Sin ventas en el período</td></tr>';
         if (ganancias.length) {
             $('#rep-ganancias').innerHTML += `
                 <tr class="total-row">
                     <td><strong>TOTAL</strong></td><td></td>
-                    <td><strong>S/ ${fmtNum(totVenta)}</strong></td>
-                    <td><strong>S/ ${fmtNum(totCosto)}</strong></td>
-                    <td><strong>S/ ${fmtNum(totUtil)}</strong></td>
+                    <td><strong>Bs ${fmtNum(totVenta)}</strong></td>
+                    <td><strong>Bs ${fmtNum(totCosto)}</strong></td>
+                    <td><strong>Bs ${fmtNum(totUtil)}</strong></td>
                 </tr>`;
         }
     } catch (e) {
@@ -668,13 +965,13 @@ function actVentaItems() {
         <tr>
             <td><strong>${it.nombre}</strong></td>
             <td>${it.cantidad}</td>
-            <td>S/ ${fmtNum(it.precio)}</td>
-            <td>S/ ${fmtNum(it.cantidad * it.precio)}</td>
+            <td>Bs ${fmtNum(it.precio)}</td>
+            <td>Bs ${fmtNum(it.cantidad * it.precio)}</td>
             <td><button class="btn btn-icon btn-danger" onclick="quitarItemVenta(${i})">Quitar</button></td>
         </tr>`).join('')
         : '<tr><td colspan="5" class="empty">Agrega productos a la venta</td></tr>';
     const total = ventaItems.reduce((s, it) => s + it.cantidad * it.precio, 0);
-    $('#venta-total').textContent = 'S/ ' + fmtNum(total);
+    $('#venta-total').textContent = 'Bs ' + fmtNum(total);
 }
 
 window.quitarItemVenta = (i) => { ventaItems.splice(i, 1); actVentaItems(); };
@@ -700,10 +997,6 @@ $('#venta-producto').addEventListener('change', () => {
     if (opt && opt.dataset.precio) $('#venta-precio').value = opt.dataset.precio;
 });
 
-$('#venta-fiado').addEventListener('change', (e) => {
-    $('#campo-fiado').style.display = e.target.checked ? 'block' : 'none';
-});
-
 $('#form-venta').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!ventaItems.length) return toast('La venta no tiene productos', 'err');
@@ -711,19 +1004,16 @@ $('#form-venta').addEventListener('submit', async (e) => {
         const res = await request(API + '/ventas', {
             method: 'POST',
             body: JSON.stringify({
-                fecha: $('#venta-fecha').value || undefined,
+                fecha: fechaISO($('#venta-fecha').value) || undefined,
                 nota: $('#venta-nota').value,
-                fiado: $('#venta-fiado').checked ? 1 : 0,
-                cliente: $('#venta-cliente').value.trim(),
-                telefono: $('#venta-telefono').value.trim(),
                 detalle: ventaItems,
             }),
         });
-        toast('Venta registrada por S/ ' + fmtNum(res.total));
+        toast('Venta registrada por Bs ' + fmtNum(res.total));
         ventaItems = [];
         actVentaItems();
         e.target.reset();
-        $('#venta-fecha').value = new Date().toISOString().slice(0, 10);
+        $('#venta-fecha').value = nowLocal();
         listarVentas();
     } catch (err) {
         toast(err.message, 'err');
@@ -741,8 +1031,9 @@ async function listarVentas() {
         <tr>
             <td>#${v.id}</td>
             <td>${fmtDate(v.fecha)}</td>
-            <td>${v.num_items} items</td>
-            <td><strong>S/ ${fmtNum(v.total)}</strong></td>
+            <td class="items-detalle">${esc(v.items_detalle) || v.num_items + ' items'}</td>
+            <td><strong>Bs ${fmtNum(v.total)}</strong></td>
+            <td>${esc(v.nota) || '—'}</td>
             <td>${v.usuario || '—'}</td>
             <td>
                 <button class="btn btn-icon" onclick="verVenta(${v.id})" title="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -752,13 +1043,12 @@ async function listarVentas() {
 }
 
 window.anularVenta = async (id) => {
-    if (!confirm('¿Anular la venta #' + id + '? Se repondrá el stock y se cancelará su fiado (si no tiene pagos).')) return;
+    if (!confirm('¿Anular la venta #' + id + '? Se repondrá el stock.')) return;
     try {
         const res = await request(API + '/ventas/' + id, { method: 'DELETE' });
         toast(res.message, 'ok');
         listarVentas();
         loadDashboard();
-        loadFiados();
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -768,8 +1058,20 @@ window.verVenta = async (id) => {
     try {
         const data = await request(API + '/ventas/' + id);
         const v = data.venta;
-        const det = data.detalle.map((d) => `<tr><td>${d.producto_nombre}</td><td>${d.cantidad}</td><td>S/ ${fmtNum(d.precio_unitario)}</td><td>S/ ${fmtNum(d.subtotal)}</td></tr>`).join('');
-        alert('Venta #' + v.id + ' · ' + v.fecha + '\n\n' + det + '\n\nTOTAL: S/ ' + fmtNum(v.total));
+        $('#det-venta-title').textContent = 'Detalle de venta #' + v.id;
+        $('#det-venta-fecha').textContent = fmtDate(v.fecha);
+        $('#det-venta-usuario').textContent = v.usuario || '—';
+        $('#det-venta-nota').textContent = v.nota || 'Sin nota';
+        $('#det-venta-estado').textContent = v.id ? 'Registrada' : '—';
+        $('#det-venta-total').textContent = fmtNum(v.total);
+        $('#det-venta-items').innerHTML = data.detalle.map((d) => `
+            <tr>
+                <td>${esc(d.producto_nombre)}</td>
+                <td>${d.cantidad}</td>
+                <td>${fmtNum(d.precio_unitario)}</td>
+                <td><strong>${fmtNum(d.subtotal)}</strong></td>
+            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin items</td></tr>';
+        $('#modal-detalle-venta').classList.add('open');
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -807,15 +1109,15 @@ async function loadRepartos() {
 function actRepartoItems() {
     $('#reparto-items-tbody').innerHTML = repartoItems.length ? repartoItems.map((it, i) => `
         <tr>
-            <td><strong>${it.nombre}</strong></td>
+            <td><strong>${esc(it.nombre)}</strong></td>
             <td>${it.cantidad}</td>
-            <td>S/ ${fmtNum(it.costo)}</td>
-            <td>S/ ${fmtNum(it.cantidad * it.costo)}</td>
+            <td>Bs ${fmtNum(it.costo_unitario)}</td>
+            <td>Bs ${fmtNum(it.cantidad * it.costo_unitario)}</td>
             <td><button class="btn btn-icon btn-danger" onclick="quitarItemReparto(${i})">Quitar</button></td>
         </tr>`).join('')
         : '<tr><td colspan="5" class="empty">Agrega productos al reparto</td></tr>';
-    const total = repartoItems.reduce((s, it) => s + it.cantidad * it.costo, 0);
-    $('#reparto-total').textContent = 'S/ ' + fmtNum(total);
+    const total = repartoItems.reduce((s, it) => s + it.cantidad * it.costo_unitario, 0);
+    $('#reparto-total').textContent = 'Bs ' + fmtNum(total);
 }
 
 window.quitarItemReparto = (i) => { repartoItems.splice(i, 1); actRepartoItems(); };
@@ -847,18 +1149,17 @@ $('#form-reparto').addEventListener('submit', async (e) => {
         const res = await request(API + '/repartos', {
             method: 'POST',
             body: JSON.stringify({
-                fecha: $('#reparto-fecha').value || undefined,
+                fecha: fechaISO($('#reparto-fecha').value) || undefined,
                 sucursal_id: +$('#reparto-sucursal').value,
                 nota: $('#reparto-nota').value,
                 detalle: repartoItems,
             }),
         });
-        toast('Reparto registrado por S/ ' + fmtNum(res.total));
+        toast('Reparto registrado por Bs ' + fmtNum(res.total));
         repartoItems = [];
         actRepartoItems();
         e.target.reset();
-$('#reparto-fecha').value = new Date().toISOString().slice(0, 10);
-$('#pago-fecha').value = new Date().toISOString().slice(0, 10);
+        $('#reparto-fecha').value = nowLocal();
         listarRepartos();
     } catch (err) {
         toast(err.message, 'err');
@@ -876,9 +1177,10 @@ async function listarRepartos() {
         <tr>
             <td>#${r.id}</td>
             <td>${fmtDate(r.fecha)}</td>
-            <td><strong>${r.sucursal_nombre}</strong></td>
-            <td>${r.num_items} items</td>
-            <td><strong>S/ ${fmtNum(r.total)}</strong></td>
+            <td><strong>${esc(r.sucursal_nombre)}</strong></td>
+            <td class="items-detalle">${esc(r.items_detalle) || r.num_items + ' items'}</td>
+            <td><strong>Bs ${fmtNum(r.total)}</strong></td>
+            <td>${esc(r.nota) || '—'}</td>
             <td>${r.usuario || '—'}</td>
             <td>
                 <button class="btn btn-icon" onclick="verReparto(${r.id})" title="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -903,8 +1205,21 @@ window.verReparto = async (id) => {
     try {
         const data = await request(API + '/repartos/' + id);
         const r = data.reparto;
-        const det = data.detalle.map((d) => `<tr><td>${d.producto_nombre}</td><td>${d.cantidad}</td><td>S/ ${fmtNum(d.costo_unitario)}</td><td>S/ ${fmtNum(d.subtotal)}</td></tr>`).join('');
-        alert('Reparto #' + r.id + ' · ' + r.fecha + ' · ' + r.sucursal_nombre + '\n\n' + det + '\n\nTOTAL: S/ ' + fmtNum(r.total));
+        $('#det-reparto-title').textContent = 'Detalle de reparto #' + r.id;
+        $('#det-reparto-fecha').textContent = fmtDate(r.fecha);
+        $('#det-reparto-sucursal').textContent = r.sucursal_nombre || '—';
+        $('#det-reparto-usuario').textContent = r.usuario || '—';
+        $('#det-reparto-nota').textContent = r.nota || 'Sin nota';
+        $('#det-reparto-estado').textContent = r.id ? 'Registrado' : '—';
+        $('#det-reparto-total').textContent = fmtNum(r.total);
+        $('#det-reparto-items').innerHTML = data.detalle.map((d) => `
+            <tr>
+                <td>${esc(d.producto_nombre)}</td>
+                <td>${d.cantidad}</td>
+                <td>${fmtNum(d.costo_unitario)}</td>
+                <td><strong>${fmtNum(d.subtotal)}</strong></td>
+            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin items</td></tr>';
+        $('#modal-detalle-reparto').classList.add('open');
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -931,7 +1246,7 @@ async function cargarSucursales() {
             <td>${s.direccion || '—'}</td>
             <td><span class="badge ${s.principal ? 'badge-bajo' : 'badge-entrada'}">${s.principal ? 'Principal' : 'Sucursal'}</span></td>
             <td>${s.num_repartos}</td>
-            <td>S/ ${fmtNum(s.total_repartido)}</td>
+            <td>Bs ${fmtNum(s.total_repartido)}</td>
             <td>
                 <button class="btn btn-icon" data-edit-suc="${s.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
                 <button class="btn btn-icon btn-danger" data-del-suc="${s.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
@@ -982,93 +1297,6 @@ $('#btn-guardar-sucursal').addEventListener('click', async () => {
         toast(e.message, 'err');
     }
 });
-
-// ---------------- Fiados / cuentas por cobrar ----------------
-async function loadFiados() {
-    try {
-        const qs = new URLSearchParams();
-        const filtro = ($('#fiado-filtro') || {}).value?.trim() || '';
-        if (filtro) qs.set('filtro', filtro);
-        const data = await request(API + '/creditos?' + qs.toString());
-        $('#fiado-por-cobrar').textContent = 'S/ ' + fmtNum(data.total_pendiente);
-        $('#fiado-cobrado').textContent = 'S/ ' + fmtNum(data.total_cobrado);
-
-        const pendientes = data.lista.filter((c) => c.estado === 'pendiente');
-        const pagadas = data.lista.filter((c) => c.estado === 'pagado');
-
-        $('#fiados-tbody').innerHTML = pendientes.length ? pendientes.map((c) => `
-            <tr>
-                <td>${fmtDate(c.fecha)}</td>
-                <td><strong>${c.cliente}</strong></td>
-                <td>${c.telefono || '—'}</td>
-                <td>S/ ${fmtNum(c.monto)}</td>
-                <td><strong class="text-red">S/ ${fmtNum(c.saldo)}</strong></td>
-                <td>${c.usuario || '—'}</td>
-                <td>
-                    <button class="btn btn-icon" onclick="abrirPago(${c.id}, '${c.cliente.replace(/'/g, "\\'")}', ${c.saldo})" title="Registrar pago">Pagar</button>
-                    <button class="btn btn-icon" onclick="pagarCompleto(${c.id})" title="Marcar como pagado completo">Pagar todo</button>
-                </td>
-            </tr>`).join('')
-            : '<tr><td colspan="7" class="empty">No hay ventas al fiado pendientes</td></tr>';
-
-        $('#fiados-pagados-tbody').innerHTML = pagadas.length ? pagadas.map((c) => `
-            <tr>
-                <td>${fmtDate(c.fecha)}</td>
-                <td><strong>${c.cliente}</strong></td>
-                <td>S/ ${fmtNum(c.monto)}</td>
-                <td><span class="badge badge-entrada">Pagado</span></td>
-                <td>${c.usuario || '—'}</td>
-            </tr>`).join('')
-            : '<tr><td colspan="5" class="empty">Aún no hay fiados pagados</td></tr>';
-    } catch (e) {
-        toast(e.message, 'err');
-    }
-}
-
-window.abrirPago = (id, cliente, saldo) => {
-    $('#pago-credito-id').value = id;
-    $('#pago-monto').value = '';
-    $('#pago-monto').max = saldo;
-    $('#pago-info').textContent = `Cliente: ${cliente} · Saldo pendiente: S/ ${fmtNum(saldo)}`;
-    $('#modal-pago').classList.add('open');
-    $('#pago-monto').focus();
-};
-
-window.pagarCompleto = async (id) => {
-    if (!confirm('¿Marcar este fiado como totalmente pagado?')) return;
-    try {
-        await request(API + '/creditos/' + id + '/pago', {
-            method: 'POST',
-            body: JSON.stringify({ monto: 999999999 }),
-        });
-        toast('Pago registrado');
-        loadFiados();
-    } catch (e) {
-        toast(e.message, 'err');
-    }
-};
-
-$('#form-pago').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const id = $('#pago-credito-id').value;
-    try {
-        const res = await request(API + '/creditos/' + id + '/pago', {
-            method: 'POST',
-            body: JSON.stringify({
-                monto: +$('#pago-monto').value,
-                fecha: $('#pago-fecha').value || undefined,
-            }),
-        });
-        toast('Pago registrado' + (res.estado === 'pagado' ? ' · fiado saldado' : ''));
-        $('#modal-pago').classList.remove('open');
-        loadFiados();
-    } catch (err) {
-        toast(err.message, 'err');
-    }
-});
-
-$('#btn-refrescar-fiados').addEventListener('click', loadFiados);
-on('#fiado-filtro', 'input', debounce(loadFiados, 300));
 
 // ---------------- Usuarios ----------------
 async function loadUsuarios() {
@@ -1229,10 +1457,10 @@ window.addEventListener('click', (e) => {
 });
 
 // Fechas por defecto en movimientos, gastos, ventas y repartos
-$('#mov-fecha').value = new Date().toISOString().slice(0, 10);
-$('#gasto-fecha').value = new Date().toISOString().slice(0, 10);
-$('#venta-fecha').value = new Date().toISOString().slice(0, 10);
-$('#reparto-fecha').value = new Date().toISOString().slice(0, 10);
+$('#mov-fecha').value = nowLocal();
+$('#gasto-fecha').value = nowLocal();
+$('#venta-fecha').value = nowLocal();
+$('#reparto-fecha').value = nowLocal();
 
 // ---------------- Inicio ----------------
 (async function init() {

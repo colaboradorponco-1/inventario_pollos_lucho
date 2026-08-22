@@ -3,7 +3,7 @@
 Crea la aplicación Flask a partir de la fábrica create_app() y la arranca.
 Para producción usa `run.py` (servidor WSGI Waitress).
 """
-from flask import Flask
+from flask import Flask, request as flask_request
 
 from database import init_db
 from core.auth import auth_bp
@@ -27,10 +27,13 @@ def create_app():
         app.register_blueprint(bp)
 
     @app.after_request
-    def no_cache(resp):
-        resp.headers["Cache-Control"] = "no-store, must-revalidate"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
+    def add_headers(resp):
+        if flask_request.path.startswith('/static/'):
+            resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        else:
+            resp.headers["Cache-Control"] = "no-store, must-revalidate"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
         return resp
 
     return app

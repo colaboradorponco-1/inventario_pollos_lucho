@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import date
+from datetime import datetime
 
 from flask import Blueprint, request, session
 
@@ -85,7 +85,7 @@ def repartos():
     conn = get_conn()
     if request.method == "POST":
         data = request.get_json() or {}
-        fecha = data.get("fecha") or date.today().isoformat()
+        fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         sucursal_id = data.get("sucursal_id")
         nota = data.get("nota", "")
         detalle = data.get("detalle", [])
@@ -137,7 +137,7 @@ def repartos():
         conn.commit()
         conn.close()
         registrar_auditoria("Reparto registrado",
-                            f"Reparto #{reparto_id} a {suc['nombre']} por S/ {round(total, 2)}")
+                            f"Reparto #{reparto_id} a {suc['nombre']} por Bs {round(total, 2)}")
         return ok({"id": reparto_id, "total": round(total, 2)}, message="Reparto registrado")
 
     desde = request.args.get("desde", "")
@@ -145,7 +145,9 @@ def repartos():
     filtro = request.args.get("filtro", "").strip()
     q = """
         SELECT r.*, s.nombre AS sucursal_nombre,
-               (SELECT COUNT(*) FROM reparto_detalle d WHERE d.reparto_id = r.id) AS num_items
+               (SELECT COUNT(*) FROM reparto_detalle d WHERE d.reparto_id = r.id) AS num_items,
+               (SELECT GROUP_CONCAT(d.producto_nombre || ' (' || d.cantidad || ')' , ', ')
+                FROM reparto_detalle d WHERE d.reparto_id = r.id) AS items_detalle
         FROM repartos r JOIN sucursales s ON s.id = r.sucursal_id WHERE 1=1
     """
     params = []
@@ -193,7 +195,7 @@ def reparto_eliminar(reparto_id):
     detalle = conn.execute("SELECT * FROM reparto_detalle WHERE reparto_id = ?", (reparto_id,)).fetchall()
     for d in detalle:
         registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], d["costo_unitario"],
-                             date.today().isoformat(),
+                             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                              f"Anulación reparto #{reparto_id} de {reparto['sucursal_nombre']}",
                              session.get("usuario", ""))
     conn.execute("DELETE FROM repartos WHERE id = ?", (reparto_id,))
