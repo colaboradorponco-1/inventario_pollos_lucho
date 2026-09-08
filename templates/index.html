@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inventario Pollos Lucho</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="/static/style.css?v=5">
+    <link rel="stylesheet" href="/static/style.css?v=9">
 </head>
-<body>
+<body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
@@ -51,9 +51,22 @@
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
                 Repartos
             </button>
+            <button class="menu-btn" data-view="pedidos">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                <span class="badge-alerta" id="badge-pedidos" style="display:none"></span>
+                Pedidos
+            </button>
             <button class="menu-btn" data-view="reportes">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                 Reportes
+            </button>
+            <button class="menu-btn" data-view="almacenes">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                Almacenes
+            </button>
+            <button class="menu-btn" data-view="categorias">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                Categorías
             </button>
             <button class="menu-btn" data-view="usuarios">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -68,11 +81,8 @@
                 Respaldo
             </button>
         </nav>
+        <div class="sidebar-sesion" id="sidebar-sesion"></div>
         <div class="sidebar-footer">
-            <button class="menu-btn" id="btn-cambiar-pass">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                Cambiar contraseña
-            </button>
             <button class="menu-btn" id="btn-salir">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 Salir
@@ -95,42 +105,45 @@
             <div class="kpi-grid">
                 <div class="kpi kpi-yellow"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></div><div class="kpi-info"><span class="kpi-label">Productos</span><span class="kpi-value" id="stat-productos">0</span></div></div>
                 <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div><div class="kpi-info"><span class="kpi-label">Con stock</span><span class="kpi-value" id="stat-stock">0</span></div></div>
-                <div class="kpi kpi-yellow"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="kpi-info"><span class="kpi-label">Valor inventario</span><span class="kpi-value" id="stat-valor">Bs 0.00</span></div></div>
+                <div class="kpi kpi-yellow kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="kpi-info"><span class="kpi-label">Valor inventario</span><span class="kpi-value" id="stat-valor">Bs 0.00</span></div></div>
                 <div class="kpi kpi-red"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div><div class="kpi-info"><span class="kpi-label">Stock bajo</span><span class="kpi-value" id="stat-stock-bajo">0</span></div></div>
             </div>
 
             <h3 style="margin:12px 0 6px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Hoy</h3>
             <div class="kpi-grid">
-                <div class="kpi kpi-green"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="kpi-info"><span class="kpi-label">Ventas</span><span class="kpi-value" id="stat-ventas-hoy">Bs 0.00</span></div></div>
-                <div class="kpi kpi-red"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div><div class="kpi-info"><span class="kpi-label">Gastos</span><span class="kpi-value" id="stat-gastos-hoy">Bs 0.00</span></div></div>
-                <div class="kpi kpi-green"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ganancia</span><span class="kpi-value" id="stat-utilidad-hoy">Bs 0.00</span></div></div>
+                <div class="kpi kpi-green kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="kpi-info"><span class="kpi-label">Ventas</span><span class="kpi-value" id="stat-ventas-hoy">Bs 0.00</span></div></div>
+                <div class="kpi kpi-red kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div><div class="kpi-info"><span class="kpi-label">Gastos</span><span class="kpi-value" id="stat-gastos-hoy">Bs 0.00</span></div></div>
+                <div class="kpi kpi-green kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ganancia</span><span class="kpi-value" id="stat-utilidad-hoy">Bs 0.00</span></div></div>
                 <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="kpi-info"><span class="kpi-label">N. ventas</span><span class="kpi-value" id="stat-num-ventas-hoy">0</span></div></div>
+                <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div><div class="kpi-info"><span class="kpi-label">N. repartos</span><span class="kpi-value" id="stat-repartos-hoy">0</span></div></div>
             </div>
 
             <h3 style="margin:12px 0 6px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Mes</h3>
             <div class="kpi-grid">
-                <div class="kpi kpi-green"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ventas</span><span class="kpi-value" id="stat-ventas">Bs 0.00</span></div></div>
-                <div class="kpi kpi-red"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div><div class="kpi-info"><span class="kpi-label">Gastos</span><span class="kpi-value" id="stat-gastos">Bs 0.00</span></div></div>
-                <div class="kpi kpi-green"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ganancia</span><span class="kpi-value" id="stat-utilidad">Bs 0.00</span></div></div>
-                <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div><div class="kpi-info"><span class="kpi-label">Repartos</span><span class="kpi-value" id="stat-repartos">0</span></div></div>
+                <div class="kpi kpi-green kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ventas</span><span class="kpi-value" id="stat-ventas">Bs 0.00</span></div></div>
+                <div class="kpi kpi-red kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div><div class="kpi-info"><span class="kpi-label">Gastos</span><span class="kpi-value" id="stat-gastos">Bs 0.00</span></div></div>
+                <div class="kpi kpi-green kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ganancia</span><span class="kpi-value" id="stat-utilidad">Bs 0.00</span></div></div>
+                <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="kpi-info"><span class="kpi-label">N. ventas</span><span class="kpi-value" id="stat-num-ventas-mes">0</span></div></div>
+                <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div><div class="kpi-info"><span class="kpi-label">N. repartos</span><span class="kpi-value" id="stat-repartos">0</span></div></div>
             </div>
 
             <h3 style="margin:12px 0 6px;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:1px">Anio</h3>
             <div class="kpi-grid">
-                <div class="kpi kpi-yellow"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="kpi-info"><span class="kpi-label">Ventas</span><span class="kpi-value" id="stat-ventas-anio">Bs 0.00</span></div></div>
-                <div class="kpi kpi-red"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div><div class="kpi-info"><span class="kpi-label">Gastos</span><span class="kpi-value" id="stat-gastos-anio">Bs 0.00</span></div></div>
-                <div class="kpi kpi-green"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ganancia</span><span class="kpi-value" id="stat-utilidad-anio">Bs 0.00</span></div></div>
-                <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="kpi-info"><span class="kpi-label">N. ventas</span><span class="kpi-value" id="stat-num-ventas-mes">0</span></div></div>
+                <div class="kpi kpi-yellow kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="kpi-info"><span class="kpi-label">Ventas</span><span class="kpi-value" id="stat-ventas-anio">Bs 0.00</span></div></div>
+                <div class="kpi kpi-red kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg></div><div class="kpi-info"><span class="kpi-label">Gastos</span><span class="kpi-value" id="stat-gastos-anio">Bs 0.00</span></div></div>
+                <div class="kpi kpi-green kpi-finance"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div><div class="kpi-info"><span class="kpi-label">Ganancia</span><span class="kpi-value" id="stat-utilidad-anio">Bs 0.00</span></div></div>
+                <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div><div class="kpi-info"><span class="kpi-label">N. ventas</span><span class="kpi-value" id="stat-num-ventas-anio">0</span></div></div>
+                <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></div><div class="kpi-info"><span class="kpi-label">N. repartos</span><span class="kpi-value" id="stat-repartos-anio">0</span></div></div>
             </div>
 
             <div class="dash-charts">
-                <div class="panel">
-                    <h2>Ventas vs Gastos (6 meses)</h2>
+                <div class="panel panel-finance">
+                    <h2>Ventas vs Gastos (historial por mes)</h2>
                     <div id="graf-ventas-gastos" class="chart-box"></div>
                     <div class="chart-leyenda"><span class="lg lg-yellow">Ventas</span><span class="lg lg-red">Gastos</span></div>
                 </div>
-                <div class="panel">
-                    <h2>Ganancias por mes</h2>
+                <div class="panel panel-finance">
+                    <h2>Ganancias por mes (historial)</h2>
                     <div id="graf-utilidad" class="chart-box"></div>
                 </div>
             </div>
@@ -184,6 +197,10 @@
         <!-- PRODUCTOS -->
         <section id="view-productos" class="view">
             <div class="toolbar">
+                <label class="scan-input" style="flex:0 0 260px;margin:0">
+                    <span class="scan-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg></span>
+                    <input type="text" id="prod-escaneo" placeholder="Escanear código de barras..." autocomplete="off">
+                </label>
                 <input type="text" id="prod-filtro" placeholder="Buscar producto...">
                 <select id="prod-categoria"></select>
                 <select id="prod-filtro-proveedor"></select>
@@ -233,6 +250,7 @@
                         <option value="entrada">Entrada (sumar stock)</option>
                         <option value="salida">Salida (restar stock)</option>
                     </select>
+                    <select id="qr-proveedor" style="max-width:220px"></select>
                     <label class="scan-input" style="flex:1;margin:0">
                         <span class="scan-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg></span>
                         <input type="text" id="qr-escaneo" placeholder="Apunta el escáner aquí y escanea..." autocomplete="off">
@@ -268,6 +286,9 @@
                                 <option value="salida">Salida (consumo / venta)</option>
                             </select>
                         </label>
+                        <label id="mov-proveedor-label">Proveedor (entrada de mercadería)
+                            <select id="mov-proveedor"></select>
+                        </label>
                         <label>Cantidad
                             <input type="number" id="mov-cantidad" step="any" min="0" required>
                         </label>
@@ -277,7 +298,7 @@
                         <label>Fecha
                             <input type="datetime-local" id="mov-fecha">
                         </label>
-                        <label>Almacén
+                        <label id="mov-almacen-label" style="display:none">Sucursal (destino del movimiento)
                             <select id="mov-almacen"></select>
                         </label>
                         <label>Nota
@@ -288,6 +309,13 @@
                 </div>
                 <div class="panel">
                     <h3 style="margin-bottom:12px">Historial de movimientos</h3>
+                    <div class="hist-sucursal-tabs" id="hist-sucursal-tabs" style="display:none;margin-bottom:10px">
+                        <button class="btn hist-tab active" id="btn-hist-mio" type="button">Mi Almacén</button>
+                        <button class="btn hist-tab" id="btn-hist-sucursales" type="button">Almacén de Sucursales</button>
+                        <select id="hist-sucursal-select" style="display:none;max-width:260px">
+                            <option value="">Todas las sucursales</option>
+                        </select>
+                    </div>
                     <div class="toolbar small">
                         <input type="text" id="mov-filtro" placeholder="Buscar producto...">
                         <input type="date" id="mov-desde">
@@ -301,9 +329,10 @@
                         <button class="btn" id="btn-exportar-mov">Exportar</button>
                     </div>
                     <table class="data-table">
-                        <thead><tr><th>Fecha y hora</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Precio (Bs)</th><th>Nota</th><th>Usuario</th></tr></thead>
+                        <thead><tr><th>Fecha y hora</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Precio (Bs)</th><th>Sucursal</th><th>Proveedor</th><th>Nota</th><th>Usuario</th></tr></thead>
                         <tbody id="movimientos-tbody"></tbody>
                     </table>
+                    <div class="pagination" id="movimientos-paginacion"></div>
                 </div>
             </div>
         </section>
@@ -315,9 +344,16 @@
                 <input type="text" id="proveedor-filtro" placeholder="Buscar nombre, teléfono, email...">
                 <button class="btn btn-primary" id="btn-nuevo-proveedor">+ Nuevo proveedor</button>
             </div>
+            <div class="hist-sucursal-tabs" id="prov-tabs" style="display:none;margin-bottom:10px">
+                <button class="btn hist-tab active" id="btn-prov-mio" type="button">Mi Almacén</button>
+                <button class="btn hist-tab" id="btn-prov-sucursales" type="button">Almacén de Sucursales</button>
+                <select id="prov-sucursal-select" style="display:none;max-width:260px">
+                    <option value="">Seleccione una sucursal...</option>
+                </select>
+            </div>
             <div class="panel">
                 <table class="data-table">
-                    <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th></th></tr></thead>
+                    <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Sucursal</th><th></th></tr></thead>
                     <tbody id="proveedores-tbody"></tbody>
                 </table>
             </div>
@@ -362,11 +398,47 @@
                         <button class="btn" id="btn-filtrar-gastos">Filtrar</button>
                         <button class="btn" id="btn-exportar-gastos">Exportar</button>
                     </div>
+                    <div class="hist-sucursal-tabs" id="gasto-tabs" style="display:none;margin-bottom:10px">
+                        <button class="btn hist-tab active" id="btn-gasto-mio" type="button">Mi Almacén</button>
+                        <button class="btn hist-tab" id="btn-gasto-sucursales" type="button">Almacén de Sucursales</button>
+                        <select id="gasto-sucursal-select" style="display:none;max-width:260px">
+                            <option value="">Seleccione una sucursal...</option>
+                        </select>
+                    </div>
                     <table class="data-table">
-                        <thead><tr><th>Fecha y hora</th><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th>Monto (Bs)</th><th></th></tr></thead>
+                        <thead><tr><th>Fecha y hora</th><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th>Sucursal</th><th>Monto (Bs)</th><th></th></tr></thead>
                         <tbody id="gastos-tbody"></tbody>
                     </table>
+                    <div class="pagination" id="gastos-paginacion"></div>
                 </div>
+            </div>
+        </section>
+
+        <!-- ALMACENES -->
+        <section id="view-almacenes" class="view">
+            <div class="toolbar">
+                <h2>Almacenes</h2>
+                <button class="btn btn-primary" id="btn-nuevo-almacen">+ Nuevo almacén</button>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead><tr><th>Nombre</th><th>Ubicación</th><th></th></tr></thead>
+                    <tbody id="almacenes-tbody"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- CATEGORÍAS -->
+        <section id="view-categorias" class="view">
+            <div class="toolbar">
+                <h2>Categorías</h2>
+                <button class="btn btn-primary" id="btn-nueva-categoria">+ Nueva categoría</button>
+            </div>
+            <div class="panel">
+                <table class="data-table">
+                    <thead><tr><th>Nombre</th><th></th></tr></thead>
+                    <tbody id="categorias-tbody"></tbody>
+                </table>
             </div>
         </section>
 
@@ -420,6 +492,15 @@
                     <tbody id="rep-ganancias"></tbody>
                 </table>
             </div>
+            <div class="panel" id="panel-sincronia" style="display:none">
+                <h2>Sincronía de inventario</h2>
+                <p class="scan-hint">Verifica que el stock cuadre con los movimientos, ventas y repartos, y corrige inconsistencias. Uso exclusivo de administradores.</p>
+                <div class="toolbar small">
+                    <button class="btn" id="btn-auditar">Auditar números</button>
+                    <button class="btn btn-primary" id="btn-reconciliar">Reconciliar inventario</button>
+                </div>
+                <div id="sincronia-resultado"></div>
+            </div>
         </section>
 
         <!-- VENTAS -->
@@ -460,10 +541,18 @@
                         <button class="btn" id="btn-filtrar-ventas">Filtrar</button>
                         <button class="btn" id="btn-exportar-ventas">Exportar</button>
                     </div>
+                    <div class="hist-sucursal-tabs" id="venta-tabs" style="display:none;margin-bottom:10px">
+                        <button class="btn hist-tab active" id="btn-venta-mio" type="button">Mi Almacén</button>
+                        <button class="btn hist-tab" id="btn-venta-sucursales" type="button">Almacén de Sucursales</button>
+                        <select id="venta-sucursal-select" style="display:none;max-width:260px">
+                            <option value="">Seleccione una sucursal...</option>
+                        </select>
+                    </div>
                     <table class="data-table">
-                        <thead><tr><th>Nº</th><th>Fecha y hora</th><th>Detalle</th><th>Total (Bs)</th><th>Nota</th><th>Usuario</th><th></th></tr></thead>
+                        <thead><tr><th>Nº</th><th>Fecha y hora</th><th>Detalle</th><th>Total (Bs)</th><th>Sucursal</th><th>Nota</th><th>Usuario</th><th></th></tr></thead>
                         <tbody id="ventas-tbody"></tbody>
                     </table>
+                    <div class="pagination" id="ventas-paginacion"></div>
                 </div>
             </div>
         </section>
@@ -505,6 +594,13 @@
                 </div>
                 <div class="panel">
                     <h2>Historial de repartos</h2>
+                    <div class="hist-sucursal-tabs" id="reparto-tabs" style="display:none;margin-bottom:10px">
+                        <button class="btn hist-tab active" id="btn-reparto-mio" type="button">Mi Almacén</button>
+                        <button class="btn hist-tab" id="btn-reparto-sucursales" type="button">Almacén de Sucursales</button>
+                        <select id="reparto-sucursal-select" style="display:none;max-width:260px">
+                            <option value="">Seleccione una sucursal...</option>
+                        </select>
+                    </div>
                     <div class="toolbar small">
                         <input type="text" id="reparto-filtro" placeholder="Buscar sucursal, usuario, nota...">
                         <input type="date" id="reparto-desde">
@@ -513,12 +609,83 @@
                         <button class="btn" id="btn-exportar-repartos">Exportar</button>
                     </div>
                     <table class="data-table">
-                        <thead><tr><th>Nº</th><th>Fecha y hora</th><th>Sucursal</th><th>Detalle</th><th>Total (Bs)</th><th>Nota</th><th>Usuario</th><th></th></tr></thead>
+                        <thead><tr><th>Nº</th><th>Fecha y hora</th><th>Recorrido</th><th>Detalle</th><th>Total (Bs)</th><th>Nota</th><th>Usuario</th><th></th></tr></thead>
                         <tbody id="repartos-tbody"></tbody>
                     </table>
+                    <div class="pagination" id="repartos-paginacion"></div>
                 </div>
             </div>
         </section>
+
+        <!-- PEDIDOS -->
+        <section id="view-pedidos" class="view">
+            <div class="toolbar">
+                <h2>Pedidos / Tickets de sucursales</h2>
+                <span class="respaldo-txt" id="pedidos-info"></span>
+            </div>
+            <div class="grid-2">
+                <div class="panel">
+                    <h2>Nuevo pedido</h2>
+                    <p class="scan-hint">Cada sucursal registra su pedido, elige la sucursal que lo provee y llega como ticket a esa sucursal.</p>
+                    <form id="form-pedido">
+                        <div class="grid-2">
+                            <label>Fecha <input type="datetime-local" id="pedido-fecha"></label>
+                            <label>Sucursal <select id="pedido-sucursal"></select></label>
+                            <label>Sucursal destino <select id="pedido-destino"></select></label>
+                        </div>
+                        <div class="toolbar small">
+                            <select id="pedido-producto"></select>
+                            <input type="number" id="pedido-cantidad" placeholder="Cant." step="any" min="0" style="width:90px">
+                            <button type="button" class="btn" id="btn-agregar-item-pedido">Agregar</button>
+                        </div>
+                        <table class="data-table">
+                            <thead><tr><th>Producto</th><th>Cant.</th><th></th></tr></thead>
+                            <tbody id="pedido-items-tbody"></tbody>
+                        </table>
+                        <label>Nota <input type="text" id="pedido-nota" placeholder="Ej: pedido semanal de pollo..."></label>
+                        <button type="submit" class="btn btn-primary">Enviar pedido</button>
+                    </form>
+                </div>
+                <div class="panel">
+                    <h2>Historial de pedidos</h2>
+                    <div class="toolbar small">
+                        <input type="text" id="pedido-filtro" placeholder="Buscar ticket, sucursal, nota...">
+                        <select id="pedido-estado"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="despachado">Despachado</option><option value="cumplido">Cumplido</option></select>
+                        <button class="btn" id="btn-filtrar-pedidos">Filtrar</button>
+                    </div>
+                    <table class="data-table">
+                        <thead><tr><th>Ticket</th><th>Fecha y hora</th><th>Sucursal</th><th>Sucursal destino</th><th>Items</th><th>Estado</th><th>Nota</th><th></th></tr></thead>
+                        <tbody id="pedidos-tbody"></tbody>
+                    </table>
+                    <div class="pagination" id="pedidos-paginacion"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- MODAL DETALLE PEDIDO -->
+        <div id="modal-pedido" class="modal">
+            <div class="modal-content">
+                <span class="close" data-close="modal-pedido">&times;</span>
+                <h2 id="det-pedido-title">Detalle de pedido</h2>
+                <div class="venta-detalle-meta">
+                    <span><strong>Ticket:</strong> <span id="det-pedido-nro"></span></span>
+                    <span><strong>Fecha:</strong> <span id="det-pedido-fecha"></span></span>
+                    <span><strong>Sucursal:</strong> <span id="det-pedido-sucursal"></span></span>
+                    <span><strong>Sucursal destino:</strong> <span id="det-pedido-destino"></span></span>
+                    <span><strong>USUARIO:</strong> <span id="det-pedido-usuario"></span></span>
+                    <span><strong>Estado:</strong> <span id="det-pedido-estado"></span></span>
+                    <span><strong>Nota:</strong> <span id="det-pedido-nota"></span></span>
+                </div>
+                <table class="data-table">
+                    <thead><tr><th>Producto</th><th>Cantidad</th></tr></thead>
+                    <tbody id="det-pedido-items"></tbody>
+                </table>
+                <div class="toolbar small" style="margin-top:12px">
+                    <button class="btn" id="btn-pedido-despachar">Despachar (crear reparto)</button>
+                    <select id="pedido-cambiar-estado"><option value="">Cambiar estado...</option><option value="pendiente">Pendiente</option><option value="despachado">Despachado</option><option value="cumplido">Cumplido</option></select>
+                </div>
+            </div>
+        </div>
 
         <!-- USUARIOS -->
         <section id="view-usuarios" class="view">
@@ -594,9 +761,12 @@
                 </div>
                 <div class="grid-2">
                     <label>Vencimiento <input type="date" id="prod-vencimiento"></label>
+                    <label id="prod-sucursal-label" style="display:none">Sucursal <select id="prod-sucursal"></select></label>
                 </div>
                 <label>Proveedor <select id="prod-proveedor"></select></label>
                 <label id="campo-stock-inicial">Stock inicial <input type="number" id="prod-stock-inicial" step="any" min="0"></label>
+                <label id="campo-stock-actual" style="display:none">Stock actual <input type="number" id="prod-stock-actual" step="any" min="0"></label>
+                <p class="scan-hint" id="prod-stock-hint" style="display:none">Al guardar se registra un "Ajuste de inventario" por la diferencia.</p>
                 <button type="submit" class="btn btn-primary">Guardar</button>
             </form>
         </div>
@@ -647,6 +817,7 @@
             <h2>Nuevo proveedor</h2>
             <form id="form-proveedor">
                 <input type="hidden" id="prov-id">
+                <label id="prov-sucursal-label" style="display:none">Sucursal <select id="prov-sucursal"></select></label>
                 <label>Nombre <input type="text" id="prov-nombre" required></label>
                 <label>Teléfono <input type="text" id="prov-telefono"></label>
                 <label>Email <input type="text" id="prov-email"></label>
@@ -687,6 +858,7 @@
                     <label>Rol <select id="user-rol">
                         <option value="encargado">Encargado</option>
                         <option value="admin">Administrador</option>
+                        <option value="superadmin" data-sobreadmin>Superadministrador</option>
                     </select></label>
                     <label>Estado <select id="user-activo">
                         <option value="1">Activo</option>
@@ -699,17 +871,81 @@
         </div>
     </div>
 
-    <!-- MODAL CAMBIAR CONTRASEÑA -->
-    <div id="modal-password" class="modal">
+    <!-- MODAL MI PERFIL -->
+    <div id="modal-perfil" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-password">&times;</span>
-            <h2>Cambiar contraseña</h2>
-            <form id="form-password">
+            <span class="close" data-close="modal-perfil">&times;</span>
+            <h2>Mi perfil</h2>
+            <form id="form-perfil">
+                <div class="perfil-avatar-lg" id="perfil-avatar-lg"></div>
+                <label>Nombre
+                    <input type="text" id="perfil-nombre" placeholder="Tu nombre" required>
+                </label>
                 <label>Contraseña actual
-                    <input type="password" id="pass-actual" required>
+                    <input type="password" id="perfil-pass-actual" placeholder="Dejar en blanco si no cambias">
                 </label>
                 <label>Nueva contraseña
-                    <input type="password" id="pass-nueva" required minlength="4">
+                    <input type="password" id="perfil-pass-nueva" placeholder="Mínimo 4 caracteres" minlength="4">
+                </label>
+                <button type="submit" class="btn btn-primary">Guardar cambios</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL EDITAR GASTO -->
+    <div id="modal-editar-gasto" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-editar-gasto">&times;</span>
+            <h2>Editar gasto</h2>
+            <form id="form-editar-gasto">
+                <input type="hidden" id="edit-gasto-id">
+                <label>Categoría
+                    <input type="text" id="edit-gasto-categoria" list="gasto-categorias" required>
+                </label>
+                <label>Descripción
+                    <input type="text" id="edit-gasto-descripcion">
+                </label>
+                <label>Monto (Bs)
+                    <input type="number" id="edit-gasto-monto" step="any" min="0" required>
+                </label>
+                <label>Fecha
+                    <input type="datetime-local" id="edit-gasto-fecha">
+                </label>
+                <label>Proveedor
+                    <select id="edit-gasto-proveedor"></select>
+                </label>
+                <button type="submit" class="btn btn-primary">Guardar cambios</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL ALMACÉN -->
+    <div id="modal-almacen" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-almacen">&times;</span>
+            <h2 id="modal-almacen-title">Nuevo almacén</h2>
+            <form id="form-almacen">
+                <input type="hidden" id="alm-id">
+                <label>Nombre
+                    <input type="text" id="alm-nombre" required>
+                </label>
+                <label>Ubicación
+                    <input type="text" id="alm-ubicacion">
+                </label>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL CATEGORÍA -->
+    <div id="modal-categoria" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-categoria">&times;</span>
+            <h2 id="modal-categoria-title">Nueva categoría</h2>
+            <form id="form-categoria">
+                <input type="hidden" id="cat-id">
+                <label>Nombre
+                    <input type="text" id="cat-nombre" required>
                 </label>
                 <button type="submit" class="btn btn-primary">Guardar</button>
             </form>
@@ -757,6 +993,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="/static/app.min.js?v=5"></script>
+    <script src="/static/app.js?v=32"></script>
 </body>
 </html>

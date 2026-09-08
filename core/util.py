@@ -13,6 +13,20 @@ def ok(data=None, message="OK"):
     return jsonify({"ok": True, "message": message, "data": data})
 
 
+def ok_paginado(data, total, pagina, por_pagina):
+    return jsonify({"ok": True, "message": "OK", "data": data,
+                    "total": total, "pagina": pagina, "por_pagina": por_pagina,
+                    "paginas": max(1, -(-total // por_pagina))})
+
+
+def paginar_params():
+    """Extrae pagina/por_pagina de los query params. Retorna (offset, limit, pagina, por_pagina)."""
+    pagina = max(1, int(request.args.get("pagina", 1)))
+    por_pagina = min(2000, max(10, int(request.args.get("por_pagina", 50))))
+    offset = (pagina - 1) * por_pagina
+    return offset, por_pagina, pagina, por_pagina
+
+
 def err(message, status=400):
     return jsonify({"ok": False, "message": message}), status
 
@@ -32,11 +46,63 @@ def rol_requerido(*roles):
     def decorador(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
-            if session.get("rol") not in roles:
+            rol = session.get("rol")
+            # superadmin tiene acceso a cualquier rol administrativo
+            if rol == "superadmin" and ("admin" in roles or "superadmin" in roles):
+                return f(*args, **kwargs)
+            if rol not in roles:
                 return err("No tienes permisos para esta acción", 403)
             return f(*args, **kwargs)
         return wrapper
     return decorador
+
+
+def es_superadmin():
+    return session.get("rol") == "superadmin"
+
+
+def es_gestion():
+    """True si el usuario puede gestionar (admin/superadmin)."""
+    return session.get("rol") in ("admin", "superadmin")
+
+
+def es_encargado_almacen(conn):
+    """True si el rol es encargado y su sucursal es un almacén principal.
+    Estos encargados coordinan el inventario: ven todo, como el admin."""
+    if session.get("rol") != "encargado":
+        return False
+    sid = sucursal_actual()
+    if not sid:
+        return False
+    fila = conn.execute("SELECT principal FROM sucursales WHERE id = ?", (sid,)).fetchone()
+    return bool(fila and fila["principal"])
+
+
+def sucursal_actual():
+    """Devuelve el id de la sucursal del usuario logueado.
+    superadmin ve todo (devuelve None). admin/encargado devuelven su sucursal."""
+    if session.get("rol") == "superadmin":
+        return None
+    return session.get("sucursal_id") or None
+
+
+def sucursal_operativa():
+    """Devuelve la sucursal sobre la que se aplica una operación de escritura (stock).
+    Todo usuario (incluido el superadmin) opera SIEMPRE sobre su sucursal asignada:
+    - superadmin: su Almacén Principal 1.
+    - admin: su almacén principal asignado.
+    - encargado: la sucursal que tiene asignada.
+    Esta es distinta de sucursal_actual(), que para superadmin devuelve None (vista global)."""
+    return session.get("sucursal_id") or None
+
+
+def clausula_sucursal(col="sucursal_id"):
+    """Devuelve (sql_where, params) para filtrar por la sucursal del usuario.
+    superadmin (sin sucursal) ve todo."""
+    sid = sucursal_actual()
+    if sid is None:
+        return "", []
+    return f" AND {col} = ?", [sid]
 
 
 def registrar_auditoria(accion, detalle=""):
@@ -52,23 +118,36 @@ def registrar_auditoria(accion, detalle=""):
         pass
 
 
-def stock_actual(conn, prod_id):
-    fila = conn.execute("SELECT cantidad FROM stock WHERE producto_id = ?", (prod_id,)).fetchone()
+def stock_actual(conn, prod_id, sucursal_id=None):
+    if sucursal_id is None:
+        sucursal_id = sucursal_actual()
+    if sucursal_id is None:
+        fila = conn.execute("SELECT COALESCE(SUM(cantidad),0) c FROM stock WHERE producto_id = ?",
+                            (prod_id,)).fetchone()
+        return fila["c"] or 0.0
+    fila = conn.execute("SELECT cantidad FROM stock WHERE producto_id = ? AND sucursal_id = ?",
+                        (prod_id, sucursal_id)).fetchone()
     return fila["cantidad"] if fila else 0.0
 
 
 def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota, usuario,
-                         almacen_id=None):
-    """Inserta un movimiento y actualiza la tabla stock en la misma transacción."""
+                         sucursal_id=None, proveedor_id=None):
+    """Inserta un movimiento y actualiza el stock de la sucursal en la misma transacción.
+    Si no se indica sucursal y el usuario (p. ej. superadmin) no tiene una asignada,
+    se usa la primera sucursal principal como destino del stock."""
+    if sucursal_id is None:
+        sucursal_id = sucursal_operativa()
+    if sucursal_id is None:
+        raise ValueError("No se puede registrar el movimiento sin una sucursal definida")
     conn.execute("""
-        INSERT INTO movimientos (producto_id, tipo, cantidad, precio_unitario, fecha, almacen_id, nota, usuario)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (producto_id, tipo, cantidad, precio, fecha, almacen_id, nota, usuario))
+        INSERT INTO movimientos (producto_id, tipo, cantidad, precio_unitario, fecha, sucursal_id, nota, usuario, proveedor_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (producto_id, tipo, cantidad, precio, fecha, sucursal_id, nota, usuario, proveedor_id))
     signo = cantidad if tipo == "entrada" else -cantidad
     conn.execute("""
-        INSERT INTO stock (producto_id, cantidad) VALUES (?, ?)
-        ON CONFLICT(producto_id) DO UPDATE SET cantidad = stock.cantidad + excluded.cantidad
-    """, (producto_id, signo))
+        INSERT INTO stock (producto_id, sucursal_id, cantidad) VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE cantidad = stock.cantidad + VALUES(cantidad)
+    """, (producto_id, sucursal_id, signo))
 
 
 def responder_excel(nombre_archivo, encabezados, filas, ancho_col=None, titulo=None):

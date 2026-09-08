@@ -31,3 +31,7 @@ dist/
 # Archivos temporales
 *.tmp
 *.bak
+
+# Claves
+.secret_key
+
