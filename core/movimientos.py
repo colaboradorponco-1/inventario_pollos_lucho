@@ -50,6 +50,14 @@ def movimientos():
                 return err("El proveedor no pertenece a esta sucursal")
             proveedor_id = prov["id"]
 
+        prod = conn.execute("SELECT sucursal_id FROM productos WHERE id = ?", (prod_id,)).fetchone()
+        if not prod:
+            conn.close()
+            return err("Producto no encontrado")
+        if prod["sucursal_id"] != sid:
+            conn.close()
+            return err("El producto no pertenece a esta sucursal")
+
         stock_actual_val = stock_actual(conn, prod_id, sid)
 
         if tipo == "salida" and stock_actual_val < cantidad:

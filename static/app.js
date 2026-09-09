@@ -699,12 +699,22 @@ $('#prod-sucursal').addEventListener('change', () => {
 });
 
 // ---------------- Movimientos ----------------
+let movProdsAll = [];
+
+function popMovProductos(sid) {
+    const sel = $('#mov-producto');
+    if (!sel) return;
+    const lista = sid ? movProdsAll.filter((p) => p.sucursal_id === sid) : movProdsAll;
+    sel.innerHTML = lista.length
+        ? '<option value="">Seleccione...</option>' +
+            lista.map((p) => `<option value="${p.id}">${nomProd(p)} (${p.stock} ${p.unidad})</option>`).join('')
+        : '<option value="">No hay productos en esta sucursal</option>';
+}
+
 async function loadMovimientos() {
     try {
         const resp = await request(API + '/productos?por_pagina=1000');
-        const prods = resp.data || resp;
-        $('#mov-producto').innerHTML = '<option value="">Seleccione...</option>' +
-            prods.map((p) => `<option value="${p.id}">${nomProd(p)} (${p.stock} ${p.unidad})</option>`).join('');
+        movProdsAll = resp.data || resp;
         // Inicializar tabs histórico (solo admin/superadmin ven el selector de sucursales)
         const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
         const tabs = $('#hist-sucursal-tabs');
@@ -734,6 +744,7 @@ async function loadMovimientos() {
         // cualquier sucursal; encargado registra siempre en la suya (oculto).
         const movAlm = $('#mov-almacen');
         const movAlmLabel = $('#mov-almacen-label');
+        let sidMov = window.SUCURSAL_ID || null;
         if (movAlm && movAlmLabel) {
             if (window.ROL === 'admin' || window.ROL === 'superadmin') {
                 movAlmLabel.style.display = 'block';
@@ -742,15 +753,21 @@ async function loadMovimientos() {
                     movAlm.innerHTML = sucs.map((s) => `<option value="${s.id}">${s.principal ? '★ ' : ''}${s.nombre}</option>`).join('');
                     movAlm.value = window.SUCURSAL_ID || (sucs.find((s) => s.principal) || {}).id || '';
                 } catch (e) { /* sin sucursales */ }
+                sidMov = +movAlm.value || window.SUCURSAL_ID || null;
             } else {
                 movAlmLabel.style.display = 'none';
             }
         }
+        popMovProductos(sidMov);
         await listarMovimientos();
     } catch (e) {
         toast(e.message, 'err');
     }
 }
+
+$('#mov-almacen').addEventListener('change', () => {
+    popMovProductos(+$('#mov-almacen').value || null);
+});
 
 async function listarMovimientos() {
     const qs = new URLSearchParams();
@@ -1496,6 +1513,10 @@ function vincularEscaneo(inputSel, selectSel, cantSel) {
         try {
             const p = await buscarProductoPorCodigo(codigo);
             const sel = $(selectSel);
+            if (!sel.querySelector(`option[value="${p.id}"]`)) {
+                toast('Ese producto no pertenece a esta sucursal', 'err');
+                return;
+            }
             sel.value = p.id;
             sel.dispatchEvent(new Event('change'));
             const cant = $(cantSel);
