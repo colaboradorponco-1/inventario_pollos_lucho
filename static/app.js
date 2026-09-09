@@ -119,11 +119,11 @@ async function loadCatalogos() {
         return lista.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('');
     };
     const selImp = $('#importar-sucursal');
-    if (selImp) selImp.innerHTML = '<option value="0">Globales (sin sucursal)</option>' + sucursalesOpt();
+    if (selImp) selImp.innerHTML = '<option value="">Seleccione una sucursal...</option>' + sucursalesOpt();
     const selExp = $('#exportar-sucursal');
-    if (selExp) selExp.innerHTML = '<option value="">Todas las sucursales</option><option value="0">Globales</option>' + sucursalesOpt();
+    if (selExp) selExp.innerHTML = '<option value="">Todas las sucursales</option>' + sucursalesOpt();
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
-    fill('#prod-sucursal', catalogos.sucursales, '— Sin sucursal —');
+    fill('#prod-sucursal', catalogos.sucursales, 'Seleccione una sucursal...');
     fill('#mov-almacen', catalogos.almacenes, '— Sin almacén —');
     fill('#prod-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#gasto-proveedor', catalogos.proveedores, '— Sin proveedor —');
@@ -332,7 +332,7 @@ async function pintarProdScope() {
     const row = $('#prod-scope-tabs');
     if (!row) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
-    const botones = [{ v: '', lbl: 'Todas' }, { v: '0', lbl: 'Globales' }]
+    const botones = [{ v: '', lbl: 'Todas' }]
         .concat((catalogos.sucursales || []).map((s) => ({ v: String(s.id), lbl: s.nombre })));
     const ctr = {};
     for (const b of botones) {
@@ -372,11 +372,8 @@ async function loadProductos() {
         const container = $('#productos-por-categoria');
         container.innerHTML = '';
 
-        const grupos = [{ id: 0, nombre: 'Globales (almacenes principales)' }]
-            .concat((catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre })));
-        let visibles = grupos;
-        if (_prodSuc === '0') visibles = [grupos[0]];
-        else if (_prodSuc !== '') visibles = grupos.filter((g) => String(g.id) === _prodSuc);
+        const grupos = (catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre }));
+        let visibles = _prodSuc === '' ? grupos : grupos.filter((g) => String(g.id) === _prodSuc);
         let hay = false;
 
         visibles.forEach((g) => {
@@ -619,6 +616,10 @@ async function openProductoModal(id, lista) {
 $('#form-producto').addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = $('#prod-id').value;
+    if (esCentral() && !$('#prod-sucursal').value) {
+        toast('Selecciona una sucursal para el producto', 'err');
+        return;
+    }
     const body = {
         codigo: $('#prod-codigo').value.trim() || null,
         nombre: $('#prod-nombre').value,

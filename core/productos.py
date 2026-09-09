@@ -75,7 +75,7 @@ def productos():
             return err("Ya existe un producto con ese código")
         proveedor_id = data.get("proveedor_id")
         if es_gestion() or es_encargado_almacen(conn):
-            sid = data.get("sucursal_id") or None
+            sid = data.get("sucursal_id")
         else:
             # El encargado crea productos de SU sucursal y con proveedor de su sucursal
             sid = sucursal_actual()
@@ -84,6 +84,10 @@ def productos():
                 if not prov or (prov["sucursal_id"] and prov["sucursal_id"] != sid):
                     conn.close()
                     return err("El proveedor debe pertenecer a tu sucursal", 400)
+        if not sid:
+            conn.close()
+            return err("Debes asignar una sucursal al producto", 400)
+        sid = int(sid)
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
                                    precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, activo)
@@ -253,6 +257,10 @@ def producto(prod_id):
             conn.close()
             return err("Ya existe otro producto con ese código de barras")
     sid_p = fila["sucursal_id"] if not (es_gestion() or es_encargado_almacen(conn)) else (data.get("sucursal_id") or fila["sucursal_id"])
+    if not sid_p:
+        conn.close()
+        return err("Debes asignar una sucursal al producto", 400)
+    sid_p = int(sid_p)
     conn.execute("""
         UPDATE productos SET codigo=?, nombre=?, marca=?, categoria_id=?, unidad=?, stock_minimo=?,
                costo_promedio=?, precio_venta=?, vencimiento=?, almacen_id=?, proveedor_id=?, sucursal_id=?
@@ -384,13 +392,16 @@ def importar_productos():
 
         sid_imp = None
         raw_suc = request.form.get("sucursal_id", "").strip()
-        if raw_suc and raw_suc not in ("0", ""):
-            s = int(raw_suc)
-            if not (es_gestion() or es_encargado_almacen(conn)) and s != sucursal_actual():
-                conn.close()
-                wb.close()
-                return err("No tienes permisos para importar a esa sucursal", 403)
-            sid_imp = s
+        if raw_suc in ("", "0"):
+            conn.close()
+            wb.close()
+            return err("Debes elegir una sucursal para importar los productos", 400)
+        s = int(raw_suc)
+        if not (es_gestion() or es_encargado_almacen(conn)) and s != sucursal_actual():
+            conn.close()
+            wb.close()
+            return err("No tienes permisos para importar a esa sucursal", 403)
+        sid_imp = s
 
         h_nombre = buscar("nombre", "producto", "articulo")
         h_codigo = buscar("codigo", "codigo de barras", "ean", "cod")
