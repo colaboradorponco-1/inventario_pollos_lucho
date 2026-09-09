@@ -615,6 +615,12 @@ body.rol-encargado .panel-finance {
     color: #fff;
     border-color: var(--primary, #CF141D);
 }
+.scope-info {
+    color: var(--muted, #666);
+    font-size: 13px;
+    margin: 0 0 10px;
+    font-weight: 600;
+}
 
 /* Sincronía de inventario (Reportes admin) */
 .sinc-fichas { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }

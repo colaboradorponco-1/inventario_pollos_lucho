@@ -1,7 +1,9 @@
 from flask import Blueprint, request
 
 from database import get_conn
-from .util import ok, err, login_requerido, rol_requerido, responder_excel, sucursal_actual, es_gestion, clausula_sucursal
+from .util import (ok, err, login_requerido, rol_requerido, responder_excel, sucursal_actual,
+                   sucursal_operativa, es_gestion, es_encargado_almacen, clausula_sucursal)
+from .productos import scope_productos
 
 reportes_bp = Blueprint("reportes", __name__)
 
@@ -56,7 +58,8 @@ def exportar_productos():
     proveedor = request.args.get("proveedor", "").strip()
     estado = request.args.get("estado", "").strip()
     sid = sucursal_actual()
-    if sid is None:
+    ver_todo = es_gestion() or es_encargado_almacen(conn)
+    if ver_todo or sid is None:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
         stock_params = []
     else:
@@ -78,6 +81,9 @@ def exportar_productos():
         params.append(0)
     else:
         params.append(1)
+    scope_sql, scope_params = scope_productos(ver_todo, sucursal_operativa(), request.args.get("scope", "").strip())
+    q += scope_sql
+    params += scope_params
     if filtro:
         q += " AND (p.nombre LIKE ? OR p.codigo LIKE ? OR pr.nombre LIKE ? OR c.nombre LIKE ?)"
         f = f"%{filtro}%"

@@ -80,7 +80,7 @@ $$('.menu-btn').forEach((btn) => {
 
 function loadView(name) {
     if (name === 'dashboard') loadDashboard();
-    if (name === 'productos') loadProductos();
+    if (name === 'productos') { pintarProdScope(); loadProductos(); }
     if (name === 'movimientos') loadMovimientos();
     if (name === 'proveedores') loadProveedores();
     if (name === 'gastos') loadGastos();
@@ -309,6 +309,43 @@ function graficoHBar(selector, items, campo, pref, color) {
 }
 
 // ---------------- Productos ----------------
+function esAdmin() { return window.ROL === 'admin' || window.ROL === 'superadmin'; }
+function esAlmacenPpal() { return window.ROL === 'encargado' && !!window.SUCURSAL_PRINCIPAL; }
+// Admin/superadmin y encargados de almacén principal actúan como "mano derecha" del admin
+function esCentral() { return esAdmin() || esAlmacenPpal(); }
+
+let _prodScope = '';
+async function pintarProdScope() {
+    const row = $('#prod-scope-tabs');
+    if (!row) return;
+    const esFilial = !esCentral();
+    const filtros = esFilial
+        ? [
+            { v: '', lbl: 'Todos los productos' },
+            { v: 'almacenes', lbl: 'Almacenes principales' },
+            { v: 'propios', lbl: 'Mis productos' },
+          ]
+        : [
+            { v: '', lbl: 'Todos los productos' },
+            { v: 'mio', lbl: 'Mi almacén' },
+            { v: 'sucursales', lbl: 'Productos de sucursales' },
+          ];
+    const ctr = {};
+    for (const f of filtros) {
+        try {
+            const r = await request(API + '/productos?scope=' + f.v + '&por_pagina=1');
+            ctr[f.v] = r.total != null ? r.total : (r.data || r).length || 0;
+        } catch (_) { ctr[f.v] = 0; }
+    }
+    row.innerHTML = filtros.map((f) =>
+        `<button class="btn hist-tab ${_prodScope === f.v ? 'active' : ''}" data-prod-scope="${f.v}">${f.lbl} · ${ctr[f.v]}</button>`).join('');
+    row.querySelectorAll('[data-prod-scope]').forEach((b) => b.addEventListener('click', () => {
+        _prodScope = b.dataset.prodScope;
+        pintarProdScope();
+        loadProductos();
+    }));
+}
+
 async function loadProductos() {
     try {
         const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
@@ -320,9 +357,11 @@ async function loadProductos() {
         if (categoria) qs.set('categoria', categoria);
         if (proveedor) qs.set('proveedor', proveedor);
         if (estado) qs.set('estado', estado);
+        if (_prodScope) qs.set('scope', _prodScope);
         qs.set('por_pagina', 1000);
         const resp = await request(API + '/productos?' + qs.toString());
         const prods = resp.data || resp;
+        $('#prod-scope-info').textContent = 'Mostrando ' + (resp.total != null ? resp.total : prods.length) + ' producto(s)';
 
         const cats = {};
         prods.forEach(p => {
@@ -331,7 +370,7 @@ async function loadProductos() {
             cats[cat].push(p);
         });
 
-        const esGestion = window.ROL !== 'encargado';
+        const esGestion = esCentral();
         const container = $('#productos-por-categoria');
         container.innerHTML = '';
 
@@ -346,7 +385,7 @@ async function loadProductos() {
                 const esPropio = window.ROL === 'encargado' && p.sucursal_id === window.SUCURSAL_ID;
                 const puedeEditar = esGestion || esPropio;
                 const acciones = estado === 'inactivos'
-                    ? (esGestion ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
+                    ? (esAdmin() ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
                     : `<button class="btn btn-icon" data-hist-prod="${p.id}" title="Historial"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>${
                         puedeEditar
                             ? `<button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
@@ -507,6 +546,7 @@ function exportarProductos() {
     if (categoria) qs.set('categoria', categoria);
     if (proveedor) qs.set('proveedor', proveedor);
     if (estado) qs.set('estado', estado);
+    if (_prodScope) qs.set('scope', _prodScope);
     window.location.href = API + '/exportar/productos?' + qs.toString();
 }
 
@@ -519,7 +559,7 @@ async function openProductoModal(id, lista) {
     $('#campo-stock-inicial').style.display = 'flex';
     $('#campo-stock-actual').style.display = 'none';
     $('#prod-stock-hint').style.display = 'none';
-    const esGestionDlg = (window.ROL === 'admin' || window.ROL === 'superadmin');
+    const esGestionDlg = esCentral();
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
     $('#prod-sucursal').value = esGestionDlg ? (window.SUCURSAL_ID || '') : '';
@@ -571,7 +611,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         proveedor_id: +$('#prod-proveedor').value || null,
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
-    if (window.ROL === 'admin' || window.ROL === 'superadmin') {
+    if (esCentral()) {
         body.sucursal_id = +$('#prod-sucursal').value || null;
     }
     if (id) body.stock = +$('#prod-stock-actual').value || 0;
@@ -2251,10 +2291,10 @@ window.verPedido = async (id) => {
         window._pedidoActual = { id, estado: p.estado };
         const despacharBtn = $('#btn-pedido-despachar');
         const cambia = $('#pedido-cambiar-estado');
-        const puedeDespachar = window.ROL === 'superadmin' || window.ROL === 'admin' ||
-            (window.SUCURSAL_ID && p.destino_id === window.SUCURSAL_ID);
-        if (despacharBtn) despacharBtn.style.display = (puedeDespachar && p.estado === 'pendiente') ? 'inline-flex' : 'none';
-        if (cambia) { cambia.value = ''; cambia.style.display = window.ROL === 'encargado' ? 'none' : 'inline-flex'; }
+        const esAdmin = window.ROL === 'superadmin' || window.ROL === 'admin';
+        const esAlmacenPrincipal = window.ROL === 'encargado' && window.SUCURSAL_PRINCIPAL;
+        if (despacharBtn) despacharBtn.style.display = (esAdmin && p.estado === 'pendiente') ? 'inline-flex' : 'none';
+        if (cambia) { cambia.value = ''; cambia.style.display = (esAdmin || esAlmacenPrincipal) ? 'inline-flex' : 'none'; }
     } catch (e) {
         toast(e.message, 'err');
     }

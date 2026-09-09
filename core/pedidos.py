@@ -2,7 +2,8 @@
 
 Cada sucursal registra un pedido (ticket) que llega al almacén principal.
 Estados: pendiente -> despachado -> cumplido.
-Solo admin/superadmin pueden cambiar el estado o despachar un pedido.
+Cambiar el estado o despachar puede hacerlo un admin/superadmin o un
+encargado de almacén principal (los que coordinan el inventario).
 """
 from datetime import datetime
 
@@ -10,7 +11,8 @@ from flask import Blueprint, request, session
 
 from database import get_conn
 from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
-                   paginar_params, sucursal_actual, stock_actual, es_gestion, es_superadmin)
+                   paginar_params, sucursal_actual, stock_actual, es_gestion,
+                   es_superadmin, es_encargado_almacen)
 
 pedidos_bp = Blueprint("pedidos", __name__)
 
@@ -159,9 +161,12 @@ def pedido_detalle(pedido_id):
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/estado", methods=["PUT"])
 @login_requerido
 def pedido_estado(pedido_id):
-    if not es_gestion():
-        return err("No tienes permisos para esta acción", 403)
     conn = get_conn()
+    # Los encargados de almacén principal (mano derecha del admin) también pueden
+    # cambiar el estado de cualquier pedido, igual que los administradores.
+    if not (es_gestion() or es_encargado_almacen(conn)):
+        conn.close()
+        return err("No tienes permisos para esta acción", 403)
     pedido = conn.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone()
     if not pedido:
         conn.close()
@@ -181,20 +186,17 @@ def pedido_estado(pedido_id):
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/despachar", methods=["POST"])
 @login_requerido
 def pedido_despachar(pedido_id):
-    """Convierte un pedido pendiente en un reparto real del almacén a la sucursal."""
+    """Convierte un pedido pendiente en un reparto real del almacén a la sucursal.
+    Solo admin/superadmin despachan; los encargados de almacén cambian estados pero no despachan."""
     rol = session.get("rol")
     conn = get_conn()
     pedido = conn.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone()
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
-    puede = rol in ("admin", "superadmin")
-    if not puede:
-        puede = rol == "encargado" and sucursal_actual() == pedido.get("destino_id")
-    if not puede:
+    if rol not in ("admin", "superadmin"):
         conn.close()
-        return err("Solo puede despachar el pedido la sucursal a la que va dirigido, "
-                   "un administrador o un superadministrador", 403)
+        return err("Solo un administrador o superadministrador puede despachar pedidos", 403)
     if pedido["estado"] != "pendiente":
         conn.close()
         return err("Solo se pueden despachar pedidos en estado 'pendiente'")

@@ -12,6 +12,37 @@ from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movi
 productos_bp = Blueprint("productos", __name__)
 
 
+def scope_productos(ver_todo, sid, scope):
+    """(condición_sql, params) para filtrar productos por ámbito de visibilidad.
+
+    - ver_todo (admin/superadmin/encargado de almacén principal):
+        ''           -> todos los productos (todas las sucursales)
+        mio          -> solo los de mi sucursal
+        sucursales   -> los de las demás sucursales
+    - sucursal filial:
+        ''           -> globales (almacenes principales) + sus propios
+        almacenes    -> solo los globales (almacenes principales 1 y 2)
+        propios      -> solo los de su sucursal
+    """
+    if ver_todo:
+        if scope == "mio":
+            if sid:
+                return " AND p.sucursal_id = %s", [sid]
+            return " AND p.sucursal_id IS NULL", []
+        if scope == "sucursales":
+            if sid:
+                return " AND p.sucursal_id IS NOT NULL AND p.sucursal_id != %s", [sid]
+            return " AND p.sucursal_id IS NOT NULL", []
+        return "", []
+    if scope == "propios":
+        return " AND p.sucursal_id = %s", [sid]
+    if scope == "almacenes":
+        return (" AND (p.sucursal_id IS NULL OR p.sucursal_id IN "
+                "(SELECT id FROM sucursales WHERE principal = 1))"), []
+    return (" AND (p.sucursal_id IS NULL OR p.sucursal_id IN "
+            "(SELECT id FROM sucursales WHERE principal = 1) OR p.sucursal_id = %s)"), [sid]
+
+
 def siguiente_codigo(conn):
     filas = conn.execute("SELECT codigo FROM productos WHERE codigo LIKE 'PRD-%'").fetchall()
     max_n = 0
@@ -36,7 +67,7 @@ def productos():
             conn.close()
             return err("Ya existe un producto con ese código")
         proveedor_id = data.get("proveedor_id")
-        if es_gestion():
+        if es_gestion() or es_encargado_almacen(conn):
             sid = data.get("sucursal_id") or None
         else:
             # El encargado crea productos de SU sucursal y con proveedor de su sucursal
@@ -97,10 +128,11 @@ def productos():
         params.append(0)
     else:
         params.append(1)
-    if not ver_todo:
-        # Sucursal normal: ve el catálogo global + los productos de SU sucursal
-        q += " AND (p.sucursal_id IS NULL OR p.sucursal_id = ?)"
-        params.append(sid)
+    # Filtro por ámbito: admin/almacén principal alternan entre mi almacén y las sucursales;
+    # las filiales ven globales (almacenes principales) + sus productos.
+    scope_sql, scope_params = scope_productos(ver_todo, sucursal_operativa(), request.args.get("scope", "").strip())
+    q += scope_sql
+    params += scope_params
     if filtro:
         q += " AND (p.nombre LIKE ? OR p.codigo LIKE ? OR pr.nombre LIKE ? OR c.nombre LIKE ?)"
         params += [f"%{filtro}%"] * 4
@@ -145,15 +177,15 @@ def producto_por_codigo():
     else:
         join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?"
         params = [sid, codigo]
+    scope_sql, scope_params = scope_productos(ver_todo, sucursal_operativa(), "")
     row = conn.execute("""
         SELECT p.*, COALESCE(s.cantidad, 0) AS stock
         FROM productos p
         {join_stock}
         WHERE LOWER(p.codigo) = LOWER(?) AND p.activo = 1
         {scope}
-    """.format(join_stock=join_stock,
-               scope="AND (p.sucursal_id IS NULL OR p.sucursal_id = ?)" if (not ver_todo and sid is not None) else ""),
-        params + ([sid] if (not ver_todo and sid is not None) else [])).fetchone()
+    """.format(join_stock=join_stock, scope=scope_sql),
+        params + scope_params).fetchone()
     conn.close()
     if not row:
         return err("Producto no encontrado con ese código", 404)
@@ -168,8 +200,9 @@ def producto(prod_id):
     if not fila:
         conn.close()
         return err("Producto no encontrado", 404)
-    # Encargado solo gestiona productos de SU sucursal (los que creó)
-    if not es_gestion() and fila["sucursal_id"] != sucursal_actual():
+    # Admin/superadmin y encargados de almacén principal gestionan cualquier producto;
+    # las sucursales filiales solo gestionan los de SU sucursal (los que crearon).
+    if not es_gestion() and not es_encargado_almacen(conn) and fila["sucursal_id"] != sucursal_actual():
         conn.close()
         return err("Solo puedes gestionar productos de tu sucursal", 403)
     if request.method == "DELETE":
@@ -188,7 +221,7 @@ def producto(prod_id):
         if dup:
             conn.close()
             return err("Ya existe otro producto con ese código de barras")
-    sid_p = fila["sucursal_id"] if not es_gestion() else (data.get("sucursal_id") or fila["sucursal_id"])
+    sid_p = fila["sucursal_id"] if not (es_gestion() or es_encargado_almacen(conn)) else (data.get("sucursal_id") or fila["sucursal_id"])
     conn.execute("""
         UPDATE productos SET codigo=?, nombre=?, categoria_id=?, unidad=?, stock_minimo=?,
                costo_promedio=?, precio_venta=?, vencimiento=?, almacen_id=?, proveedor_id=?, sucursal_id=?
