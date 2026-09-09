@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inventario Pollos Lucho</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="/static/style.css?v=9">
+    <link rel="stylesheet" href="/static/style.css?v=10">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
@@ -805,6 +805,9 @@
                 <select id="importar-sucursal"></select>
                 <small style="color:var(--muted)">Los productos importados quedan asignados a esa sucursal</small>
             </label>
+            <label>Categoría (si el archivo no trae columna "categoria")
+                <select id="importar-categoria"></select>
+            </label>
             <input type="file" id="importar-archivo" accept=".xlsx,.xls" style="display:none;">
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
                 <button class="btn" id="btn-seleccionar-archivo">Seleccionar archivo</button>
@@ -825,8 +828,11 @@
             <label>Sucursal
                 <select id="exportar-sucursal"></select>
             </label>
+            <label>Categoría
+                <select id="exportar-categoria"></select>
+            </label>
             <p style="color:var(--muted);font-size:13px;margin:8px 0 16px;">
-                Se exportará con el filtro, categoría y estado actuales de la vista de productos.
+                Se exportará con el filtro y estado actuales de la vista de productos, más la sucursal y categoría elegidas.
             </p>
             <div style="text-align:right;">
                 <button class="btn btn-primary" id="btn-confirmar-exportar">Exportar</button>
@@ -1017,6 +1023,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="/static/app.js?v=42"></script>
+    <script src="/static/app.js?v=43"></script>
 </body>
 </html>

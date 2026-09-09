@@ -524,6 +524,19 @@ input:focus, select:focus { outline: 2px solid var(--accent); border-color: var(
     font-size: 16px;
     color: var(--black);
 }
+.subcat-titulo {
+    padding: 10px 20px;
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--primary);
+    background: rgba(252, 195, 2, .04);
+    border-top: 1px solid var(--border);
+}
+.subcat-titulo:first-child {
+    border-top: none;
+}
 .categoria-table-wrap {
     max-height: 320px;
     overflow-y: auto;

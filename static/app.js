@@ -124,6 +124,8 @@ async function loadCatalogos() {
     if (selExp) selExp.innerHTML = '<option value="">Todas las sucursales</option>' + sucursalesOpt();
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
     fill('#prod-sucursal', catalogos.sucursales, 'Seleccione una sucursal...');
+    fill('#importar-categoria', catalogos.categorias, '— Sin categoría —');
+    fill('#exportar-categoria', catalogos.categorias, 'Todas las categorías');
     fill('#mov-almacen', catalogos.almacenes, '— Sin almacén —');
     fill('#prod-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#gasto-proveedor', catalogos.proveedores, '— Sin proveedor —');
@@ -373,14 +375,34 @@ async function loadProductos() {
         container.innerHTML = '';
 
         const grupos = (catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre }));
+        const cats = [{ id: 0, nombre: 'Sin categoría' }]
+            .concat((catalogos.categorias || []).map((c) => ({ id: c.id, nombre: c.nombre })));
         let visibles = _prodSuc === '' ? grupos : grupos.filter((g) => String(g.id) === _prodSuc);
         let hay = false;
 
         visibles.forEach((g) => {
-            const items = prods.filter((p) => (p.sucursal_id || 0) === g.id);
+            const items = prods.filter((p) => p.sucursal_id === g.id);
+            if (!items.length) return;
             hay = true;
+            renderSucursal(g, items);
+        });
 
-            let rows = items.map(p => {
+        if (!hay) {
+            container.innerHTML = '<div class="empty">No hay productos</div>';
+        }
+
+        function renderSucursal(g, items) {
+            const bloques = cats
+                .map((c) => ({
+                    c,
+                    items: items.filter((p) =>
+                        c.id === 0
+                            ? !(catalogos.categorias || []).some((x) => x.id === p.categoria_id)
+                            : p.categoria_id === c.id)
+                }))
+                .filter((b) => b.items.length);
+
+            const filas = (it) => it.map(p => {
                 let stockColor, stockIcon;
                 if (p.stock === 0) { stockColor = '#dc2626'; stockIcon = '🔴'; }
                 else if (p.stock <= (p.stock_minimo || 10)) { stockColor = '#d97706'; stockIcon = '🟡'; }
@@ -397,7 +419,6 @@ async function loadProductos() {
                 return `<tr>
                     <td><strong>${nomProd(p)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
                     <td>${esc(p.almacen_nombre || '—')}</td>
-                    <td>${esc(p.sucursal_nombre || 'Global')}</td>
                     <td style="color:${stockColor};font-weight:700">${stockIcon} ${p.stock} ${p.unidad}</td>
                     <td>${p.stock_minimo} ${p.unidad}</td>
                     <td>${p.unidad}</td>
@@ -416,25 +437,23 @@ async function loadProductos() {
                         <h3>${esc(g.nombre)}</h3>
                         <span class="badge badge-info">${items.length} producto(s)</span>
                     </div>
-                    ${items.length
-                        ? `<div class="categoria-table-wrap">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th>Producto</th><th>Almacén</th><th>Sucursal</th><th>Stock</th>
-                                    <th>Mínimo</th><th>Unidad</th><th>Costo (Bs)</th><th>Precio (Bs)</th>
-                                    <th>Proveedor</th><th>Vence</th><th></th>
-                                </tr>
-                            </thead>
-                            <tbody>${rows}</tbody>
-                        </table>
-                    </div>`
+                    ${bloques.length
+                        ? bloques.map((b) => `
+                            <div class="subcat-titulo">${esc(b.c.nombre)} · ${b.items.length}</div>
+                            <div class="categoria-table-wrap">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Producto</th><th>Almacén</th><th>Stock</th>
+                                            <th>Mínimo</th><th>Unidad</th><th>Costo (Bs)</th><th>Precio (Bs)</th>
+                                            <th>Proveedor</th><th>Vence</th><th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>${filas(b.items)}</tbody>
+                                </table>
+                            </div>`).join('')
                         : '<div class="empty">Sin productos registrados</div>'}
                 </div>`;
-        });
-
-        if (!hay) {
-            container.innerHTML = '<div class="empty">No hay productos</div>';
         }
 
         $$('[data-edit-prod]').forEach((b) => b.addEventListener('click', () => openProductoModal(Number(b.dataset.editProd), prods)));
@@ -504,6 +523,8 @@ async function verHistorialProducto(id) {
 $('#btn-exportar-productos').addEventListener('click', () => {
     const sel = $('#exportar-sucursal');
     if (sel) sel.value = _prodSuc;
+    const selCat = $('#exportar-categoria');
+    if (selCat) selCat.value = ($('#prod-categoria') || {}).value || '';
     $('#modal-exportar-prod').classList.add('open');
 });
 $('#btn-confirmar-exportar').addEventListener('click', () => {
@@ -533,6 +554,8 @@ $('#btn-ejecutar-importar').addEventListener('click', async () => {
     fd.append('archivo', archivo);
     const impSuc = $('#importar-sucursal');
     if (impSuc) fd.append('sucursal_id', impSuc.value);
+    const impCat = $('#importar-categoria');
+    if (impCat && impCat.value) fd.append('categoria_id', impCat.value);
     try {
         const res = await fetch(API + '/productos/importar', {
             method: 'POST', body: fd
@@ -554,10 +577,10 @@ $('#btn-ejecutar-importar').addEventListener('click', async () => {
 
 function exportarProductos() {
     const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
-    const categoria = ($('#prod-categoria') || {}).value || '';
     const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
     const estado = ($('#prod-estado') || {}).value || '';
     const suc = ($('#exportar-sucursal') || {}).value;
+    const categoria = ($('#exportar-categoria') || {}).value || '';
     const qs = new URLSearchParams();
     if (filtro) qs.set('filtro', filtro);
     if (categoria) qs.set('categoria', categoria);

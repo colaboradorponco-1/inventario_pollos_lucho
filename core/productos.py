@@ -396,6 +396,8 @@ def importar_productos():
             wb.close()
             return err("No tienes permisos para importar a esa sucursal", 403)
         sid_imp = s
+        cat_fallback = request.form.get("categoria_id", "").strip()
+        cat_fallback = int(cat_fallback) if cat_fallback.isdigit() else None
 
         h_nombre = buscar("nombre", "producto", "articulo")
         h_codigo = buscar("codigo", "codigo de barras", "ean", "cod")
@@ -439,6 +441,8 @@ def importar_productos():
                         cat_id = cur.lastrowid
                     else:
                         cat_id = f["id"]
+                if cat_id is None and cat_fallback:
+                    cat_id = cat_fallback
 
                 prov_id = None
                 if proveedor:
