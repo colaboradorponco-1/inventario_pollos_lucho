@@ -109,12 +109,6 @@ async function loadCatalogos() {
     fill('#prod-categoria-form', catalogos.categorias, '— Sin categoría —');
     fill('#prod-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#prod-filtro-proveedor', catalogos.proveedores, 'Todos los proveedores');
-    const dom = $('#prod-filtro-sucursal');
-    if (dom) {
-        dom.innerHTML = '<option value="">Todas las sucursales</option>' +
-            catalogos.sucursales.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('') +
-            '<option value="0">Globales (almacenes principales)</option>';
-    }
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
     fill('#prod-sucursal', catalogos.sucursales, '— Sin sucursal —');
     fill('#mov-almacen', catalogos.almacenes, '— Sin almacén —');
@@ -320,33 +314,24 @@ function esAlmacenPpal() { return window.ROL === 'encargado' && !!window.SUCURSA
 // Admin/superadmin y encargados de almacén principal actúan como "mano derecha" del admin
 function esCentral() { return esAdmin() || esAlmacenPpal(); }
 
-let _prodScope = '';
+let _prodSuc = '';
 async function pintarProdScope() {
     const row = $('#prod-scope-tabs');
     if (!row) return;
-    const esFilial = !esCentral();
-    const filtros = esFilial
-        ? [
-            { v: '', lbl: 'Todos los productos' },
-            { v: 'almacenes', lbl: 'Almacenes principales' },
-            { v: 'propios', lbl: 'Mis productos' },
-          ]
-        : [
-            { v: '', lbl: 'Todos los productos' },
-            { v: 'mio', lbl: 'Mi almacén' },
-            { v: 'sucursales', lbl: 'Productos de sucursales' },
-          ];
+    if (!catalogos || !catalogos.sucursales) await loadCatalogos();
+    const botones = [{ v: '', lbl: 'Todas' }, { v: '0', lbl: 'Globales' }]
+        .concat((catalogos.sucursales || []).map((s) => ({ v: String(s.id), lbl: s.nombre })));
     const ctr = {};
-    for (const f of filtros) {
+    for (const b of botones) {
         try {
-            const r = await request(API + '/productos?scope=' + f.v + '&por_pagina=1');
-            ctr[f.v] = r.total != null ? r.total : (r.data || r).length || 0;
-        } catch (_) { ctr[f.v] = 0; }
+            const r = await request(API + '/productos?por_pagina=1' + (b.v ? '&sucursal=' + b.v : ''));
+            ctr[b.v] = r.total != null ? r.total : (r.data || r).length || 0;
+        } catch (_) { ctr[b.v] = 0; }
     }
-    row.innerHTML = filtros.map((f) =>
-        `<button class="btn hist-tab ${_prodScope === f.v ? 'active' : ''}" data-prod-scope="${f.v}">${f.lbl} · ${ctr[f.v]}</button>`).join('');
-    row.querySelectorAll('[data-prod-scope]').forEach((b) => b.addEventListener('click', () => {
-        _prodScope = b.dataset.prodScope;
+    row.innerHTML = botones.map((f) =>
+        `<button class="btn hist-tab ${_prodSuc === f.v ? 'active' : ''}" data-prod-suc="${f.v}">${f.lbl} · ${ctr[f.v]}</button>`).join('');
+    row.querySelectorAll('[data-prod-suc]').forEach((b) => b.addEventListener('click', () => {
+        _prodSuc = b.dataset.prodSuc;
         pintarProdScope();
         loadProductos();
     }));
@@ -358,14 +343,12 @@ async function loadProductos() {
         const categoria = ($('#prod-categoria') || {}).value || '';
         const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
         const estado = ($('#prod-estado') || {}).value || '';
-        const sucursal = ($('#prod-filtro-sucursal') || {}).value || '';
         const qs = new URLSearchParams();
         if (filtro) qs.set('filtro', filtro);
         if (categoria) qs.set('categoria', categoria);
         if (proveedor) qs.set('proveedor', proveedor);
         if (estado) qs.set('estado', estado);
-        if (sucursal) qs.set('sucursal', sucursal);
-        if (_prodScope) qs.set('scope', _prodScope);
+        if (_prodSuc !== '') qs.set('sucursal', _prodSuc);
         qs.set('por_pagina', 1000);
         const resp = await request(API + '/productos?' + qs.toString());
         const prods = resp.data || resp;
@@ -551,14 +534,12 @@ function exportarProductos() {
     const categoria = ($('#prod-categoria') || {}).value || '';
     const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
     const estado = ($('#prod-estado') || {}).value || '';
-    const sucursal = ($('#prod-filtro-sucursal') || {}).value || '';
     const qs = new URLSearchParams();
     if (filtro) qs.set('filtro', filtro);
     if (categoria) qs.set('categoria', categoria);
     if (proveedor) qs.set('proveedor', proveedor);
     if (estado) qs.set('estado', estado);
-    if (sucursal) qs.set('sucursal', sucursal);
-    if (_prodScope) qs.set('scope', _prodScope);
+    if (_prodSuc !== '') qs.set('sucursal', _prodSuc);
     window.location.href = API + '/exportar/productos?' + qs.toString();
 }
 

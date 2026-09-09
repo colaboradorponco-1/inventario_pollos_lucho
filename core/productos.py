@@ -147,17 +147,12 @@ def productos():
         params.append(proveedor)
     if sucursal:
         suc = int(sucursal)
-        if ver_todo or suc == 0:
-            if suc == 0:
-                q += " AND p.sucursal_id IS NULL"
-            else:
-                q += " AND p.sucursal_id = ?"
-                params.append(suc)
-        elif sid is not None and suc == sid:
+        if suc == 0:
+            q += " AND p.sucursal_id IS NULL"
+        else:
+            # El scope de visibilidad limita a filiales: solo lo que pueden ver
             q += " AND p.sucursal_id = ?"
             params.append(suc)
-        else:
-            q += " AND 1 = 0"
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":
