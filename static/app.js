@@ -114,7 +114,6 @@ async function loadCatalogos() {
         dom.innerHTML = '<option value="">Todas las sucursales</option>' +
             catalogos.sucursales.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('') +
             '<option value="0">Globales (almacenes principales)</option>';
-        dom.style.display = esCentral() ? '' : 'none';
     }
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
     fill('#prod-sucursal', catalogos.sucursales, '— Sin sucursal —');
@@ -372,19 +371,18 @@ async function loadProductos() {
         const prods = resp.data || resp;
         $('#prod-scope-info').textContent = 'Mostrando ' + (resp.total != null ? resp.total : prods.length) + ' producto(s)';
 
-        const cats = {};
-        prods.forEach(p => {
-            const cat = p.categoria_nombre || 'Sin categoría';
-            if (!cats[cat]) cats[cat] = [];
-            cats[cat].push(p);
-        });
-
+        if (!catalogos || !catalogos.sucursales) await loadCatalogos();
         const esGestion = esCentral();
         const container = $('#productos-por-categoria');
         container.innerHTML = '';
 
-        Object.keys(cats).sort().forEach(cat => {
-            const items = cats[cat];
+        const grupos = [{ id: 0, nombre: 'Globales (almacenes principales)' }]
+            .concat((catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre })));
+        let hay = false;
+
+        grupos.forEach((g) => {
+            const items = prods.filter((p) => (p.sucursal_id || 0) === g.id);
+            hay = true;
 
             let rows = items.map(p => {
                 let stockColor, stockIcon;
@@ -419,10 +417,11 @@ async function loadProductos() {
             container.innerHTML += `
                 <div class="categoria-card">
                     <div class="categoria-header">
-                        <h3>${esc(cat)}</h3>
+                        <h3>${esc(g.nombre)}</h3>
                         <span class="badge badge-info">${items.length} producto(s)</span>
                     </div>
-                    <div class="categoria-table-wrap">
+                    ${items.length
+                        ? `<div class="categoria-table-wrap">
                         <table class="data-table">
                             <thead>
                                 <tr>
@@ -433,11 +432,12 @@ async function loadProductos() {
                             </thead>
                             <tbody>${rows}</tbody>
                         </table>
-                    </div>
+                    </div>`
+                        : '<div class="empty">Sin productos registrados</div>'}
                 </div>`;
         });
 
-        if (!prods.length) {
+        if (!hay) {
             container.innerHTML = '<div class="empty">No hay productos</div>';
         }
 

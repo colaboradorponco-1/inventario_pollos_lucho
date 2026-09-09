@@ -95,12 +95,19 @@ def exportar_productos():
     if proveedor:
         q += " AND p.proveedor_id = ?"
         params.append(int(proveedor))
-    if sucursal and ver_todo:
-        if sucursal == "0":
-            q += " AND p.sucursal_id IS NULL"
-        else:
+    if sucursal:
+        suc = int(sucursal)
+        if ver_todo or suc == 0:
+            if suc == 0:
+                q += " AND p.sucursal_id IS NULL"
+            else:
+                q += " AND p.sucursal_id = ?"
+                params.append(suc)
+        elif sid is not None and suc == sid:
             q += " AND p.sucursal_id = ?"
-            params.append(int(sucursal))
+            params.append(suc)
+        else:
+            q += " AND 1 = 0"
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":
