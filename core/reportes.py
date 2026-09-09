@@ -67,7 +67,7 @@ def exportar_productos():
         join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = %s"
         stock_params = [sid]
     q = """
-        SELECT p.codigo, p.nombre, c.nombre AS categoria, a.nombre AS almacen,
+        SELECT p.codigo, p.nombre, p.marca, c.nombre AS categoria, a.nombre AS almacen,
                p.unidad, p.stock_minimo, p.costo_promedio, p.precio_venta,
                COALESCE(s.cantidad, 0) AS stock, p.vencimiento, pr.nombre AS proveedor
         FROM productos p
@@ -115,14 +115,14 @@ def exportar_productos():
     q += " ORDER BY p.nombre"
     rows = conn.execute(q, params).fetchall()
     conn.close()
-    filas = [(r["codigo"] or "", r["nombre"], r["categoria"] or "", r["almacen"] or "",
+    filas = [(r["codigo"] or "", r["nombre"], r["marca"] or "", r["categoria"] or "", r["almacen"] or "",
               r["unidad"], r["stock"], r["stock_minimo"], r["costo_promedio"],
               r["precio_venta"], r["proveedor"] or "", r["vencimiento"] or "") for r in rows]
     return responder_excel("productos.xlsx",
-                         ["Código", "Producto", "Categoría", "Almacén", "Unidad",
+                         ["Código", "Producto", "Marca", "Categoría", "Almacén", "Unidad",
                           "Stock", "Stock mínimo", "Costo (Bs)", "Precio venta (Bs)",
                           "Proveedor", "Vencimiento"],
-                         filas, [14, 25, 16, 16, 10, 10, 12, 14, 14, 18, 14],
+                         filas, [14, 22, 14, 16, 16, 10, 10, 12, 14, 14, 18, 14],
                          titulo="PRODUCTOS - POLLOS LUCHO")
 
 

@@ -12,6 +12,13 @@ from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movi
 productos_bp = Blueprint("productos", __name__)
 
 
+def norm_nombre(texto):
+    """Normaliza un texto (sin acentos, sin símbolos) para comparar nombres."""
+    s = unicodedata.normalize("NFKD", str(texto or ""))
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
 def scope_productos(ver_todo, sid, scope):
     """(condición_sql, params) para filtrar productos por ámbito de visibilidad.
 
@@ -78,10 +85,11 @@ def productos():
                     conn.close()
                     return err("El proveedor debe pertenecer a tu sucursal", 400)
         cur = conn.execute("""
-            INSERT INTO productos (codigo, nombre, categoria_id, unidad, stock_minimo, costo_promedio,
+            INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
                                    precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-        """, (codigo, data["nombre"].strip(), data.get("categoria_id"),
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
+              data.get("categoria_id"),
               data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
               data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
               data.get("vencimiento"), data.get("almacen_id"), proveedor_id, sid))
@@ -95,9 +103,20 @@ def productos():
                                  session.get("usuario", ""), sucursal_id=sid,
                                  proveedor_id=proveedor_id)
             conn.commit()
+        aviso = ""
+        nv = norm_nombre(data["nombre"])
+        if nv:
+            duplicado = conn.execute(
+                "SELECT nombre, codigo, marca FROM productos WHERE activo = 1 AND id != ? ORDER BY nombre LIMIT 5",
+                (new_id,)).fetchall()
+            for f in duplicado:
+                if norm_nombre(f["nombre"]) == nv:
+                    detalle = f["marca"] and (" - " + f["marca"]) or ""
+                    aviso = f"Ya existe '{f['nombre']}'{detalle} (cód. {f['codigo']}). Verifica que no sea el mismo producto."
+                    break
         conn.close()
         registrar_auditoria("Producto creado", f"{data['nombre'].strip()} ({codigo})")
-        return ok({"codigo": codigo}, message="Producto creado")
+        return ok({"codigo": codigo, "aviso": aviso or None}, message="Producto creado")
 
     filtro = request.args.get("filtro", "").strip()
     categoria = request.args.get("categoria", "").strip()
@@ -235,10 +254,11 @@ def producto(prod_id):
             return err("Ya existe otro producto con ese código de barras")
     sid_p = fila["sucursal_id"] if not (es_gestion() or es_encargado_almacen(conn)) else (data.get("sucursal_id") or fila["sucursal_id"])
     conn.execute("""
-        UPDATE productos SET codigo=?, nombre=?, categoria_id=?, unidad=?, stock_minimo=?,
+        UPDATE productos SET codigo=?, nombre=?, marca=?, categoria_id=?, unidad=?, stock_minimo=?,
                costo_promedio=?, precio_venta=?, vencimiento=?, almacen_id=?, proveedor_id=?, sucursal_id=?
         WHERE id=?
-    """, (codigo, data["nombre"].strip(), data.get("categoria_id"),
+    """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
+          data.get("categoria_id"),
           data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
           data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
           data.get("vencimiento"), data.get("almacen_id"), data.get("proveedor_id"), sid_p, prod_id))
@@ -374,6 +394,7 @@ def importar_productos():
 
         h_nombre = buscar("nombre", "producto", "articulo")
         h_codigo = buscar("codigo", "codigo de barras", "ean", "cod")
+        h_marca = buscar("marca", "brand", "marca del producto")
         h_unidad = buscar("unidad", "unidades")
         h_costo = buscar("costo", "costo promedio", "costo (bs)", "costo unitario")
         h_precio = buscar("precio", "precio venta", "precio (bs)", "precio venta (bs)")
@@ -396,6 +417,7 @@ def importar_productos():
                 codigo = str(rd.get(h_codigo) or "").strip() if h_codigo else ""
                 if not codigo:
                     codigo = siguiente_codigo(conn)
+                marca = (str(rd.get(h_marca) or "").strip() if h_marca else "") or None
                 unidad = (str(rd.get(h_unidad) or "unidad").strip() if h_unidad else "unidad") or "unidad"
                 costo = parse_num(rd.get(h_costo)) if h_costo else 0.0
                 precio = parse_num(rd.get(h_precio)) if h_precio else 0.0
@@ -424,11 +446,11 @@ def importar_productos():
                         prov_id = f["id"]
 
                 cur = conn.execute("""
-                    INSERT INTO productos (codigo, nombre, categoria_id, unidad, stock_minimo,
+                    INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo,
                                            costo_promedio, precio_venta, vencimiento, proveedor_id,
                                            sucursal_id, activo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                """, (codigo, nombre, cat_id, unidad, stock_min, costo, precio, vencimiento, prov_id, sid_imp))
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """, (codigo, nombre, marca, cat_id, unidad, stock_min, costo, precio, vencimiento, prov_id, sid_imp))
                 prod_id = cur.lastrowid
                 stock_cant = parse_num(rd.get(h_stock)) if h_stock else 0.0
                 if stock_cant > 0:

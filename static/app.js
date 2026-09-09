@@ -28,6 +28,8 @@ function fechaISO(val) {
 
 const esc = (s) => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
 
+const nomProd = (p) => esc(p.nombre) + (p.marca ? ` - ${esc(p.marca)}` : '');
+
 async function request(url, opts = {}) {
     const res = await fetch(url, {
         headers: { 'Content-Type': 'application/json' },
@@ -180,7 +182,7 @@ async function loadDashboard() {
         tStock.innerHTML = stockBajo.length ? stockBajo.map((p) => {
             const estado = p.stock === 0 ? 'Sin stock' : 'Bajo';
             return `<tr>
-                <td><strong>${esc(p.nombre)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
+                <td><strong>${nomProd(p)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
                 <td style="font-weight:700;color:${p.stock === 0 ? '#dc2626' : '#d97706'}">${p.stock} ${p.unidad}</td>
                 <td>${p.stock_minimo || 10} ${p.unidad}</td>
                 <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${p.stock === 0 ? '#dc2626' : '#d97706'};margin-right:6px"></span>${estado}</td>
@@ -194,7 +196,7 @@ async function loadDashboard() {
             else if (p.estado === 'urgente') { estado = 'Urgente'; color = '#d97706'; }
             else { estado = 'Proximo'; color = '#ca8a04'; }
             return `<tr>
-                <td><strong>${esc(p.nombre)}</strong></td>
+                <td><strong>${nomProd(p)}</strong></td>
                 <td style="font-weight:700;color:${color}">${fmtDate(p.vencimiento)}</td>
                 <td>${p.stock} ${p.unidad}</td>
                 <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${estado}</td>
@@ -396,7 +398,7 @@ async function loadProductos() {
                         <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
                             : ''}`;
                 return `<tr>
-                    <td><strong>${esc(p.nombre)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
+                    <td><strong>${nomProd(p)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
                     <td>${esc(p.almacen_nombre || '—')}</td>
                     <td>${esc(p.sucursal_nombre || 'Global')}</td>
                     <td style="color:${stockColor};font-weight:700">${stockIcon} ${p.stock} ${p.unidad}</td>
@@ -592,6 +594,7 @@ async function openProductoModal(id, lista) {
         $('#prod-id').value = p.id;
         $('#prod-codigo').value = p.codigo || '';
         $('#prod-nombre').value = p.nombre;
+        $('#prod-marca').value = p.marca || '';
         $('#prod-categoria-form').value = p.categoria_id || '';
         $('#prod-almacen').value = p.almacen_id || '';
         $('#prod-unidad').value = p.unidad || 'unidad';
@@ -619,6 +622,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
     const body = {
         codigo: $('#prod-codigo').value.trim() || null,
         nombre: $('#prod-nombre').value,
+        marca: $('#prod-marca').value.trim() || null,
         categoria_id: +$('#prod-categoria-form').value || null,
         almacen_id: +$('#prod-almacen').value || null,
         unidad: $('#prod-unidad').value,
@@ -634,12 +638,14 @@ $('#form-producto').addEventListener('submit', async (e) => {
     }
     if (id) body.stock = +$('#prod-stock-actual').value || 0;
     try {
+        let resp = null;
         if (id) {
-            await request(API + '/productos/' + id, { method: 'PUT', body: JSON.stringify(body) });
+            resp = await request(API + '/productos/' + id, { method: 'PUT', body: JSON.stringify(body) });
         } else {
-            await request(API + '/productos', { method: 'POST', body: JSON.stringify(body) });
+            resp = await request(API + '/productos', { method: 'POST', body: JSON.stringify(body) });
         }
         toast(id ? 'Producto actualizado' : 'Producto creado');
+        if (resp && resp.aviso) setTimeout(() => toast('⚠ ' + resp.aviso, 'err'), 400);
         $('#modal-producto').classList.remove('open');
         loadProductos();
     } catch (err) {
@@ -674,7 +680,7 @@ async function loadMovimientos() {
         const resp = await request(API + '/productos?por_pagina=1000');
         const prods = resp.data || resp;
         $('#mov-producto').innerHTML = '<option value="">Seleccione...</option>' +
-            prods.map((p) => `<option value="${p.id}">${p.nombre} (${p.stock} ${p.unidad})</option>`).join('');
+            prods.map((p) => `<option value="${p.id}">${nomProd(p)} (${p.stock} ${p.unidad})</option>`).join('');
         // Inicializar tabs histórico (solo admin/superadmin ven el selector de sucursales)
         const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
         const tabs = $('#hist-sucursal-tabs');
@@ -1499,7 +1505,7 @@ async function loadVentas() {
         const respP = await request(API + '/productos?por_pagina=1000');
         const prods = respP.data || respP;
         $('#venta-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
-            prods.map((p) => `<option value="${p.id}" data-precio="${p.precio_venta || ''}" data-stock="${p.stock}">${p.nombre} (stock: ${p.stock} ${p.unidad})</option>`).join('');
+            prods.map((p) => `<option value="${p.id}" data-precio="${p.precio_venta || ''}" data-stock="${p.stock}">${nomProd(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('');
         await listarVentas();
     } catch (e) {
         toast(e.message, 'err');
@@ -1686,7 +1692,7 @@ async function loadRepartos() {
         const respP = await request(API + '/productos?por_pagina=1000');
         const prods = respP.data || respP;
         $('#reparto-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
-            prods.map((p) => `<option value="${p.id}" data-costo="${p.costo_promedio || ''}" data-stock="${p.stock}">${p.nombre} (stock: ${p.stock} ${p.unidad})</option>`).join('');
+            prods.map((p) => `<option value="${p.id}" data-costo="${p.costo_promedio || ''}" data-stock="${p.stock}">${nomProd(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('');
         const sucursales = await request(API + '/sucursales');
         const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
         const esPrincipal = !!window.SUCURSAL_PRINCIPAL;
@@ -2167,7 +2173,7 @@ async function loadPedidos() {
         const respP = await request(API + '/productos?por_pagina=1000');
         const prods = respP.data || respP;
         $('#pedido-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
-            prods.map((p) => `<option value="${p.id}">${p.nombre} (${p.unidad})</option>`).join('');
+            prods.map((p) => `<option value="${p.id}">${nomProd(p)} (${p.unidad})</option>`).join('');
         const sucursales = await request(API + '/sucursales');
         $('#pedido-destino').innerHTML = '<option value="">Seleccione la sucursal que provee...</option>' +
             sucursales.filter((s) => s.id !== window.SUCURSAL_ID).map((s) =>
