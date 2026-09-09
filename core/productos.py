@@ -27,9 +27,9 @@ def scope_productos(ver_todo, sid, scope):
         mio          -> solo los de mi sucursal
         sucursales   -> los de las demás sucursales
     - sucursal filial:
-        ''           -> globales (almacenes principales) + sus propios
-        almacenes    -> solo los globales (almacenes principales 1 y 2)
-        propios      -> solo los de su sucursal
+        ve TODO el catálogo (visibilidad universal). Lo que agrega el admin
+        o cualquier encargado se ve en todas las sucursales; cada una maneja
+        su propio stock según la sucursal del usuario que consulta.
     """
     if ver_todo:
         if scope == "mio":
@@ -41,13 +41,7 @@ def scope_productos(ver_todo, sid, scope):
                 return " AND p.sucursal_id IS NOT NULL AND p.sucursal_id != %s", [sid]
             return " AND p.sucursal_id IS NOT NULL", []
         return "", []
-    if scope == "propios":
-        return " AND p.sucursal_id = %s", [sid]
-    if scope == "almacenes":
-        return (" AND (p.sucursal_id IS NULL OR p.sucursal_id IN "
-                "(SELECT id FROM sucursales WHERE principal = 1))"), []
-    return (" AND (p.sucursal_id IS NULL OR p.sucursal_id IN "
-            "(SELECT id FROM sucursales WHERE principal = 1) OR p.sucursal_id = %s)"), [sid]
+    return "", []
 
 
 def siguiente_codigo(conn):
