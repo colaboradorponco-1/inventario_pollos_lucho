@@ -71,11 +71,14 @@ def pedidos():
             cantidad = float(item.get("cantidad", 0) or 0)
             if cantidad <= 0 or not prod_id:
                 continue
-            fila = conn.execute("SELECT id, nombre FROM productos WHERE id = ? AND activo = 1",
+            fila = conn.execute("SELECT id, nombre, sucursal_id FROM productos WHERE id = ? AND activo = 1",
                                 (prod_id,)).fetchone()
             if not fila:
                 conn.close()
                 return err("Producto no encontrado")
+            if fila["sucursal_id"] != destino_id:
+                conn.close()
+                return err(f"'{fila['nombre']}' no pertenece a la sucursal que provee ({destino_id})")
             items.append((prod_id, fila["nombre"], cantidad))
         if not items:
             conn.close()

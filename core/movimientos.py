@@ -146,16 +146,22 @@ def movimientos_lote():
         proveedor_id = prov["id"]
     errores = []
     registrados = 0
+    sid = sucursal_operativa()
     for item in items:
         prod_id = item.get("producto_id")
         cantidad = float(item.get("cantidad", 0) or 0)
         if cantidad <= 0 or not prod_id:
             continue
+        prod = conn.execute("SELECT nombre, sucursal_id FROM productos WHERE id=?", (prod_id,)).fetchone()
+        if not prod:
+            errores.append(f"Producto {prod_id} no encontrado")
+            continue
+        if prod["sucursal_id"] != sid:
+            errores.append(f"{prod['nombre']}: el producto no pertenece a esta sucursal")
+            continue
         stock_val = stock_actual(conn, prod_id)
         if tipo == "salida" and stock_val < cantidad:
-            prod = conn.execute("SELECT nombre FROM productos WHERE id=?", (prod_id,)).fetchone()
-            nombre = prod["nombre"] if prod else str(prod_id)
-            errores.append(f"{nombre}: stock insuficiente ({stock_val})")
+            errores.append(f"{prod['nombre']}: stock insuficiente ({stock_val})")
             continue
         registrar_movimiento(conn, prod_id, tipo, cantidad,
                              float(item.get("precio_unitario", 0) or 0),

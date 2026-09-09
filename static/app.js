@@ -921,6 +921,10 @@ $('#qr-escaneo').addEventListener('keydown', async (e) => {
     if (!codigo) return;
     try {
         const p = await request(API + '/productos/codigo?codigo=' + encodeURIComponent(codigo));
+        if (p.sucursal_id && p.sucursal_id !== window.SUCURSAL_ID) {
+            toast('Ese producto no pertenece a tu sucursal', 'err');
+            return;
+        }
         const key = String(p.id);
         if (qrItems[key]) {
             qrItems[key].cantidad += 1;
@@ -1547,10 +1551,12 @@ let ventaItems = [];
 async function loadVentas() {
     try {
         await loadCatalogos();
-        const respP = await request(API + '/productos?por_pagina=1000');
-        const prods = respP.data || respP;
-        $('#venta-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
-            prods.map((p) => `<option value="${p.id}" data-precio="${p.precio_venta || ''}" data-stock="${p.stock}">${nomProd(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('');
+        const respP = await request(API + '/productos?por_pagina=1000&stock_sucursal=' + (window.SUCURSAL_ID || ''));
+        const prods = (respP.data || respP).filter((p) => p.stock > 0);
+        $('#venta-producto').innerHTML = prods.length
+            ? '<option value="">Seleccione producto...</option>' +
+                prods.map((p) => `<option value="${p.id}" data-precio="${p.precio_venta || ''}" data-stock="${p.stock}">${nomProd(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('')
+            : '<option value="">No tienes productos con stock</option>';
         await listarVentas();
     } catch (e) {
         toast(e.message, 'err');
@@ -1734,10 +1740,12 @@ let repartoItems = [];
 async function loadRepartos() {
     try {
         await loadCatalogos();
-        const respP = await request(API + '/productos?por_pagina=1000');
+        const respP = await request(API + '/productos?por_pagina=1000&stock_sucursal=' + (window.SUCURSAL_ID || ''));
         const prods = respP.data || respP;
+        const due = (p) => (p.sucursal_id && p.sucursal_id !== window.SUCURSAL_ID)
+            ? ` · dueño: ${p.sucursal_nombre || p.sucursal_id}` : '';
         $('#reparto-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
-            prods.map((p) => `<option value="${p.id}" data-costo="${p.costo_promedio || ''}" data-stock="${p.stock}">${nomProd(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('');
+            prods.map((p) => `<option value="${p.id}" data-costo="${p.costo_promedio || ''}" data-stock="${p.stock}">${nomProd(p)}${due(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('');
         const sucursales = await request(API + '/sucursales');
         const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
         const esPrincipal = !!window.SUCURSAL_PRINCIPAL;
@@ -2211,14 +2219,29 @@ $('#pedido-fecha').value = nowLocal();
 
 // ---------------- Pedidos ----------------
 let pedidoItems = [];
+let pedidoProdsAll = [];
+
+function popPedidoProductos(sid) {
+    const sel = $('#pedido-producto');
+    if (!sel) return;
+    const lista = sid ? pedidoProdsAll.filter((p) => +p.sucursal_id === sid) : [];
+    sel.innerHTML = !sid
+        ? '<option value="">Primero selecciona la sucursal que provee...</option>'
+        : (lista.length
+            ? '<option value="">Seleccione producto...</option>' +
+                lista.map((p) => `<option value="${p.id}">${nomProd(p)} (${p.unidad})</option>`).join('')
+            : '<option value="">Esa sucursal no tiene productos aún</option>');
+}
+
+$('#pedido-destino').addEventListener('change', () => {
+    popPedidoProductos(+$('#pedido-destino').value || null);
+});
 
 async function loadPedidos() {
     try {
         await loadCatalogos();
         const respP = await request(API + '/productos?por_pagina=1000');
-        const prods = respP.data || respP;
-        $('#pedido-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
-            prods.map((p) => `<option value="${p.id}">${nomProd(p)} (${p.unidad})</option>`).join('');
+        pedidoProdsAll = respP.data || respP;
         const sucursales = await request(API + '/sucursales');
         $('#pedido-destino').innerHTML = '<option value="">Seleccione la sucursal que provee...</option>' +
             sucursales.filter((s) => s.id !== window.SUCURSAL_ID).map((s) =>
@@ -2240,6 +2263,7 @@ async function loadPedidos() {
             $('#pedido-sucursal').innerHTML = sucursales.map((s) =>
                 `<option value="${s.id}">${s.principal ? '★ ' : ''}${s.nombre}</option>`).join('');
         }
+        popPedidoProductos(+$('#pedido-destino').value || null);
         $('#pedidos-info').textContent = `Tickets por pedido de sucursal.`;
         await listarPedidos();
     } catch (e) {

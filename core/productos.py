@@ -125,10 +125,17 @@ def productos():
     # Admin, superadmin y encargados de almacén principal ven TODO el catálogo
     # (sus productos globales + los de todas las sucursales).
     ver_todo = es_gestion() or es_encargado_almacen(conn)
-    if ver_todo or sid is None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
-    else:
+    # stock_sucursal: fuerza el stock de UNA sucursal concreta (p. ej. el desplegable
+    # de ventas/repartos usa el stock de la sucursal del usuario, no el total).
+    stock_sid = None
+    if request.args.get("stock_sucursal", "").strip():
+        stock_sid = int(request.args.get("stock_sucursal"))
+    elif not ver_todo and sid is not None:
+        stock_sid = sid
+    if stock_sid is not None:
         join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?"
+    else:
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
     q = """
         SELECT p.*, c.nombre AS categoria_nombre, a.nombre AS almacen_nombre,
                su.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre,
@@ -142,8 +149,8 @@ def productos():
         WHERE p.activo = ?
     """.format(join_stock=join_stock)
     params = []
-    if sid is not None and not ver_todo:
-        params.append(sid)
+    if stock_sid is not None:
+        params.append(stock_sid)
     if estado == "inactivos":
         params.append(0)
     else:
