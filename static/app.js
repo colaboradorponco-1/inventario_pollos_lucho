@@ -361,9 +361,12 @@ async function loadProductos() {
 
         const grupos = [{ id: 0, nombre: 'Globales (almacenes principales)' }]
             .concat((catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre })));
+        let visibles = grupos;
+        if (_prodSuc === '0') visibles = [grupos[0]];
+        else if (_prodSuc !== '') visibles = grupos.filter((g) => String(g.id) === _prodSuc);
         let hay = false;
 
-        grupos.forEach((g) => {
+        visibles.forEach((g) => {
             const items = prods.filter((p) => (p.sucursal_id || 0) === g.id);
             hay = true;
 
