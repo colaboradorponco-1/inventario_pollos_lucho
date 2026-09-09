@@ -57,6 +57,7 @@ def exportar_productos():
     categoria = request.args.get("categoria", "").strip()
     proveedor = request.args.get("proveedor", "").strip()
     estado = request.args.get("estado", "").strip()
+    sucursal = request.args.get("sucursal", "").strip()
     sid = sucursal_actual()
     ver_todo = es_gestion() or es_encargado_almacen(conn)
     if ver_todo or sid is None:
@@ -94,6 +95,12 @@ def exportar_productos():
     if proveedor:
         q += " AND p.proveedor_id = ?"
         params.append(int(proveedor))
+    if sucursal and ver_todo:
+        if sucursal == "0":
+            q += " AND p.sucursal_id IS NULL"
+        else:
+            q += " AND p.sucursal_id = ?"
+            params.append(int(sucursal))
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":

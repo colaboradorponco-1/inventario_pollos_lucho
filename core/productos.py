@@ -103,6 +103,7 @@ def productos():
     categoria = request.args.get("categoria", "").strip()
     proveedor = request.args.get("proveedor", "").strip()
     estado = request.args.get("estado", "").strip()
+    sucursal = request.args.get("sucursal", "").strip()
     sid = sucursal_actual()
     # Admin, superadmin y encargados de almacén principal ven TODO el catálogo
     # (sus productos globales + los de todas las sucursales).
@@ -112,11 +113,13 @@ def productos():
     else:
         join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?"
     q = """
-        SELECT p.*, c.nombre AS categoria_nombre, a.nombre AS almacen_nombre, pr.nombre AS proveedor_nombre,
+        SELECT p.*, c.nombre AS categoria_nombre, a.nombre AS almacen_nombre,
+               su.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre,
                COALESCE(s.cantidad, 0) AS stock
         FROM productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN almacenes a ON a.id = p.almacen_id
+        LEFT JOIN sucursales su ON su.id = p.sucursal_id
         LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
         {join_stock}
         WHERE p.activo = ?
@@ -142,6 +145,12 @@ def productos():
     if proveedor:
         q += " AND p.proveedor_id = ?"
         params.append(proveedor)
+    if sucursal and ver_todo:
+        if sucursal == "0":
+            q += " AND p.sucursal_id IS NULL"
+        else:
+            q += " AND p.sucursal_id = ?"
+            params.append(int(sucursal))
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":
@@ -152,7 +161,8 @@ def productos():
         q += (" AND p.vencimiento IS NOT NULL AND p.vencimiento != ''"
               " AND STR_TO_DATE(p.vencimiento, '%Y-%m-%d') <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)")
     q += " ORDER BY p.nombre"
-    count_q = "SELECT COUNT(*) AS c FROM (" + q.replace("p.*, c.nombre AS categoria_nombre, a.nombre AS almacen_nombre, pr.nombre AS proveedor_nombre,\n               COALESCE(s.cantidad, 0) AS stock", "1") + ") AS sub"
+    _, sep, tail = q.partition("FROM productos p")
+    count_q = "SELECT COUNT(*) AS c FROM (SELECT 1 " + sep + tail + ") AS sub"
     total = conn.execute(count_q, params).fetchone()["c"]
     offset, limit, pagina, por_pagina = paginar_params()
     q += " LIMIT ? OFFSET ?"

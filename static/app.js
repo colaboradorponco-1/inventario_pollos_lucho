@@ -109,6 +109,13 @@ async function loadCatalogos() {
     fill('#prod-categoria-form', catalogos.categorias, '— Sin categoría —');
     fill('#prod-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#prod-filtro-proveedor', catalogos.proveedores, 'Todos los proveedores');
+    const dom = $('#prod-filtro-sucursal');
+    if (dom) {
+        dom.innerHTML = '<option value="">Todas las sucursales</option>' +
+            catalogos.sucursales.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('') +
+            '<option value="0">Globales (almacenes principales)</option>';
+        dom.style.display = esCentral() ? '' : 'none';
+    }
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
     fill('#prod-sucursal', catalogos.sucursales, '— Sin sucursal —');
     fill('#mov-almacen', catalogos.almacenes, '— Sin almacén —');
@@ -352,11 +359,13 @@ async function loadProductos() {
         const categoria = ($('#prod-categoria') || {}).value || '';
         const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
         const estado = ($('#prod-estado') || {}).value || '';
+        const sucursal = ($('#prod-filtro-sucursal') || {}).value || '';
         const qs = new URLSearchParams();
         if (filtro) qs.set('filtro', filtro);
         if (categoria) qs.set('categoria', categoria);
         if (proveedor) qs.set('proveedor', proveedor);
         if (estado) qs.set('estado', estado);
+        if (sucursal) qs.set('sucursal', sucursal);
         if (_prodScope) qs.set('scope', _prodScope);
         qs.set('por_pagina', 1000);
         const resp = await request(API + '/productos?' + qs.toString());
@@ -394,6 +403,7 @@ async function loadProductos() {
                 return `<tr>
                     <td><strong>${esc(p.nombre)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
                     <td>${esc(p.almacen_nombre || '—')}</td>
+                    <td>${esc(p.sucursal_nombre || 'Global')}</td>
                     <td style="color:${stockColor};font-weight:700">${stockIcon} ${p.stock} ${p.unidad}</td>
                     <td>${p.stock_minimo} ${p.unidad}</td>
                     <td>${p.unidad}</td>
@@ -416,7 +426,7 @@ async function loadProductos() {
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>Producto</th><th>Almacén</th><th>Stock</th>
+                                    <th>Producto</th><th>Almacén</th><th>Sucursal</th><th>Stock</th>
                                     <th>Mínimo</th><th>Unidad</th><th>Costo (Bs)</th><th>Precio (Bs)</th>
                                     <th>Proveedor</th><th>Vence</th><th></th>
                                 </tr>
@@ -541,11 +551,13 @@ function exportarProductos() {
     const categoria = ($('#prod-categoria') || {}).value || '';
     const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
     const estado = ($('#prod-estado') || {}).value || '';
+    const sucursal = ($('#prod-filtro-sucursal') || {}).value || '';
     const qs = new URLSearchParams();
     if (filtro) qs.set('filtro', filtro);
     if (categoria) qs.set('categoria', categoria);
     if (proveedor) qs.set('proveedor', proveedor);
     if (estado) qs.set('estado', estado);
+    if (sucursal) qs.set('sucursal', sucursal);
     if (_prodScope) qs.set('scope', _prodScope);
     window.location.href = API + '/exportar/productos?' + qs.toString();
 }
