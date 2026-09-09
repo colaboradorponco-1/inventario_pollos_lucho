@@ -85,12 +85,12 @@ def productos():
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
                                    precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1)
         """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
               data.get("categoria_id"),
               data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
               data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
-              data.get("vencimiento"), data.get("almacen_id"), proveedor_id, sid))
+              data.get("almacen_id"), proveedor_id, sid))
         conn.commit()
         new_id = cur.lastrowid
         stock_inicial = data.get("stock_inicial", 0) or 0
@@ -99,7 +99,7 @@ def productos():
                                  data.get("costo_promedio", 0) or 0,
                                  datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Stock inicial",
                                  session.get("usuario", ""), sucursal_id=sid,
-                                 proveedor_id=proveedor_id)
+                                 proveedor_id=proveedor_id, vencimiento=data.get("vencimiento"))
             conn.commit()
         aviso = ""
         nv = norm_nombre(data["nombre"])
@@ -133,13 +133,20 @@ def productos():
     elif not ver_todo and sid is not None:
         stock_sid = sid
     if stock_sid is not None:
-        join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?"
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = ? GROUP BY producto_id) s ON s.producto_id = p.id"
+        lote_cond = " AND l2.sucursal_id = " + str(int(stock_sid))
     else:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
+        lote_cond = ""
     q = """
-        SELECT p.*, c.nombre AS categoria_nombre, a.nombre AS almacen_nombre,
+        SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
+               p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
+               c.nombre AS categoria_nombre, a.nombre AS almacen_nombre,
                su.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre,
-               COALESCE(s.cantidad, 0) AS stock
+               COALESCE(s.cantidad, 0) AS stock,
+               (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
+                WHERE l2.producto_id = p.id AND l2.cantidad > 0
+                  AND l2.fecha_vencimiento IS NOT NULL{lote_cond}) AS vencimiento
         FROM productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN almacenes a ON a.id = p.almacen_id
@@ -147,7 +154,7 @@ def productos():
         LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
         {join_stock}
         WHERE p.activo = ?
-    """.format(join_stock=join_stock)
+    """.format(join_stock=join_stock, lote_cond=lote_cond)
     params = []
     if stock_sid is not None:
         params.append(stock_sid)
@@ -184,8 +191,10 @@ def productos():
     elif estado == "stock-bajo":
         q += " AND p.stock_minimo > 0 AND COALESCE(s.cantidad, 0) <= p.stock_minimo"
     elif estado == "por-vencer":
-        q += (" AND p.vencimiento IS NOT NULL AND p.vencimiento != ''"
-              " AND STR_TO_DATE(p.vencimiento, '%Y-%m-%d') <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)")
+        q += (" AND EXISTS (SELECT 1 FROM lotes l2 WHERE l2.producto_id = p.id AND l2.cantidad > 0"
+              " AND l2.fecha_vencimiento IS NOT NULL"
+              " AND l2.fecha_vencimiento <= DATE_ADD(CURDATE(), INTERVAL 14 DAY){lote_cond})"
+              ).format(lote_cond=lote_cond)
     q += " ORDER BY p.nombre"
     _, sep, tail = q.partition("FROM productos p")
     count_q = "SELECT COUNT(*) AS c FROM (SELECT 1 " + sep + tail + ") AS sub"
@@ -207,21 +216,31 @@ def producto_por_codigo():
     conn = get_conn()
     sid = sucursal_actual()
     ver_todo = es_gestion() or es_encargado_almacen(conn)
-    if ver_todo or sid is None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
-        params = [codigo]
+    stock_sid = None
+    if request.args.get("stock_sucursal", "").strip():
+        stock_sid = int(request.args.get("stock_sucursal"))
+    elif not ver_todo and sid is not None:
+        stock_sid = sid
+    if stock_sid is not None:
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = ? GROUP BY producto_id) s ON s.producto_id = p.id"
+        lote_cond = " AND l2.sucursal_id = " + str(int(stock_sid))
     else:
-        join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = ?"
-        params = [sid, codigo]
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
+        lote_cond = ""
     scope_sql, scope_params = scope_productos(ver_todo, sucursal_operativa(), "")
     row = conn.execute("""
-        SELECT p.*, COALESCE(s.cantidad, 0) AS stock
+        SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
+               p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
+               COALESCE(s.cantidad, 0) AS stock,
+               (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
+                WHERE l2.producto_id = p.id AND l2.cantidad > 0
+                  AND l2.fecha_vencimiento IS NOT NULL{lote_cond}) AS vencimiento
         FROM productos p
         {join_stock}
         WHERE LOWER(p.codigo) = LOWER(?) AND p.activo = 1
         {scope}
-    """.format(join_stock=join_stock, scope=scope_sql),
-        params + scope_params).fetchone()
+    """.format(join_stock=join_stock, lote_cond=lote_cond, scope=scope_sql),
+        (([stock_sid] if stock_sid is not None else []) + [codigo]) + scope_params).fetchone()
     conn.close()
     if not row:
         return err("Producto no encontrado con ese código", 404)
@@ -264,13 +283,13 @@ def producto(prod_id):
     sid_p = int(sid_p)
     conn.execute("""
         UPDATE productos SET codigo=?, nombre=?, marca=?, categoria_id=?, unidad=?, stock_minimo=?,
-               costo_promedio=?, precio_venta=?, vencimiento=?, almacen_id=?, proveedor_id=?, sucursal_id=?
+               costo_promedio=?, precio_venta=?, almacen_id=?, proveedor_id=?, sucursal_id=?
         WHERE id=?
     """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
           data.get("categoria_id"),
           data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
           data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
-          data.get("vencimiento"), data.get("almacen_id"), data.get("proveedor_id"), sid_p, prod_id))
+          data.get("almacen_id"), data.get("proveedor_id"), sid_p, prod_id))
     # Ajuste directo de stock: registra la diferencia como movimiento para mantener la sincronía
     stock_nuevo = data.get("stock")
     if stock_nuevo is not None:
@@ -465,15 +484,15 @@ def importar_productos():
                     INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo,
                                            costo_promedio, precio_venta, vencimiento, proveedor_id,
                                            sucursal_id, activo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                """, (codigo, nombre, marca, cat_id, unidad, stock_min, costo, precio, vencimiento, prov_id, sid_imp))
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1)
+                """, (codigo, nombre, marca, cat_id, unidad, stock_min, costo, precio, prov_id, sid_imp))
                 prod_id = cur.lastrowid
                 stock_cant = parse_num(rd.get(h_stock)) if h_stock else 0.0
                 if stock_cant > 0:
                     registrar_movimiento(conn, prod_id, "entrada", stock_cant, costo,
                                          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                          "Importación Excel", session.get("usuario", ""),
-                                         sucursal_id=sid_imp)
+                                         sucursal_id=sid_imp, vencimiento=vencimiento)
                 importados += 1
             except Exception as e:
                 errores.append(f"Fila {row_idx}: {str(e)}")

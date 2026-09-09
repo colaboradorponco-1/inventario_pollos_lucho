@@ -211,6 +211,16 @@ def init_db():
                 "nombre VARCHAR(255) NOT NULL UNIQUE,"
                 "direccion VARCHAR(255) DEFAULT '',"
                 "principal TINYINT DEFAULT 0)")
+    cur.execute("CREATE TABLE IF NOT EXISTS lotes ("
+                "id INT AUTO_INCREMENT PRIMARY KEY,"
+                "producto_id INT NOT NULL,"
+                "sucursal_id INT NOT NULL,"
+                "lote VARCHAR(100),"
+                "cantidad DOUBLE NOT NULL DEFAULT 0,"
+                "fecha_ingreso VARCHAR(50) NOT NULL,"
+                "fecha_vencimiento DATE,"
+                "FOREIGN KEY (producto_id) REFERENCES productos(id),"
+                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
     cur.execute("CREATE TABLE IF NOT EXISTS movimientos ("
                 "id INT AUTO_INCREMENT PRIMARY KEY,"
                 "producto_id INT NOT NULL,"
@@ -220,11 +230,14 @@ def init_db():
                 "fecha VARCHAR(50) NOT NULL,"
                 "sucursal_id INT,"
                 "almacen_id INT,"
+                "lote_id INT,"
+                "vencimiento DATE,"
                 "nota TEXT,"
                 "usuario VARCHAR(255) DEFAULT '',"
                 "FOREIGN KEY (producto_id) REFERENCES productos(id),"
                 "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
-                "FOREIGN KEY (almacen_id) REFERENCES almacenes(id))")
+                "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
+                "FOREIGN KEY (lote_id) REFERENCES lotes(id))")
     cur.execute("CREATE TABLE IF NOT EXISTS gastos ("
                 "id INT AUTO_INCREMENT PRIMARY KEY,"
                 "categoria VARCHAR(255) NOT NULL,"

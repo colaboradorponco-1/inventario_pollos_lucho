@@ -119,35 +119,48 @@ def registrar_auditoria(accion, detalle=""):
 
 
 def stock_actual(conn, prod_id, sucursal_id=None):
+    """Stock actual del producto (suma de sus lotes).
+    Si no se indica sucursal, suma los lotes de todas las sucursales."""
+    from .lotes import stock_lotes
     if sucursal_id is None:
         sucursal_id = sucursal_actual()
-    if sucursal_id is None:
-        fila = conn.execute("SELECT COALESCE(SUM(cantidad),0) c FROM stock WHERE producto_id = ?",
-                            (prod_id,)).fetchone()
-        return fila["c"] or 0.0
-    fila = conn.execute("SELECT cantidad FROM stock WHERE producto_id = ? AND sucursal_id = ?",
-                        (prod_id, sucursal_id)).fetchone()
-    return fila["cantidad"] if fila else 0.0
+    if sucursal_id is not None:
+        return stock_lotes(conn, prod_id, sucursal_id)
+    return stock_lotes(conn, prod_id)
 
 
 def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota, usuario,
-                         sucursal_id=None, proveedor_id=None):
-    """Inserta un movimiento y actualiza el stock de la sucursal en la misma transacción.
+                         sucursal_id=None, proveedor_id=None, vencimiento=None, lote=None):
+    """Inserta un movimiento y actualiza los lotes de la sucursal en la misma transacción.
+
+    - entrada: acumula en el lote con esa fecha de vencimiento (None = lote general).
+    - salida:   consume por FEFO (primero el lote que vence antes); puede generar
+                varios movimientos si la salida abarca más de un lote.
     Si no se indica sucursal y el usuario (p. ej. superadmin) no tiene una asignada,
     se usa la primera sucursal principal como destino del stock."""
+    from .lotes import entrada_lote, salida_fefo
     if sucursal_id is None:
         sucursal_id = sucursal_operativa()
     if sucursal_id is None:
         raise ValueError("No se puede registrar el movimiento sin una sucursal definida")
-    conn.execute("""
-        INSERT INTO movimientos (producto_id, tipo, cantidad, precio_unitario, fecha, sucursal_id, nota, usuario, proveedor_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (producto_id, tipo, cantidad, precio, fecha, sucursal_id, nota, usuario, proveedor_id))
-    signo = cantidad if tipo == "entrada" else -cantidad
-    conn.execute("""
-        INSERT INTO stock (producto_id, sucursal_id, cantidad) VALUES (?, ?, ?)
-        ON DUPLICATE KEY UPDATE cantidad = stock.cantidad + VALUES(cantidad)
-    """, (producto_id, sucursal_id, signo))
+    if tipo == "entrada":
+        lote_id = entrada_lote(conn, producto_id, sucursal_id, cantidad, fecha,
+                               vencimiento=vencimiento, lote_label=lote)
+        conn.execute("""
+            INSERT INTO movimientos (producto_id, tipo, cantidad, precio_unitario, fecha,
+                                     sucursal_id, lote_id, vencimiento, nota, usuario, proveedor_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (producto_id, tipo, cantidad, precio, fecha, sucursal_id, lote_id,
+              vencimiento or None, nota, usuario, proveedor_id))
+        return lote_id
+    consumidos = salida_fefo(conn, producto_id, sucursal_id, cantidad)
+    for lote_id, take in consumidos:
+        conn.execute("""
+            INSERT INTO movimientos (producto_id, tipo, cantidad, precio_unitario, fecha,
+                                     sucursal_id, lote_id, nota, usuario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (producto_id, tipo, take, precio, fecha, sucursal_id, lote_id, nota, usuario))
+    return None
 
 
 def responder_excel(nombre_archivo, encabezados, filas, ancho_col=None, titulo=None):

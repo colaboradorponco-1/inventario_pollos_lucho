@@ -66,7 +66,7 @@ def movimientos():
 
         registrar_movimiento(conn, prod_id, tipo, cantidad, precio, fecha,
                              nota, session.get("usuario", ""), proveedor_id=proveedor_id,
-                             sucursal_id=sid)
+                             sucursal_id=sid, vencimiento=data.get("vencimiento"))
         conn.commit()
         conn.close()
         registrar_auditoria("Movimiento registrado",
@@ -159,14 +159,15 @@ def movimientos_lote():
         if prod["sucursal_id"] != sid:
             errores.append(f"{prod['nombre']}: el producto no pertenece a esta sucursal")
             continue
-        stock_val = stock_actual(conn, prod_id)
+        stock_val = stock_actual(conn, prod_id, sid)
         if tipo == "salida" and stock_val < cantidad:
             errores.append(f"{prod['nombre']}: stock insuficiente ({stock_val})")
             continue
         registrar_movimiento(conn, prod_id, tipo, cantidad,
                              float(item.get("precio_unitario", 0) or 0),
                              fecha, nota, session.get("usuario", ""),
-                             proveedor_id=proveedor_id)
+                             proveedor_id=proveedor_id, sucursal_id=sid,
+                             vencimiento=item.get("vencimiento"))
         registrados += 1
     conn.commit()
     conn.close()

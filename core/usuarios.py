@@ -10,7 +10,7 @@ from .util import ok, err, login_requerido, rol_requerido, registrar_auditoria, 
 # Tablas cuyos datos se vuelcan/restauran en el backup (en orden de dependencias)
 _TABLAS_BACKUP = [
     "almacenes", "categorias", "proveedores", "sucursales", "usuarios",
-    "productos", "stock", "movimientos", "gastos", "ventas", "venta_detalle",
+    "productos", "lotes", "movimientos", "gastos", "ventas", "venta_detalle",
     "repartos", "reparto_detalle", "auditoria",
 ]
 

@@ -253,6 +253,7 @@
                         <option value="salida">Salida (restar stock)</option>
                     </select>
                     <select id="qr-proveedor" style="max-width:220px"></select>
+                    <input type="date" id="qr-vencimiento" title="Fecha de vencimiento (solo entradas)" style="max-width:165px">
                     <label class="scan-input" style="flex:1;margin:0">
                         <span class="scan-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg></span>
                         <input type="text" id="qr-escaneo" placeholder="Apunta el escáner aquí y escanea..." autocomplete="off">
@@ -293,6 +294,9 @@
                         </label>
                         <label>Cantidad
                             <input type="number" id="mov-cantidad" step="any" min="0" required>
+                        </label>
+                        <label id="mov-vencimiento-label">Fecha de vencimiento (entradas)
+                            <input type="date" id="mov-vencimiento">
                         </label>
                         <label>Precio unitario (Bs)
                             <input type="number" id="mov-precio" step="any" min="0">
@@ -470,7 +474,7 @@
             <div class="panel">
                 <h2>Vencimientos</h2>
                 <table class="data-table">
-                    <thead><tr><th>Producto</th><th>Vence</th><th>Stock</th></tr></thead>
+                    <thead><tr><th>Producto</th><th>Sucursal</th><th>Vence</th><th>Stock</th></tr></thead>
                     <tbody id="rep-vencimientos"></tbody>
                 </table>
             </div>
@@ -1023,6 +1027,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="/static/app.js?v=45"></script>
+    <script src="/static/app.js?v=46"></script>
 </body>
 </html>

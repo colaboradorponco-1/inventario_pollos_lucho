@@ -104,7 +104,7 @@ async function loadCatalogos() {
         const el = $(sel);
         if (!el) return null;
         el.innerHTML = '<option value="">' + placeholder + '</option>' +
-            items.map((i) => `<option value="${i.id}">${i[nameKey]}</option>`).join('');
+            items.map((i) => `<option value="${i.id}">${esc(i[nameKey])}</option>`).join('');
         return el;
     };
     fill('#prod-categoria', catalogos.categorias, 'Todas las categorías');
@@ -116,7 +116,7 @@ async function loadCatalogos() {
         const lista = esCentral()
             ? (catalogos.sucursales || [])
             : (catalogos.sucursales || []).filter((s) => s.id === window.SUCURSAL_ID);
-        return lista.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('');
+        return lista.map((i) => `<option value="${i.id}">${esc(i.nombre)}</option>`).join('');
     };
     const selImp = $('#importar-sucursal');
     if (selImp) selImp.innerHTML = '<option value="">Seleccione una sucursal...</option>' + sucursalesOpt();
@@ -316,7 +316,7 @@ function graficoHBar(selector, items, campo, pref, color) {
     cont.innerHTML = items.map((i) => {
         const v = Number(i[campo]) || 0;
         return `<div class="hbar-row">
-            <span class="hbar-label" title="${i.nombre}">${i.nombre}</span>
+            <span class="hbar-label" title="${esc(i.nombre)}">${esc(i.nombre)}</span>
             <div class="hbar-track"><div class="hbar-fill" style="width:${(v / max) * 100}%;background:${color}"></div></div>
             <span class="hbar-value">${pref}${fmtCompacto(v)}</span>
         </div>`;
@@ -726,7 +726,7 @@ async function loadMovimientos() {
                 try {
                     const sucs = await request(API + '/sucursales');
                     select.innerHTML = '<option value="">Todas las sucursales</option>' +
-                        sucs.map((s) => `<option value="${s.id}">${s.principal ? '★ ' : ''}${s.nombre}</option>`).join('');
+                        sucs.map((s) => `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
                 } catch (e) { /* sin sucursales */ }
                 // Por defecto activa la vista "Almacén de Sucursales" sin filtro = se ven TODAS
                 $('#btn-hist-mio').classList.remove('active');
@@ -750,7 +750,7 @@ async function loadMovimientos() {
                 movAlmLabel.style.display = 'block';
                 try {
                     const sucs = await request(API + '/sucursales');
-                    movAlm.innerHTML = sucs.map((s) => `<option value="${s.id}">${s.principal ? '★ ' : ''}${s.nombre}</option>`).join('');
+                    movAlm.innerHTML = sucs.map((s) => `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
                     movAlm.value = window.SUCURSAL_ID || (sucs.find((s) => s.principal) || {}).id || '';
                 } catch (e) { /* sin sucursales */ }
                 sidMov = +movAlm.value || window.SUCURSAL_ID || null;
@@ -768,6 +768,13 @@ async function loadMovimientos() {
 $('#mov-almacen').addEventListener('change', () => {
     popMovProductos(+$('#mov-almacen').value || null);
 });
+
+function toggleMovVencimiento() {
+    const lbl = $('#mov-vencimiento-label');
+    if (lbl) lbl.style.display = $('#mov-tipo').value === 'entrada' ? 'block' : 'none';
+}
+$('#mov-tipo').addEventListener('change', toggleMovVencimiento);
+toggleMovVencimiento();
 
 async function listarMovimientos() {
     const qs = new URLSearchParams();
@@ -835,6 +842,7 @@ $('#form-movimiento').addEventListener('submit', async (e) => {
         sucursal_id: +$('#mov-almacen').value || null,
         proveedor_id: +$('#mov-proveedor').value || null,
         nota: $('#mov-nota').value,
+        vencimiento: $('#mov-vencimiento').value || null,
     };
     if (!body.producto_id) return toast('Seleccione un producto', 'err');
     try {
@@ -944,10 +952,12 @@ $('#btn-qr-registrar').addEventListener('click', async () => {
     if (!keys.length) return toast('No hay productos para registrar', 'err');
     const tipo = $('#qr-tipo').value;
     const proveedor_id = +($('#qr-proveedor').value) || null;
+    const vencimiento = $('#qr-vencimiento').value || null;
     const items = keys.map((k) => ({
         producto_id: qrItems[k].producto_id,
         cantidad: qrItems[k].cantidad,
         precio_unitario: qrItems[k].precio_unitario || 0,
+        vencimiento,
     }));
     try {
         const res = await request(API + '/movimientos/lote', {
@@ -1358,8 +1368,8 @@ async function loadReportes() {
 
         const venc = await request(API + '/reportes/vencimientos');
         $('#rep-vencimientos').innerHTML = venc.map((v) => `
-            <tr><td>${v.nombre}</td><td>${fmtDate(v.vencimiento)}</td><td>${v.stock} ${v.unidad}</td></tr>`).join('')
-            || '<tr><td colspan="3" class="empty">Sin productos con vencimiento</td></tr>';
+            <tr><td>${esc(v.nombre)}</td><td>${v.sucursal || '—'}</td><td>${fmtDate(v.vencimiento)}</td><td>${v.stock} ${v.unidad}</td></tr>`).join('')
+            || '<tr><td colspan="4" class="empty">Sin lotes con vencimiento</td></tr>';
 
         const repartos = await request(API + '/reportes/repartos?' + qs.toString());
         $('#rep-repartos').innerHTML = repartos.map((r) => `
@@ -1751,7 +1761,7 @@ async function loadRepartos() {
         const esPrincipal = !!window.SUCURSAL_PRINCIPAL;
         const destino = sucursales.filter((s) => s.id !== window.SUCURSAL_ID && (esGestion || esPrincipal || !s.principal));
         $('#reparto-sucursal').innerHTML = destino.map((s) =>
-            `<option value="${s.id}">${s.principal ? '★ ' : ''}${s.nombre}</option>`).join('');
+            `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
         $('#repartos-info').textContent = `Cochabamba · ${sucursales.length} sucursales`;
         if (window.ROL === 'superadmin') {
             $('#btn-gestionar-sucursales').style.display = 'inline-flex';
@@ -1940,7 +1950,7 @@ async function cargarSucursales() {
     const sucursales = await request(API + '/sucursales');
     $('#sucursales-tbody').innerHTML = sucursales.map((s) => `
         <tr>
-            <td><strong>${s.nombre}</strong></td>
+            <td><strong>${esc(s.nombre)}</strong></td>
             <td>${s.direccion || '—'}</td>
             <td><span class="badge ${s.principal ? 'badge-bajo' : 'badge-entrada'}">${s.principal ? 'Principal' : 'Sucursal'}</span></td>
             <td>${s.num_repartos}</td>
@@ -2245,7 +2255,7 @@ async function loadPedidos() {
         const sucursales = await request(API + '/sucursales');
         $('#pedido-destino').innerHTML = '<option value="">Seleccione la sucursal que provee...</option>' +
             sucursales.filter((s) => s.id !== window.SUCURSAL_ID).map((s) =>
-                `<option value="${s.id}">${s.principal ? '★ ' : ''}${s.nombre}</option>`).join('');
+                `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
         if (window.ROL === 'encargado') {
             const mie = sucursales.find((x) => x.id === window.SUCURSAL_ID);
             $('#pedido-sucursal').innerHTML = mie
@@ -2261,7 +2271,7 @@ async function loadPedidos() {
                 if (form && form.closest('.panel')) form.closest('.panel').style.display = 'none';
             }
             $('#pedido-sucursal').innerHTML = sucursales.map((s) =>
-                `<option value="${s.id}">${s.principal ? '★ ' : ''}${s.nombre}</option>`).join('');
+                `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
         }
         popPedidoProductos(+$('#pedido-destino').value || null);
         $('#pedidos-info').textContent = `Tickets por pedido de sucursal.`;

@@ -63,6 +63,21 @@ CREATE TABLE IF NOT EXISTS `sucursales` (
   `principal` TINYINT DEFAULT 0
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Lotes por producto y sucursal: cada lote tiene su cantidad y fecha de vencimiento.
+-- fecha_vencimiento NULL = sin vencimiento (lote general). El stock del producto
+-- es la suma de sus lotes y las salidas consumen FEFO (primero el que vence antes).
+CREATE TABLE IF NOT EXISTS `lotes` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `producto_id` INT NOT NULL,
+  `sucursal_id` INT NOT NULL,
+  `lote` VARCHAR(100),
+  `cantidad` DOUBLE NOT NULL DEFAULT 0,
+  `fecha_ingreso` VARCHAR(50) NOT NULL,
+  `fecha_vencimiento` DATE,
+  CONSTRAINT `fk_lote_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`),
+  CONSTRAINT `fk_lote_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Stock por producto Y por sucursal (PK compuesta)
 CREATE TABLE IF NOT EXISTS `stock` (
   `producto_id` INT NOT NULL,
@@ -81,11 +96,14 @@ CREATE TABLE IF NOT EXISTS `movimientos` (
   `precio_unitario` DOUBLE DEFAULT 0,
   `fecha` VARCHAR(50) NOT NULL,
   `almacen_id` INT,
+  `lote_id` INT,
+  `vencimiento` DATE,
   `nota` TEXT,
   `usuario` VARCHAR(255) DEFAULT '',
   `sucursal_id` INT,
   CONSTRAINT `fk_mov_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`),
-  CONSTRAINT `fk_mov_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`)
+  CONSTRAINT `fk_mov_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`),
+  CONSTRAINT `fk_mov_lote` FOREIGN KEY (`lote_id`) REFERENCES `lotes`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `gastos` (

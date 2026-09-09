@@ -42,41 +42,41 @@ def dashboard():
         total_productos = conn.execute("SELECT COUNT(*) c FROM productos WHERE activo = 1").fetchone()["c"]
     else:
         total_productos = conn.execute("""
-            SELECT COUNT(DISTINCT s.producto_id) c
-            FROM stock s JOIN productos p ON p.id = s.producto_id
-            WHERE p.activo = 1 AND s.sucursal_id = %s
+            SELECT COUNT(DISTINCT l.producto_id) c
+            FROM lotes l JOIN productos p ON p.id = l.producto_id
+            WHERE p.activo = 1 AND l.sucursal_id = %s
         """, (sid,)).fetchone()["c"]
 
     if sid is None:
         stock_total = conn.execute("""
-            SELECT COUNT(*) c FROM stock s JOIN productos p ON p.id = s.producto_id
-            WHERE s.cantidad > 0 AND p.activo = 1
+            SELECT COUNT(*) c FROM lotes l JOIN productos p ON p.id = l.producto_id
+            WHERE l.cantidad > 0 AND p.activo = 1
         """).fetchone()["c"]
         valor = conn.execute("""
-            SELECT COALESCE(SUM(s.cantidad * p.costo_promedio), 0) AS valor
-            FROM stock s JOIN productos p ON p.id = s.producto_id
-            WHERE s.cantidad > 0 AND p.activo = 1
+            SELECT COALESCE(SUM(l.cantidad * p.costo_promedio), 0) AS valor
+            FROM lotes l JOIN productos p ON p.id = l.producto_id
+            WHERE l.cantidad > 0 AND p.activo = 1
         """).fetchone()["valor"]
     else:
         stock_total = conn.execute("""
-            SELECT COUNT(*) c FROM stock s JOIN productos p ON p.id = s.producto_id
-            WHERE s.cantidad > 0 AND p.activo = 1 AND s.sucursal_id = %s
+            SELECT COUNT(*) c FROM lotes l JOIN productos p ON p.id = l.producto_id
+            WHERE l.cantidad > 0 AND p.activo = 1 AND l.sucursal_id = %s
         """, (sid,)).fetchone()["c"]
         valor = conn.execute("""
-            SELECT COALESCE(SUM(s.cantidad * p.costo_promedio), 0) AS valor
-            FROM stock s JOIN productos p ON p.id = s.producto_id
-            WHERE s.cantidad > 0 AND p.activo = 1 AND s.sucursal_id = %s
+            SELECT COALESCE(SUM(l.cantidad * p.costo_promedio), 0) AS valor
+            FROM lotes l JOIN productos p ON p.id = l.producto_id
+            WHERE l.cantidad > 0 AND p.activo = 1 AND l.sucursal_id = %s
         """, (sid,)).fetchone()["valor"]
 
     # Joins para las alertas de stock (globales si el usuario las ve de todas las sucursales)
     if alerta_global:
-        stock_join = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
+        stock_join = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         stock_where = ""
         stock_params = []
     else:
-        stock_join = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = %s"
-        stock_where = " AND s.sucursal_id = %s AND s.producto_id IS NOT NULL"
-        stock_params = [sid, sid]
+        stock_join = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = %s GROUP BY producto_id) s ON s.producto_id = p.id"
+        stock_where = " AND s.producto_id IS NOT NULL"
+        stock_params = [sid]
 
     # Top entradas/salidas
     top_entrada = conn.execute("""
@@ -104,27 +104,27 @@ def dashboard():
     """.format(join=stock_join, where=stock_where), stock_params).fetchall()
 
     if alerta_global:
-        corr_stock = "0"
         por_extra = ""
         por_params = [hoy, hoy, hoy]
     else:
-        corr_stock = "COALESCE((SELECT s2.cantidad FROM stock s2 WHERE s2.producto_id = p.id AND s2.sucursal_id = %s), 0)"
-        por_extra = " AND p.id IN (SELECT DISTINCT producto_id FROM stock WHERE sucursal_id = %s)"
-        por_params = [sid, hoy, hoy, hoy, sid]
+        por_extra = " AND l.sucursal_id = %s"
+        por_params = [hoy, hoy, hoy, sid]
 
     por_vencer = conn.execute("""
-        SELECT p.id, p.nombre, p.vencimiento, p.unidad, {corr} AS stock,
+        SELECT p.id, p.nombre, l.fecha_vencimiento AS vencimiento, p.unidad, SUM(l.cantidad) AS stock,
                CASE
-                   WHEN STR_TO_DATE(p.vencimiento, '%Y-%m-%d') < DATE(%s) THEN 'vencido'
-                   WHEN STR_TO_DATE(p.vencimiento, '%Y-%m-%d') <= DATE_ADD(DATE(%s), INTERVAL 7 DAY) THEN 'urgente'
+                   WHEN l.fecha_vencimiento < DATE(%s) THEN 'vencido'
+                   WHEN l.fecha_vencimiento <= DATE_ADD(DATE(%s), INTERVAL 7 DAY) THEN 'urgente'
                    ELSE 'proximo'
                END AS estado
-        FROM productos p
-        WHERE p.activo = 1 AND p.vencimiento IS NOT NULL AND p.vencimiento != ''
-          AND STR_TO_DATE(p.vencimiento, '%Y-%m-%d') <= DATE_ADD(DATE(%s), INTERVAL 30 DAY)
+        FROM lotes l
+        JOIN productos p ON p.id = l.producto_id
+        WHERE p.activo = 1 AND l.cantidad > 0 AND l.fecha_vencimiento IS NOT NULL
+          AND l.fecha_vencimiento <= DATE_ADD(DATE(%s), INTERVAL 30 DAY)
               {extra}
-        ORDER BY p.vencimiento
-    """.format(corr=corr_stock, extra=por_extra), por_params).fetchall()
+        GROUP BY p.id, p.nombre, l.fecha_vencimiento, p.unidad
+        ORDER BY l.fecha_vencimiento
+    """.format(extra=por_extra), por_params).fetchall()
 
     q, p = scoped("v.sucursal_id", " AND substr(v.fecha, 1, 7) = substr(%s, 1, 7)", [hoy])
     ventas_mes = esc(("SELECT COALESCE(SUM(v.total), 0) AS t FROM ventas v" + q, p))
@@ -146,10 +146,10 @@ def dashboard():
     salidas_mes = esc(("SELECT COALESCE(SUM(m.cantidad), 0) AS t FROM movimientos m" + q, p))
 
     por_vencer_hoy = conn.execute("""
-        SELECT COUNT(*) c FROM productos p
-        WHERE p.activo = 1 AND p.vencimiento IS NOT NULL AND p.vencimiento != ''
-          AND STR_TO_DATE(p.vencimiento, '%Y-%m-%d') <= DATE(%s)
-    """ + (" AND " + ("p.id IN (SELECT DISTINCT producto_id FROM stock WHERE sucursal_id = %s)" if not alerta_global else "1=1")), (hoy,) + (tuple([sid]) if not alerta_global else ())).fetchone()["c"]
+        SELECT COUNT(*) c FROM lotes l JOIN productos p ON p.id = l.producto_id
+        WHERE p.activo = 1 AND l.cantidad > 0 AND l.fecha_vencimiento IS NOT NULL
+          AND l.fecha_vencimiento <= DATE(%s)
+    """ + (" AND " + ("l.sucursal_id = %s" if not alerta_global else "1=1")), (hoy,) + (tuple([sid]) if not alerta_global else ())).fetchone()["c"]
 
     def count_scoped(fn):
         c, cp = fn

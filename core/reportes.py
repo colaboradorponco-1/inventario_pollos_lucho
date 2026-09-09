@@ -61,22 +61,27 @@ def exportar_productos():
     sid = sucursal_actual()
     ver_todo = es_gestion() or es_encargado_almacen(conn)
     if ver_todo or sid is None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
+        lote_cond = ""
         stock_params = []
     else:
-        join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = %s"
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = %s GROUP BY producto_id) s ON s.producto_id = p.id"
+        lote_cond = " AND l2.sucursal_id = " + str(int(sid))
         stock_params = [sid]
     q = """
         SELECT p.codigo, p.nombre, p.marca, c.nombre AS categoria, a.nombre AS almacen,
                p.unidad, p.stock_minimo, p.costo_promedio, p.precio_venta,
-               COALESCE(s.cantidad, 0) AS stock, p.vencimiento, pr.nombre AS proveedor
+               COALESCE(s.cantidad, 0) AS stock, p.vencimiento, pr.nombre AS proveedor,
+               (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
+                WHERE l2.producto_id = p.id AND l2.cantidad > 0
+                  AND l2.fecha_vencimiento IS NOT NULL{lote_cond}) AS venc
         FROM productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN almacenes a ON a.id = p.almacen_id
         LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
         {join_stock}
         WHERE p.activo = ?
-    """.format(join_stock=join_stock)
+    """.format(join_stock=join_stock, lote_cond=lote_cond)
     params = stock_params
     if estado == "inactivos":
         params.append(0)
@@ -110,14 +115,16 @@ def exportar_productos():
     elif estado == "stock-bajo":
         q += " AND p.stock_minimo > 0 AND COALESCE(s.cantidad, 0) <= p.stock_minimo"
     elif estado == "por-vencer":
-        q += (" AND p.vencimiento IS NOT NULL AND p.vencimiento != ''"
-              " AND STR_TO_DATE(p.vencimiento, '%Y-%m-%d') <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)")
+        q += (" AND EXISTS (SELECT 1 FROM lotes l2 WHERE l2.producto_id = p.id AND l2.cantidad > 0"
+              " AND l2.fecha_vencimiento IS NOT NULL"
+              " AND l2.fecha_vencimiento <= DATE_ADD(CURDATE(), INTERVAL 14 DAY){lote_cond})"
+              ).format(lote_cond=lote_cond)
     q += " ORDER BY p.nombre"
     rows = conn.execute(q, params).fetchall()
     conn.close()
     filas = [(r["codigo"] or "", r["nombre"], r["marca"] or "", r["categoria"] or "", r["almacen"] or "",
               r["unidad"], r["stock"], r["stock_minimo"], r["costo_promedio"],
-              r["precio_venta"], r["proveedor"] or "", r["vencimiento"] or "") for r in rows]
+              r["precio_venta"], r["proveedor"] or "", r["venc"] or "") for r in rows]
     return responder_excel("productos.xlsx",
                          ["Código", "Producto", "Marca", "Categoría", "Almacén", "Unidad",
                           "Stock", "Stock mínimo", "Costo (Bs)", "Precio venta (Bs)",
@@ -338,10 +345,10 @@ def reporte_valorizacion():
     conn = get_conn()
     sid = sucursal_actual()
     if sid is None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         params = []
     else:
-        join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = %s"
+        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = %s GROUP BY producto_id) s ON s.producto_id = p.id"
         params = [sid]
     rows = conn.execute("""
         SELECT p.nombre, p.unidad, p.costo_promedio, p.precio_venta,
@@ -363,18 +370,20 @@ def reporte_vencimientos():
     conn = get_conn()
     sid = sucursal_actual()
     if sid is None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM stock GROUP BY producto_id) s ON s.producto_id = p.id"
         params = []
+        lote_cond = ""
     else:
-        join_stock = "LEFT JOIN stock s ON s.producto_id = p.id AND s.sucursal_id = %s"
         params = [sid]
+        lote_cond = " AND l.sucursal_id = %s"
     rows = conn.execute("""
-        SELECT p.nombre, p.vencimiento, p.unidad, COALESCE(s.cantidad, 0) AS stock
-        FROM productos p
-        {join_stock}
-        WHERE p.activo = 1 AND p.vencimiento IS NOT NULL AND p.vencimiento != ''
-        ORDER BY p.vencimiento
-    """.format(join_stock=join_stock), params).fetchall()
+        SELECT p.nombre, l.fecha_vencimiento AS vencimiento, p.unidad,
+               l.cantidad AS stock, s.nombre AS sucursal
+        FROM lotes l
+        JOIN productos p ON p.id = l.producto_id
+        JOIN sucursales s ON s.id = l.sucursal_id
+        WHERE p.activo = 1 AND l.cantidad > 0 AND l.fecha_vencimiento IS NOT NULL{lote_cond}
+        ORDER BY l.fecha_vencimiento
+    """.format(lote_cond=lote_cond), params).fetchall()
     conn.close()
     return ok([dict(r) for r in rows])
 
@@ -382,31 +391,16 @@ def reporte_vencimientos():
 def _auditar(conn):
     """Resumen de consistencia numérica del sistema (solo lectura)."""
     rows = conn.execute("""
-        SELECT p.nombre, p.id AS producto_id, st.sucursal_id, s.nombre AS sucursal,
-               st.cantidad AS stock_tab,
-               COALESCE(m.c, 0) AS mov,
-               st.cantidad - COALESCE(m.c, 0) AS dif
-        FROM stock st
-        JOIN productos p ON p.id = st.producto_id
-        JOIN sucursales s ON s.id = st.sucursal_id
-        LEFT JOIN (
-            SELECT producto_id, sucursal_id, SUM(IF(tipo='entrada', cantidad, -cantidad)) c
-            FROM movimientos GROUP BY producto_id, sucursal_id
-        ) m ON m.producto_id = st.producto_id AND m.sucursal_id = st.sucursal_id
-        WHERE st.cantidad - COALESCE(m.c, 0) <> 0
-        ORDER BY p.nombre, s.nombre
-    """).fetchall()
-    faltantes = conn.execute("""
-        SELECT p.nombre, p.id AS producto_id, m.sucursal_id, s.nombre AS sucursal,
-               0 AS stock_tab, m.c AS mov, 0 - m.c AS dif
-        FROM (
-            SELECT producto_id, sucursal_id, SUM(IF(tipo='entrada', cantidad, -cantidad)) c
-            FROM movimientos GROUP BY producto_id, sucursal_id
-        ) m
-        JOIN productos p ON p.id = m.producto_id
-        JOIN sucursales s ON s.id = m.sucursal_id
-        LEFT JOIN stock st ON st.producto_id = m.producto_id AND st.sucursal_id = m.sucursal_id
-        WHERE st.producto_id IS NULL AND m.c <> 0
+        SELECT p.nombre, p.id AS producto_id, l.sucursal_id, s.nombre AS sucursal,
+               l.cantidad AS stock_tab, l.fecha_vencimiento AS venc,
+               SUM(IF(ml.tipo='entrada', ml.cantidad, -ml.cantidad)) AS mov,
+               l.cantidad - SUM(IF(ml.tipo='entrada', ml.cantidad, -ml.cantidad)) AS dif
+        FROM lotes l
+        JOIN productos p ON p.id = l.producto_id
+        JOIN sucursales s ON s.id = l.sucursal_id
+        LEFT JOIN movimientos ml ON ml.lote_id = l.id
+        GROUP BY l.id, p.nombre, p.id, l.sucursal_id, s.nombre, l.cantidad, l.fecha_vencimiento
+        HAVING ABS(l.cantidad - SUM(IF(ml.tipo='entrada', ml.cantidad, -ml.cantidad))) > 0.001
         ORDER BY p.nombre, s.nombre
     """).fetchall()
     ventas = conn.execute("""
@@ -425,20 +419,20 @@ def _auditar(conn):
     """).fetchone()
     val = conn.execute("""
         SELECT s.nombre AS sucursal,
-               ROUND(SUM(p.costo_promedio * st.cantidad), 2) AS valor,
-               SUM(st.cantidad) AS unid
-        FROM stock st
-        JOIN productos p ON p.id = st.producto_id
-        JOIN sucursales s ON s.id = st.sucursal_id
-        WHERE st.cantidad <> 0
-        GROUP BY st.sucursal_id
+               ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor,
+               SUM(l.cantidad) AS unid
+        FROM lotes l
+        JOIN productos p ON p.id = l.producto_id
+        JOIN sucursales s ON s.id = l.sucursal_id
+        WHERE l.cantidad <> 0
+        GROUP BY l.sucursal_id
         ORDER BY valor DESC
     """).fetchall()
-    con_stock = conn.execute("SELECT COUNT(*) AS n FROM stock WHERE cantidad > 0").fetchone()["n"]
-    con_venc = conn.execute("SELECT COUNT(*) AS n FROM productos WHERE activo = 1 AND vencimiento IS NOT NULL AND vencimiento != ''").fetchone()["n"]
+    con_stock = conn.execute("SELECT COUNT(*) AS n FROM lotes WHERE cantidad > 0").fetchone()["n"]
+    con_venc = conn.execute("SELECT COUNT(*) AS n FROM lotes WHERE cantidad > 0 AND fecha_vencimiento IS NOT NULL").fetchone()["n"]
     proveedores = conn.execute("SELECT COUNT(*) AS n FROM proveedores").fetchone()["n"]
     return {
-        "descuadres": [dict(r) for r in rows] + [dict(r) for r in faltantes],
+        "descuadres": [dict(r) for r in rows],
         "ventas": dict(ventas),
         "repartos": dict(repartos),
         "valorizacion": [dict(r) for r in val],
@@ -481,13 +475,11 @@ def reporte_reconciliar():
         if not existe:
             conn.execute("DELETE FROM movimientos WHERE id = %s", (m["id"],))
             borrados += 1
-    conn.execute("CREATE TEMPORARY TABLE mcalc AS "
-                 "SELECT producto_id, sucursal_id, SUM(IF(tipo='entrada', cantidad, -cantidad)) c "
-                 "FROM movimientos GROUP BY producto_id, sucursal_id")
-    conn.execute("DELETE FROM stock")
-    conn.execute("INSERT INTO stock (producto_id, sucursal_id, cantidad) "
-                 "SELECT producto_id, sucursal_id, c FROM mcalc WHERE c <> 0")
-    conn.execute("DROP TEMPORARY TABLE mcalc")
+    conn.execute("UPDATE lotes l JOIN "
+                 "(SELECT lote_id, SUM(IF(tipo='entrada', cantidad, -cantidad)) c "
+                 " FROM movimientos WHERE lote_id IS NOT NULL GROUP BY lote_id) m ON m.lote_id = l.id "
+                 "SET l.cantidad = m.c")
+    conn.execute("UPDATE lotes SET cantidad = 0 WHERE cantidad < 0.0001")
     conn.execute("UPDATE ventas v JOIN (SELECT venta_id, SUM(subtotal) t FROM venta_detalle GROUP BY venta_id) d "
                  "ON d.venta_id = v.id SET v.total = d.t")
     conn.execute("UPDATE repartos r JOIN (SELECT reparto_id, SUM(subtotal) t FROM reparto_detalle GROUP BY reparto_id) d "

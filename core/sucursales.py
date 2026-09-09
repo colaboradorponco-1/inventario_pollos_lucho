@@ -64,7 +64,7 @@ def sucursal(suc_id):
             return err("No se puede eliminar la sucursal a la que perteneces")
         # Verificar dependencias que impedirían el borrado (evita error 500 del servidor)
         checks = [
-            ("stock", "SELECT COUNT(*) c FROM stock WHERE sucursal_id = ?", "tiene stock de productos"),
+            ("lotes", "SELECT COUNT(*) c FROM lotes WHERE sucursal_id = ?", "tiene stock de productos"),
             ("movimientos", "SELECT COUNT(*) c FROM movimientos WHERE sucursal_id = ?", "tiene movimientos registrados"),
             ("usuarios", "SELECT COUNT(*) c FROM usuarios WHERE sucursal_id = ?", "tiene usuarios asignados"),
             ("pedidos", "SELECT COUNT(*) c FROM pedidos WHERE sucursal_id = ?", "tiene pedidos asociados"),
