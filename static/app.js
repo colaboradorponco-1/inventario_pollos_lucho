@@ -109,6 +109,17 @@ async function loadCatalogos() {
     fill('#prod-categoria-form', catalogos.categorias, '— Sin categoría —');
     fill('#prod-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#prod-filtro-proveedor', catalogos.proveedores, 'Todos los proveedores');
+    fill('#prov-sucursal', catalogos.sucursales, '— Sin sucursal —');
+    const sucursalesOpt = () => {
+        const lista = esCentral()
+            ? (catalogos.sucursales || [])
+            : (catalogos.sucursales || []).filter((s) => s.id === window.SUCURSAL_ID);
+        return lista.map((i) => `<option value="${i.id}">${i.nombre}</option>`).join('');
+    };
+    const selImp = $('#importar-sucursal');
+    if (selImp) selImp.innerHTML = '<option value="0">Globales (sin sucursal)</option>' + sucursalesOpt();
+    const selExp = $('#exportar-sucursal');
+    if (selExp) selExp.innerHTML = '<option value="">Todas las sucursales</option><option value="0">Globales</option>' + sucursalesOpt();
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
     fill('#prod-sucursal', catalogos.sucursales, '— Sin sucursal —');
     fill('#mov-almacen', catalogos.almacenes, '— Sin almacén —');
@@ -491,7 +502,15 @@ async function verHistorialProducto(id) {
     }
 }
 
-$('#btn-exportar-productos').addEventListener('click', exportarProductos);
+$('#btn-exportar-productos').addEventListener('click', () => {
+    const sel = $('#exportar-sucursal');
+    if (sel) sel.value = _prodSuc;
+    $('#modal-exportar-prod').classList.add('open');
+});
+$('#btn-confirmar-exportar').addEventListener('click', () => {
+    $('#modal-exportar-prod').classList.remove('open');
+    exportarProductos();
+});
 
 $('#btn-importar-prod').addEventListener('click', () => {
     $('#importar-resultado').innerHTML = '';
@@ -513,6 +532,8 @@ $('#btn-ejecutar-importar').addEventListener('click', async () => {
     if (!archivo) return;
     const fd = new FormData();
     fd.append('archivo', archivo);
+    const impSuc = $('#importar-sucursal');
+    if (impSuc) fd.append('sucursal_id', impSuc.value);
     try {
         const res = await fetch(API + '/productos/importar', {
             method: 'POST', body: fd
@@ -537,12 +558,13 @@ function exportarProductos() {
     const categoria = ($('#prod-categoria') || {}).value || '';
     const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
     const estado = ($('#prod-estado') || {}).value || '';
+    const suc = ($('#exportar-sucursal') || {}).value;
     const qs = new URLSearchParams();
     if (filtro) qs.set('filtro', filtro);
     if (categoria) qs.set('categoria', categoria);
     if (proveedor) qs.set('proveedor', proveedor);
     if (estado) qs.set('estado', estado);
-    if (_prodSuc !== '') qs.set('sucursal', _prodSuc);
+    if (suc !== undefined && suc !== '') qs.set('sucursal', suc);
     window.location.href = API + '/exportar/productos?' + qs.toString();
 }
 

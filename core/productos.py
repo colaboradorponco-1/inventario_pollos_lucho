@@ -362,6 +362,16 @@ def importar_productos():
                         return h
             return None
 
+        sid_imp = None
+        raw_suc = request.form.get("sucursal_id", "").strip()
+        if raw_suc and raw_suc not in ("0", ""):
+            s = int(raw_suc)
+            if not (es_gestion() or es_encargado_almacen(conn)) and s != sucursal_actual():
+                conn.close()
+                wb.close()
+                return err("No tienes permisos para importar a esa sucursal", 403)
+            sid_imp = s
+
         h_nombre = buscar("nombre", "producto", "articulo")
         h_codigo = buscar("codigo", "codigo de barras", "ean", "cod")
         h_unidad = buscar("unidad", "unidades")
@@ -408,22 +418,24 @@ def importar_productos():
                     f = conn.execute("SELECT id FROM proveedores WHERE nombre = ?", (proveedor,)).fetchone()
                     if not f:
                         cur = conn.execute("INSERT INTO proveedores (nombre, sucursal_id) VALUES (?, ?)",
-                                           (proveedor, sucursal_operativa()))
+                                           (proveedor, sid_imp))
                         prov_id = cur.lastrowid
                     else:
                         prov_id = f["id"]
 
                 cur = conn.execute("""
                     INSERT INTO productos (codigo, nombre, categoria_id, unidad, stock_minimo,
-                                           costo_promedio, precio_venta, vencimiento, proveedor_id, activo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
-                """, (codigo, nombre, cat_id, unidad, stock_min, costo, precio, vencimiento, prov_id))
+                                           costo_promedio, precio_venta, vencimiento, proveedor_id,
+                                           sucursal_id, activo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                """, (codigo, nombre, cat_id, unidad, stock_min, costo, precio, vencimiento, prov_id, sid_imp))
                 prod_id = cur.lastrowid
                 stock_cant = parse_num(rd.get(h_stock)) if h_stock else 0.0
                 if stock_cant > 0:
                     registrar_movimiento(conn, prod_id, "entrada", stock_cant, costo,
                                          datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                         "Importación Excel", session.get("usuario", ""))
+                                         "Importación Excel", session.get("usuario", ""),
+                                         sucursal_id=sid_imp)
                 importados += 1
             except Exception as e:
                 errores.append(f"Fila {row_idx}: {str(e)}")

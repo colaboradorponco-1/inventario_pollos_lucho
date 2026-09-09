@@ -800,6 +800,10 @@
             <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
                 Columnas: <strong>nombre</strong> (obligatorio), codigo, unidad, costo, precio, stock_minimo, categoria, proveedor, vencimiento, stock
             </p>
+            <label>Sucursal destino
+                <select id="importar-sucursal"></select>
+                <small style="color:var(--muted)">Globales = producto sin sucursal asignada (visible en almacenes principales)</small>
+            </label>
             <input type="file" id="importar-archivo" accept=".xlsx,.xls" style="display:none;">
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
                 <button class="btn" id="btn-seleccionar-archivo">Seleccionar archivo</button>
@@ -809,6 +813,23 @@
                 <button class="btn btn-primary" id="btn-ejecutar-importar" disabled>Importar</button>
             </div>
             <div id="importar-resultado" style="margin-top:10px;"></div>
+        </div>
+    </div>
+
+    <!-- MODAL EXPORTAR PRODUCTOS -->
+    <div id="modal-exportar-prod" class="modal">
+        <div class="modal-content">
+            <span class="close" data-close="modal-exportar-prod">&times;</span>
+            <h2>Exportar productos a Excel</h2>
+            <label>Sucursal
+                <select id="exportar-sucursal"></select>
+            </label>
+            <p style="color:var(--muted);font-size:13px;margin:8px 0 16px;">
+                Se exportará con el filtro, categoría y estado actuales de la vista de productos.
+            </p>
+            <div style="text-align:right;">
+                <button class="btn btn-primary" id="btn-confirmar-exportar">Exportar</button>
+            </div>
         </div>
     </div>
 
@@ -995,6 +1016,6 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="/static/app.js?v=39"></script>
+    <script src="/static/app.js?v=40"></script>
 </body>
 </html>
