@@ -9,7 +9,7 @@ import time
 from datetime import timedelta
 
 from flask import (Flask, jsonify, redirect, render_template,
-                   request as flask_request, session)
+                   request as flask_request, send_from_directory, session)
 
 from database import init_db
 from core.auth import auth_bp
@@ -104,6 +104,14 @@ def create_app():
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "SAMEORIGIN"
         resp.headers["Referrer-Policy"] = "same-origin"
+        return resp
+
+    @app.route("/sw.js")
+    def service_worker():
+        """Sirve el service worker desde la raíz para que controle toda la app (PWA)."""
+        resp = send_from_directory(app.static_folder, "sw.js",
+                                   mimetype="application/javascript")
+        resp.headers["Service-Worker-Allowed"] = "/"
         return resp
 
     @app.errorhandler(404)

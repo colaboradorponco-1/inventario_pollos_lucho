@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sin conexión - Pollos Lucho</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Jost', 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #0C0908;
+            color: #FFFFFF;
+            text-align: center;
+            padding: 24px;
+        }
+        .card { max-width: 380px; }
+        .logo {
+            width: 96px; height: 96px;
+            border-radius: 22px;
+            background: #FCC302;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 22px;
+            font-weight: 700;
+            font-size: 40px;
+            color: #0C0908;
+        }
+        h1 { font-size: 24px; margin-bottom: 10px; }
+        p { color: #C9C4C1; font-size: 15px; line-height: 1.5; margin-bottom: 22px; }
+        button {
+            font-family: inherit;
+            font-size: 15px;
+            font-weight: 600;
+            padding: 12px 26px;
+            border: none;
+            border-radius: 10px;
+            background: #FCC302;
+            color: #0C0908;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">PL</div>
+        <h1>Sin conexión</h1>
+        <p>No hay internet en este momento. Revisa tu conexión y vuelve a intentarlo para seguir trabajando con el inventario.</p>
+        <button onclick="location.reload()">Reintentar</button>
+    </div>
+</body>
+</html>
