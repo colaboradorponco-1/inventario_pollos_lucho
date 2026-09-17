@@ -5,7 +5,8 @@ from flask import Blueprint, request, session
 from database import get_conn
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    stock_actual, responder_excel, ok_paginado, paginar_params,
-                   sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion)
+                   sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion,
+                   flotante)
 
 movimientos_bp = Blueprint("movimientos", __name__)
 
@@ -16,13 +17,24 @@ def movimientos():
     conn = get_conn()
     if request.method == "POST":
         data = request.get_json()
-        prod_id = data["producto_id"]
-        tipo = data["tipo"]
-        cantidad = float(data.get("cantidad", 0) or 0)
-        if cantidad <= 0:
+        if data is None:
             conn.close()
-            return err("La cantidad debe ser mayor a cero")
-        precio = float(data.get("precio_unitario", 0) or 0)
+            return err("Datos inválidos")
+        prod_id = data.get("producto_id")
+        tipo = data.get("tipo")
+        if tipo not in ("entrada", "salida"):
+            conn.close()
+            return err("Tipo de movimiento inválido")
+        try:
+            prod_id = int(prod_id)
+        except (TypeError, ValueError):
+            conn.close()
+            return err("Producto no válido")
+        cantidad = flotante(data.get("cantidad"), 0)
+        if cantidad is None or cantidad <= 0:
+            conn.close()
+            return err("La cantidad debe ser un número mayor a cero")
+        precio = flotante(data.get("precio_unitario"), 0) or 0.0
         fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         nota = data.get("nota", "")
         proveedor_id = data.get("proveedor_id")

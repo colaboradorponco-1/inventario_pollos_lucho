@@ -5,11 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Inventario Pollos Lucho</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
-    <link rel="stylesheet" href="/static/style.css?v=10">
+    <link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <button class="salir-top" id="btn-salir-top" aria-label="Cerrar sesión" title="Cerrar sesión">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Salir
+    </button>
+    <button class="sidebar-abrir" id="btn-sidebar-abrir" aria-label="Mostrar menú" title="Mostrar menú">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -20,66 +27,85 @@
                 <h1>Pollos Lucho</h1>
                 <span class="subtitle">Sistema de Inventario</span>
             </div>
+            <button class="sidebar-toggle" id="btn-sidebar-toggle" title="Ocultar menú" aria-label="Ocultar menú">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
         </div>
-        <nav class="menu">
+        <nav class="menu" aria-label="Menú principal">
             <button class="menu-btn active" data-view="dashboard">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                 Inicio
                 <span class="badge-alerta" id="badge-alertas" style="display:none"></span>
             </button>
-            <button class="menu-btn" data-view="productos">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-                Productos
-            </button>
-            <button class="menu-btn" data-view="movimientos">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-                Entradas / Salidas
-            </button>
-            <button class="menu-btn" data-view="proveedores">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                Proveedores
-            </button>
-            <button class="menu-btn" data-view="gastos">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
-                Gastos
-            </button>
-            <button class="menu-btn" data-view="ventas">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                Ventas
-            </button>
-            <button class="menu-btn" data-view="repartos">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
-                Repartos
-            </button>
-            <button class="menu-btn" data-view="pedidos">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                <span class="badge-alerta" id="badge-pedidos" style="display:none"></span>
-                Pedidos
-            </button>
-            <button class="menu-btn" data-view="reportes">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                Reportes
-            </button>
-            <button class="menu-btn" data-view="almacenes">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                Almacenes
-            </button>
-            <button class="menu-btn" data-view="categorias">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                Categorías
-            </button>
-            <button class="menu-btn" data-view="usuarios">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                Usuarios
-            </button>
-            <button class="menu-btn" data-view="auditoria">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
-                Auditoría
-            </button>
-            <button class="menu-btn" data-view="respaldo">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Respaldo
-            </button>
+
+            <h2 class="menu-grupo">Inventario</h2>
+            <div class="menu-group">
+                <button class="menu-btn" data-view="productos">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                    Productos
+                </button>
+                <button class="menu-btn" data-view="movimientos">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                    Entradas / Salidas
+                </button>
+                <button class="menu-btn" data-view="proveedores">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    Proveedores
+                </button>
+                <button class="menu-btn" data-view="almacenes">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    Almacenes
+                </button>
+                <button class="menu-btn" data-view="categorias">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    Categorías
+                </button>
+            </div>
+
+            <h2 class="menu-grupo">Operaciones</h2>
+            <div class="menu-group">
+                <button class="menu-btn" data-view="pedidos">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <span class="badge-alerta" id="badge-pedidos" style="display:none"></span>
+                    Pedidos
+                </button>
+                <button class="menu-btn" data-view="ventas">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    Ventas
+                </button>
+                <button class="menu-btn" data-view="repartos">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                    Repartos
+                </button>
+            </div>
+
+            <h2 class="menu-grupo">Gestión</h2>
+            <div class="menu-group">
+                <button class="menu-btn" data-view="gastos">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>
+                    Gastos
+                </button>
+                <button class="menu-btn" data-view="reportes">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                    Reportes
+                </button>
+                <button class="menu-btn" data-view="usuarios">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    Usuarios
+                </button>
+            </div>
+
+            <h2 class="menu-grupo">Administración</h2>
+            <div class="menu-group">
+                <button class="menu-btn" data-view="auditoria">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h18v18H3z"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+                    Auditoría
+                </button>
+                <button class="menu-btn" data-view="respaldo">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Respaldo
+                </button>
+            </div>
         </nav>
         <div class="sidebar-sesion" id="sidebar-sesion"></div>
         <div class="sidebar-footer">
@@ -171,26 +197,26 @@
             <div class="dash-cols">
                 <div class="panel">
                     <h2>Movimientos recientes</h2>
-                    <table class="data-table">
+                    <div class="table-scroll"><table class="data-table">
                         <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Nota</th></tr></thead>
                         <tbody id="dash-movimientos"></tbody>
-                    </table>
+                    </table></div>
                 </div>
 
                 <div class="panel">
                     <h2>Alertas de stock</h2>
-                    <table class="data-table">
+                    <div class="table-scroll"><table class="data-table">
                         <thead><tr><th>Producto</th><th>Stock actual</th><th>Stock mínimo</th><th>Estado</th></tr></thead>
                         <tbody id="dash-alertas-stock"></tbody>
-                    </table>
+                    </table></div>
                 </div>
             </div>
             <div class="panel">
                 <h2>Alertas de vencimiento</h2>
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Producto</th><th>Vencimiento</th><th>Stock</th><th>Estado</th></tr></thead>
                     <tbody id="dash-alertas-vencimiento"></tbody>
-                </table>
+                </table></div>
             </div>
         </section>
 
@@ -261,10 +287,10 @@
                     <button class="btn btn-primary" id="btn-qr-registrar">Registrar todo</button>
                     <button class="btn btn-danger" id="btn-qr-limpiar">Limpiar</button>
                 </div>
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Producto</th><th>Código</th><th>Cantidad</th><th></th></tr></thead>
                     <tbody id="qr-items-tbody"></tbody>
-                </table>
+                </table></div>
                 <p class="empty" id="qr-empty">Escanea productos para comenzar</p>
             </div>
 
@@ -332,12 +358,14 @@
                             <option value="salida">Salidas</option>
                         </select>
                         <button class="btn" id="btn-filtrar-mov">Filtrar</button>
+                        <select id="mov-export-tipo" style="max-width:150px"><option value="">Todos los tipos</option><option value="entrada">Entradas</option><option value="salida">Salidas</option><option value="ajuste">Ajustes</option></select>
+                        <select id="mov-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-mov">Exportar</button>
                     </div>
-                    <table class="data-table">
+                    <div class="table-scroll"><table class="data-table">
                         <thead><tr><th>Fecha y hora</th><th>Producto</th><th>Tipo</th><th>Cant.</th><th>Precio (Bs)</th><th>Sucursal</th><th>Proveedor</th><th>Nota</th><th>Usuario</th></tr></thead>
                         <tbody id="movimientos-tbody"></tbody>
-                    </table>
+                    </table></div>
                     <div class="pagination" id="movimientos-paginacion"></div>
                 </div>
             </div>
@@ -358,10 +386,10 @@
                 </select>
             </div>
             <div class="panel">
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>Sucursal</th><th></th></tr></thead>
                     <tbody id="proveedores-tbody"></tbody>
-                </table>
+                </table></div>
             </div>
         </section>
 
@@ -402,6 +430,7 @@
                         <input type="date" id="gasto-desde">
                         <input type="date" id="gasto-hasta">
                         <button class="btn" id="btn-filtrar-gastos">Filtrar</button>
+                        <select id="gasto-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-gastos">Exportar</button>
                     </div>
                     <div class="hist-sucursal-tabs" id="gasto-tabs" style="display:none;margin-bottom:10px">
@@ -411,10 +440,10 @@
                             <option value="">Seleccione una sucursal...</option>
                         </select>
                     </div>
-                    <table class="data-table">
+                    <div class="table-scroll"><table class="data-table">
                         <thead><tr><th>Fecha y hora</th><th>Categoría</th><th>Descripción</th><th>Proveedor</th><th>Sucursal</th><th>Monto (Bs)</th><th></th></tr></thead>
                         <tbody id="gastos-tbody"></tbody>
-                    </table>
+                    </table></div>
                     <div class="pagination" id="gastos-paginacion"></div>
                 </div>
             </div>
@@ -427,10 +456,10 @@
                 <button class="btn btn-primary" id="btn-nuevo-almacen">+ Nuevo almacén</button>
             </div>
             <div class="panel">
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Nombre</th><th>Ubicación</th><th></th></tr></thead>
                     <tbody id="almacenes-tbody"></tbody>
-                </table>
+                </table></div>
             </div>
         </section>
 
@@ -441,10 +470,10 @@
                 <button class="btn btn-primary" id="btn-nueva-categoria">+ Nueva categoría</button>
             </div>
             <div class="panel">
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Nombre</th><th></th></tr></thead>
                     <tbody id="categorias-tbody"></tbody>
-                </table>
+                </table></div>
             </div>
         </section>
 
@@ -458,45 +487,56 @@
                 <button class="btn btn-primary" id="btn-imprimir-reporte">Imprimir / PDF</button>
             </div>
             <div class="panel">
+                <h2>Resumen del período</h2>
+                <div id="rep-resumen" class="sinc-fichas"></div>
+            </div>
+            <div class="panel">
                 <h2>Consumo por producto (entradas / salidas)</h2>
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Producto</th><th>Tipo</th><th>Cantidad</th><th>Total (Bs)</th></tr></thead>
                     <tbody id="rep-consumo"></tbody>
-                </table>
+                </table></div>
             </div>
             <div class="panel">
                 <h2>Valorización del inventario</h2>
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Producto</th><th>Stock</th><th>Costo prom.</th><th>Valor (Bs)</th></tr></thead>
                     <tbody id="rep-valorizacion"></tbody>
-                </table>
+                </table></div>
             </div>
             <div class="panel">
                 <h2>Vencimientos</h2>
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Producto</th><th>Sucursal</th><th>Vence</th><th>Stock</th></tr></thead>
                     <tbody id="rep-vencimientos"></tbody>
-                </table>
+                </table></div>
             </div>
             <div class="panel">
                 <h2>Reparto por sucursal</h2>
                 <div class="toolbar small">
                     <button class="btn" id="btn-exportar-rep-sucursal">Exportar</button>
                 </div>
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Sucursal</th><th>Tipo</th><th>Repartos</th><th>Total repartido (Bs)</th></tr></thead>
                     <tbody id="rep-repartos"></tbody>
-                </table>
+                </table></div>
             </div>
             <div class="panel">
                 <h2>Ganancias por producto</h2>
                 <div class="toolbar small">
                     <button class="btn" id="btn-exportar-ganancias">Exportar</button>
                 </div>
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Producto</th><th>Cant. vendida</th><th>Ventas (Bs)</th><th>Costo (Bs)</th><th>Ganancia (Bs)</th></tr></thead>
                     <tbody id="rep-ganancias"></tbody>
-                </table>
+                </table></div>
+            </div>
+            <div class="panel">
+                <h2>Ventas por sucursal</h2>
+                <div class="table-scroll"><table class="data-table">
+                    <thead><tr><th>Sucursal</th><th>Ventas</th><th>Total (Bs)</th><th>Utilidad (Bs)</th></tr></thead>
+                    <tbody id="rep-ventas-suc"></tbody>
+                </table></div>
             </div>
             <div class="panel" id="panel-sincronia" style="display:none">
                 <h2>Sincronía de inventario</h2>
@@ -529,10 +569,10 @@
                                 <button type="button" class="btn" id="btn-agregar-item">Agregar</button>
                             </div>
                         </div>
-                        <table class="data-table">
+                        <div class="table-scroll"><table class="data-table">
                             <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th><th></th></tr></thead>
                             <tbody id="venta-items-tbody"></tbody>
-                        </table>
+                        </table></div>
                         <div class="venta-total">Total: <strong id="venta-total">Bs 0.00</strong></div>
                         <label>Nota <input type="text" id="venta-nota" placeholder="Ej: venta mostrador, delivery..."></label>
                         <button type="submit" class="btn btn-primary">Registrar venta</button>
@@ -545,6 +585,7 @@
                         <input type="date" id="venta-desde">
                         <input type="date" id="venta-hasta">
                         <button class="btn" id="btn-filtrar-ventas">Filtrar</button>
+                        <select id="venta-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-ventas">Exportar</button>
                     </div>
                     <div class="hist-sucursal-tabs" id="venta-tabs" style="display:none;margin-bottom:10px">
@@ -554,10 +595,10 @@
                             <option value="">Seleccione una sucursal...</option>
                         </select>
                     </div>
-                    <table class="data-table">
+                    <div class="table-scroll"><table class="data-table">
                         <thead><tr><th>Nº</th><th>Fecha y hora</th><th>Detalle</th><th>Total (Bs)</th><th>Sucursal</th><th>Nota</th><th>Usuario</th><th></th></tr></thead>
                         <tbody id="ventas-tbody"></tbody>
-                    </table>
+                    </table></div>
                     <div class="pagination" id="ventas-paginacion"></div>
                 </div>
             </div>
@@ -589,10 +630,10 @@
                             <input type="number" id="reparto-costo" placeholder="Costo Bs" step="any" min="0" style="width:110px">
                             <button type="button" class="btn" id="btn-agregar-item-reparto">Agregar</button>
                         </div>
-                        <table class="data-table">
+                        <div class="table-scroll"><table class="data-table">
                             <thead><tr><th>Producto</th><th>Cant.</th><th>Costo</th><th>Subtotal</th><th></th></tr></thead>
                             <tbody id="reparto-items-tbody"></tbody>
-                        </table>
+                        </table></div>
                         <div class="venta-total">Total: <strong id="reparto-total">Bs 0.00</strong></div>
                         <label>Nota <input type="text" id="reparto-nota" placeholder="Ej: reparto semanal, pedido especial..."></label>
                         <button type="submit" class="btn btn-primary">Registrar reparto</button>
@@ -612,12 +653,13 @@
                         <input type="date" id="reparto-desde">
                         <input type="date" id="reparto-hasta">
                         <button class="btn" id="btn-filtrar-repartos">Filtrar</button>
+                        <select id="reparto-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-repartos">Exportar</button>
                     </div>
-                    <table class="data-table">
-                        <thead><tr><th>Nº</th><th>Fecha y hora</th><th>Recorrido</th><th>Detalle</th><th>Total (Bs)</th><th>Nota</th><th>Usuario</th><th></th></tr></thead>
+                    <div class="table-scroll"><table class="data-table">
+                        <thead><tr><th>Nº</th><th>Fecha y hora</th><th>Recorrido</th><th>Pedido</th><th>Detalle</th><th>Total (Bs)</th><th>Nota</th><th>Usuario</th><th></th></tr></thead>
                         <tbody id="repartos-tbody"></tbody>
-                    </table>
+                    </table></div>
                     <div class="pagination" id="repartos-paginacion"></div>
                 </div>
             </div>
@@ -629,40 +671,73 @@
                 <h2>Pedidos / Tickets de sucursales</h2>
                 <span class="respaldo-txt" id="pedidos-info"></span>
             </div>
-            <div class="grid-2">
+            <div class="toolbar small" id="tabs-historial-pedidos" style="margin-bottom:8px">
+                <button class="tab-log active" data-tab="mis-pedidos" id="tab-hist-mis-pedidos" type="button">Mis pedidos</button>
+                <button class="tab-log" data-tab="realizados" id="tab-hist-realizados" type="button">Realizados</button>
+            </div>
+            <div id="panel-hist-mis-pedidos">
                 <div class="panel">
                     <h2>Nuevo pedido</h2>
-                    <p class="scan-hint">Cada sucursal registra su pedido, elige la sucursal que lo provee y llega como ticket a esa sucursal.</p>
                     <form id="form-pedido">
-                        <div class="grid-2">
+                        <div class="wiz-pasos">
+                            <div class="wiz-paso active" data-dest="1"><span class="num">1</span> ¿Quién pide?</div>
+                            <div class="wiz-paso" data-dest="2"><span class="num">2</span> Elige productos</div>
+                            <div class="wiz-paso" data-dest="3"><span class="num">3</span> Revisa y envía</div>
+                        </div>
+                        <div class="wiz-panel" data-paso="1">
+                            <p class="scan-hint">Cada sucursal registra su pedido eligiendo la sucursal que lo provee; llega como ticket y al entregarlo se registra el reparto.</p>
+                            <label>Sucursal que pide <select id="pedido-sucursal"></select></label>
+                            <div class="toolbar small" style="margin-top:10px">
+                                <button type="button" class="btn btn-primary" id="wiz-a-1-2">Continuar →</button>
+                            </div>
+                        </div>
+                        <div class="wiz-panel" data-paso="2">
+                            <input type="text" id="pedido-buscar" placeholder="Buscar producto, sucursal, categoría..." autocomplete="off">
+                            <div id="pedido-listado"></div>
+                            <div class="toolbar small">
+                                <button type="button" class="btn" id="wiz-a-2-1">← Atrás</button>
+                                <button type="button" class="btn btn-primary" id="wiz-a-2-3">Revisar →</button>
+                            </div>
+                        </div>
+                        <div class="wiz-panel" data-paso="3">
+                            <div id="pedido-revision"></div>
                             <label>Fecha <input type="datetime-local" id="pedido-fecha"></label>
-                            <label>Sucursal <select id="pedido-sucursal"></select></label>
-                            <label>Sucursal destino <select id="pedido-destino"></select></label>
+                            <label>Nota <input type="text" id="pedido-nota" placeholder="Ej: pedido semanal de pollo..."></label>
+                            <div class="toolbar small">
+                                <button type="button" class="btn" id="wiz-a-3-2">← Atrás</button>
+                                <button type="submit" class="btn btn-primary">Enviar pedido</button>
+                            </div>
                         </div>
-                        <div class="toolbar small">
-                            <select id="pedido-producto"></select>
-                            <input type="number" id="pedido-cantidad" placeholder="Cant." step="any" min="0" style="width:90px">
-                            <button type="button" class="btn" id="btn-agregar-item-pedido">Agregar</button>
-                        </div>
-                        <table class="data-table">
-                            <thead><tr><th>Producto</th><th>Cant.</th><th></th></tr></thead>
-                            <tbody id="pedido-items-tbody"></tbody>
-                        </table>
-                        <label>Nota <input type="text" id="pedido-nota" placeholder="Ej: pedido semanal de pollo..."></label>
-                        <button type="submit" class="btn btn-primary">Enviar pedido</button>
                     </form>
                 </div>
                 <div class="panel">
-                    <h2>Historial de pedidos</h2>
+                    <h2>Bandeja de «Mis pedidos»</h2>
                     <div class="toolbar small">
+                        <input type="date" id="pedido-bandeja-desde">
+                        <input type="date" id="pedido-bandeja-hasta">
+                        <select id="pedido-sucursal-filtro" style="max-width:220px"></select>
+                        <button class="btn" id="btn-filtrar-pedidos">Filtrar</button>
+                        <span class="flex-grow"></span>
+                        <span class="respaldo-txt" id="historial-resumen"></span>
+                    </div>
+                    <div id="bandeja-contenido"></div>
+                </div>
+            </div>
+            <div id="panel-hist-realizados">
+                <div class="panel">
+                    <h2>Historial de pedidos (realizados)</h2>
+                    <div class="toolbar small">
+                        <input type="date" id="pedido-realizados-desde" title="Desde">
+                        <input type="date" id="pedido-realizados-hasta" title="Hasta">
                         <input type="text" id="pedido-filtro" placeholder="Buscar ticket, sucursal, nota...">
                         <select id="pedido-estado"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="despachado">Despachado</option><option value="cumplido">Cumplido</option></select>
-                        <button class="btn" id="btn-filtrar-pedidos">Filtrar</button>
+                        <select id="pedido-sucursal-realizados" style="max-width:220px"></select>
+                        <button class="btn" id="btn-filtrar-realizados">Filtrar</button>
                     </div>
-                    <table class="data-table">
-                        <thead><tr><th>Ticket</th><th>Fecha y hora</th><th>Sucursal</th><th>Sucursal destino</th><th>Items</th><th>Estado</th><th>Nota</th><th></th></tr></thead>
+                    <div class="table-scroll"><table class="data-table">
+                        <thead><tr><th>Ticket</th><th>Fecha y hora</th><th>Sucursal</th><th>Destino</th><th>Items</th><th>Reparto</th><th>Estado</th><th>Nota</th><th></th></tr></thead>
                         <tbody id="pedidos-tbody"></tbody>
-                    </table>
+                    </table></div>
                     <div class="pagination" id="pedidos-paginacion"></div>
                 </div>
             </div>
@@ -671,7 +746,7 @@
         <!-- MODAL DETALLE PEDIDO -->
         <div id="modal-pedido" class="modal">
             <div class="modal-content">
-                <span class="close" data-close="modal-pedido">&times;</span>
+                <button type="button" class="close" data-close="modal-pedido" aria-label="Cerrar">&times;</button>
                 <h2 id="det-pedido-title">Detalle de pedido</h2>
                 <div class="venta-detalle-meta">
                     <span><strong>Ticket:</strong> <span id="det-pedido-nro"></span></span>
@@ -680,14 +755,23 @@
                     <span><strong>Sucursal destino:</strong> <span id="det-pedido-destino"></span></span>
                     <span><strong>USUARIO:</strong> <span id="det-pedido-usuario"></span></span>
                     <span><strong>Estado:</strong> <span id="det-pedido-estado"></span></span>
+                    <span><strong>Total:</strong> Bs <span id="det-pedido-total"></span></span>
                     <span><strong>Nota:</strong> <span id="det-pedido-nota"></span></span>
                 </div>
-                <table class="data-table">
-                    <thead><tr><th>Producto</th><th>Cantidad</th></tr></thead>
+                <div class="table-scroll"><table class="data-table">
+                    <thead><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Destino</th></tr></thead>
                     <tbody id="det-pedido-items"></tbody>
-                </table>
+                </table></div>
+                <div id="det-pedido-repartos" style="display:none;margin-top:12px">
+                    <h3 style="font-size:15px;margin-bottom:6px">Repartos generados</h3>
+                    <div class="table-scroll"><table class="data-table">
+                        <thead><tr><th>Nº</th><th>Origen</th><th>Fecha</th><th>Total (Bs)</th><th></th></tr></thead>
+                        <tbody id="det-pedido-repartos-items"></tbody>
+                    </table></div>
+                </div>
                 <div class="toolbar small" style="margin-top:12px">
-                    <button class="btn" id="btn-pedido-despachar">Despachar (crear reparto)</button>
+                    <button class="btn" id="btn-pedido-ticket" type="button">Imprimir ticket</button>
+                    <button class="btn btn-primary" id="btn-pedido-despachar" type="button">Despachar (crear reparto)</button>
                     <select id="pedido-cambiar-estado"><option value="">Cambiar estado...</option><option value="pendiente">Pendiente</option><option value="despachado">Despachado</option><option value="cumplido">Cumplido</option></select>
                 </div>
             </div>
@@ -700,10 +784,10 @@
                 <button class="btn btn-primary" id="btn-nuevo-usuario">+ Nuevo usuario</button>
             </div>
             <div class="panel">
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
                     <tbody id="usuarios-tbody"></tbody>
-                </table>
+                </table></div>
             </div>
         </section>
 
@@ -711,13 +795,15 @@
         <section id="view-auditoria" class="view">
             <div class="toolbar">
                 <h2>Auditoría del sistema</h2>
+                <input type="date" id="aud-desde" title="Desde">
+                <input type="date" id="aud-hasta" title="Hasta">
                 <button class="btn" id="btn-refrescar-auditoria">Actualizar</button>
             </div>
             <div class="panel">
-                <table class="data-table">
+                <div class="table-scroll"><table class="data-table">
                     <thead><tr><th>Fecha y hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead>
                     <tbody id="auditoria-tbody"></tbody>
-                </table>
+                </table></div>
             </div>
         </section>
 
@@ -743,7 +829,7 @@
     <!-- MODAL PRODUCTO -->
     <div id="modal-producto" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-producto">&times;</span>
+            <button type="button" class="close" data-close="modal-producto" aria-label="Cerrar">&times;</button>
             <h2 id="modal-producto-title">Nuevo producto</h2>
             <form id="form-producto">
                 <input type="hidden" id="prod-id">
@@ -782,7 +868,7 @@
     <!-- MODAL HISTORIAL PRODUCTO -->
     <div id="modal-hist-producto" class="modal">
         <div class="modal-content modal-wide">
-            <span class="close" data-close="modal-hist-producto">&times;</span>
+            <button type="button" class="close" data-close="modal-hist-producto" aria-label="Cerrar">&times;</button>
             <h2 id="hist-prod-title">Historial del producto</h2>
             <div class="grid-2" style="margin-bottom:12px;">
                 <div><strong>Código:</strong> <span id="hist-prod-codigo"></span></div>
@@ -790,17 +876,17 @@
                 <div><strong>Stock actual:</strong> <span id="hist-prod-stock"></span></div>
                 <div><strong>Costo promedio:</strong> <span id="hist-prod-costo"></span></div>
             </div>
-            <table class="data-table">
+            <div class="table-scroll"><table class="data-table">
                 <thead><tr><th>Fecha y hora</th><th>Tipo</th><th>Cantidad</th><th>Precio unit. (Bs)</th><th>Nota</th><th>Usuario</th></tr></thead>
                 <tbody id="hist-prod-movs"></tbody>
-            </table>
+            </table></div>
         </div>
     </div>
 
     <!-- MODAL IMPORTAR PRODUCTOS -->
     <div id="modal-importar-prod" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-importar-prod">&times;</span>
+            <button type="button" class="close" data-close="modal-importar-prod" aria-label="Cerrar">&times;</button>
             <h2>Importar productos desde Excel</h2>
             <p style="color:var(--muted);font-size:13px;margin-bottom:16px;">
                 Columnas: <strong>nombre</strong> (obligatorio), codigo, unidad, costo, precio, stock_minimo, categoria, proveedor, vencimiento, stock
@@ -827,7 +913,7 @@
     <!-- MODAL EXPORTAR PRODUCTOS -->
     <div id="modal-exportar-prod" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-exportar-prod">&times;</span>
+            <button type="button" class="close" data-close="modal-exportar-prod" aria-label="Cerrar">&times;</button>
             <h2>Exportar productos a Excel</h2>
             <label>Sucursal
                 <select id="exportar-sucursal"></select>
@@ -847,7 +933,7 @@
     <!-- MODAL PROVEEDOR -->
     <div id="modal-proveedor" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-proveedor">&times;</span>
+            <button type="button" class="close" data-close="modal-proveedor" aria-label="Cerrar">&times;</button>
             <h2>Nuevo proveedor</h2>
             <form id="form-proveedor">
                 <input type="hidden" id="prov-id">
@@ -864,7 +950,7 @@
     <!-- MODAL SUCURSALES -->
     <div id="modal-sucursales" class="modal">
         <div class="modal-content modal-wide">
-            <span class="close" data-close="modal-sucursales">&times;</span>
+            <button type="button" class="close" data-close="modal-sucursales" aria-label="Cerrar">&times;</button>
             <h2>Gestionar sucursales</h2>
             <div class="toolbar">
                 <input type="text" id="suc-nombre" placeholder="Nombre de la sucursal">
@@ -872,17 +958,17 @@
                 <label class="chk"><input type="checkbox" id="suc-principal"> Principal</label>
                 <button class="btn btn-primary" id="btn-guardar-sucursal">Guardar</button>
             </div>
-            <table class="data-table">
+            <div class="table-scroll"><table class="data-table">
                 <thead><tr><th>Sucursal</th><th>Dirección</th><th>Tipo</th><th>Repartos</th><th>Total repartido</th><th></th></tr></thead>
                 <tbody id="sucursales-tbody"></tbody>
-            </table>
+            </table></div>
         </div>
     </div>
 
     <!-- MODAL USUARIO -->
     <div id="modal-usuario" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-usuario">&times;</span>
+            <button type="button" class="close" data-close="modal-usuario" aria-label="Cerrar">&times;</button>
             <h2 id="modal-usuario-title">Nuevo usuario</h2>
             <form id="form-usuario">
                 <input type="hidden" id="user-id">
@@ -908,7 +994,7 @@
     <!-- MODAL MI PERFIL -->
     <div id="modal-perfil" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-perfil">&times;</span>
+            <button type="button" class="close" data-close="modal-perfil" aria-label="Cerrar">&times;</button>
             <h2>Mi perfil</h2>
             <form id="form-perfil">
                 <div class="perfil-avatar-lg" id="perfil-avatar-lg"></div>
@@ -929,7 +1015,7 @@
     <!-- MODAL EDITAR GASTO -->
     <div id="modal-editar-gasto" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-editar-gasto">&times;</span>
+            <button type="button" class="close" data-close="modal-editar-gasto" aria-label="Cerrar">&times;</button>
             <h2>Editar gasto</h2>
             <form id="form-editar-gasto">
                 <input type="hidden" id="edit-gasto-id">
@@ -956,7 +1042,7 @@
     <!-- MODAL ALMACÉN -->
     <div id="modal-almacen" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-almacen">&times;</span>
+            <button type="button" class="close" data-close="modal-almacen" aria-label="Cerrar">&times;</button>
             <h2 id="modal-almacen-title">Nuevo almacén</h2>
             <form id="form-almacen">
                 <input type="hidden" id="alm-id">
@@ -974,7 +1060,7 @@
     <!-- MODAL CATEGORÍA -->
     <div id="modal-categoria" class="modal">
         <div class="modal-content">
-            <span class="close" data-close="modal-categoria">&times;</span>
+            <button type="button" class="close" data-close="modal-categoria" aria-label="Cerrar">&times;</button>
             <h2 id="modal-categoria-title">Nueva categoría</h2>
             <form id="form-categoria">
                 <input type="hidden" id="cat-id">
@@ -989,7 +1075,7 @@
     <!-- MODAL DETALLE VENTA -->
     <div id="modal-detalle-venta" class="modal">
         <div class="modal-content modal-wide">
-            <span class="close" data-close="modal-detalle-venta">&times;</span>
+            <button type="button" class="close" data-close="modal-detalle-venta" aria-label="Cerrar">&times;</button>
             <h2 id="det-venta-title">Detalle de venta</h2>
             <div class="grid-2" style="margin-bottom:12px;">
                 <div><strong>Fecha:</strong> <span id="det-venta-fecha"></span></div>
@@ -997,10 +1083,10 @@
                 <div><strong>Nota:</strong> <span id="det-venta-nota"></span></div>
                 <div><strong>Estado:</strong> <span id="det-venta-estado"></span></div>
             </div>
-            <table class="data-table">
+            <div class="table-scroll"><table class="data-table">
                 <thead><tr><th>Producto</th><th>Cantidad</th><th>Precio unit. (Bs)</th><th>Subtotal (Bs)</th></tr></thead>
                 <tbody id="det-venta-items"></tbody>
-            </table>
+            </table></div>
             <div style="text-align:right;margin-top:10px;font-size:18px;"><strong>Total: Bs <span id="det-venta-total"></span></strong></div>
         </div>
     </div>
@@ -1008,25 +1094,26 @@
     <!-- MODAL DETALLE REPARTO -->
     <div id="modal-detalle-reparto" class="modal">
         <div class="modal-content modal-wide">
-            <span class="close" data-close="modal-detalle-reparto">&times;</span>
+            <button type="button" class="close" data-close="modal-detalle-reparto" aria-label="Cerrar">&times;</button>
             <h2 id="det-reparto-title">Detalle de reparto</h2>
             <div class="grid-2" style="margin-bottom:12px;">
                 <div><strong>Fecha:</strong> <span id="det-reparto-fecha"></span></div>
                 <div><strong>Sucursal:</strong> <span id="det-reparto-sucursal"></span></div>
                 <div><strong>Usuario:</strong> <span id="det-reparto-usuario"></span></div>
+                <div><strong>Pedido:</strong> <span id="det-reparto-pedido"></span></div>
                 <div><strong>Nota:</strong> <span id="det-reparto-nota"></span></div>
                 <div><strong>Estado:</strong> <span id="det-reparto-estado"></span></div>
             </div>
-            <table class="data-table">
+            <div class="table-scroll"><table class="data-table">
                 <thead><tr><th>Producto</th><th>Cantidad</th><th>Costo unit. (Bs)</th><th>Subtotal (Bs)</th></tr></thead>
                 <tbody id="det-reparto-items"></tbody>
-            </table>
+            </table></div>
             <div style="text-align:right;margin-top:10px;font-size:18px;"><strong>Total: Bs <span id="det-reparto-total"></span></strong></div>
         </div>
     </div>
 
-    <div id="toast" class="toast"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=46"></script>
+    <script src="/static/app.js?v=75"></script>
 </body>
 </html>

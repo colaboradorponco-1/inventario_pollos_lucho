@@ -137,9 +137,19 @@ def usuario(user_id):
 def auditoria():
     conn = get_conn()
     limite = min(int(request.args.get("limite", 200)), 1000)
-    rows = conn.execute("""
-        SELECT * FROM auditoria ORDER BY id DESC LIMIT ?
-    """, (limite,)).fetchall()
+    desde = request.args.get("desde")
+    hasta = request.args.get("hasta")
+    q = "SELECT * FROM auditoria WHERE 1 = 1"
+    params = []
+    if desde:
+        q += " AND DATE(fecha) >= %s"
+        params.append(desde)
+    if hasta:
+        q += " AND DATE(fecha) <= %s"
+        params.append(hasta)
+    q += " ORDER BY id DESC LIMIT %s"
+    params.append(limite)
+    rows = conn.execute(q, params).fetchall()
     conn.close()
     return ok([dict(r) for r in rows])
 

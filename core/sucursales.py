@@ -190,12 +190,14 @@ def repartos():
     sid_filtro = request.args.get("sucursal_id", "")
     q = """
         SELECT r.*, s.nombre AS sucursal_nombre, o.nombre AS origen_nombre,
+               p3.nro_ticket AS pedido_ticket,
                (SELECT COUNT(*) FROM reparto_detalle d WHERE d.reparto_id = r.id) AS num_items,
                (SELECT GROUP_CONCAT(CONCAT(d.producto_nombre, ' (', d.cantidad, ')') SEPARATOR ', ')
                 FROM reparto_detalle d WHERE d.reparto_id = r.id) AS items_detalle
         FROM repartos r
         JOIN sucursales s ON s.id = r.sucursal_id
         LEFT JOIN sucursales o ON o.id = r.origen_sucursal_id
+        LEFT JOIN pedidos p3 ON p3.id = r.pedido_id
         WHERE 1=1
     """
     params = []
@@ -217,7 +219,7 @@ def repartos():
     if filtro:
         q += " AND (s.nombre LIKE ? OR r.usuario LIKE ? OR r.nota LIKE ? OR CAST(r.id AS CHAR) LIKE ?)"
         params += [f"%{filtro}%"] * 4
-    count_q = "SELECT COUNT(*) AS c FROM (" + q.replace("r.*, s.nombre AS sucursal_nombre,", "1,").replace("o.nombre AS origen_nombre,", "").replace("(SELECT COUNT(*) FROM reparto_detalle d WHERE d.reparto_id = r.id) AS num_items,", "").replace("(SELECT GROUP_CONCAT(CONCAT(d.producto_nombre, ' (', d.cantidad, ')') SEPARATOR ', ') FROM reparto_detalle d WHERE d.reparto_id = r.id) AS items_detalle", "") + ") AS sub"
+    count_q = "SELECT COUNT(*) AS c FROM (" + q.replace("r.*, s.nombre AS sucursal_nombre,", "1,").replace("o.nombre AS origen_nombre,", "").replace("p3.nro_ticket AS pedido_ticket,", "").replace("(SELECT COUNT(*) FROM reparto_detalle d WHERE d.reparto_id = r.id) AS num_items,", "").replace("(SELECT GROUP_CONCAT(CONCAT(d.producto_nombre, ' (', d.cantidad, ')') SEPARATOR ', ') FROM reparto_detalle d WHERE d.reparto_id = r.id) AS items_detalle", "") + ") AS sub"
     total = conn.execute(count_q, params).fetchone()["c"]
     offset, limit, pagina, por_pagina = paginar_params()
     q += " ORDER BY r.fecha DESC, r.id DESC LIMIT ? OFFSET ?"
@@ -232,7 +234,10 @@ def repartos():
 def reparto_detalle(reparto_id):
     conn = get_conn()
     reparto = conn.execute(
-        "SELECT r.*, s.nombre AS sucursal_nombre FROM repartos r JOIN sucursales s ON s.id = r.sucursal_id WHERE r.id = ?",
+        "SELECT r.*, s.nombre AS sucursal_nombre, p4.nro_ticket AS pedido_ticket, "
+        "p4.estado AS pedido_estado "
+        "FROM repartos r JOIN sucursales s ON s.id = r.sucursal_id "
+        "LEFT JOIN pedidos p4 ON p4.id = r.pedido_id WHERE r.id = ?",
         (reparto_id,)).fetchone()
     if not reparto:
         conn.close()

@@ -6,18 +6,52 @@ Adapta la interfaz de sqlite3 que usaba el sistema a PyMySQL/MariaDB:
 - las filas se acceden por nombre de columna (fila['nombre'])
 - lastrowid, commit, close, executemany compatibles
 """
+import os
 import re
 import unicodedata
 import pymysql
 import pymysql.cursors
 
 # ---------------------------------------------------------------------------
-# Configuración de conexión MySQL
+# Configuración de conexión MySQL (cargada desde variables de entorno o .env)
 # ---------------------------------------------------------------------------
-MYSQL_HOST = "localhost"
-MYSQL_USER = "root"
-MYSQL_PASS = "root"
-MYSQL_DB = "pollos_lucho"
+def _cargar_env():
+    """Carga KEY=VALUE desde un archivo .env junto al proyecto (sin sobrescribir
+    variables ya presentes en el entorno, que tienen prioridad)."""
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.exists(ruta):
+        return
+    with open(ruta, "r", encoding="utf-8") as f:
+        for linea in f:
+            linea = linea.strip()
+            if not linea or linea.startswith("#") or "=" not in linea:
+                continue
+            clave, _, valor = linea.partition("=")
+            clave = clave.strip()
+            valor = valor.strip().strip('"').strip("'")
+            if clave and clave not in os.environ:
+                os.environ[clave] = valor
+
+
+_cargar_env()
+
+
+def _cfg(nombre, defecto=""):
+    """Variable de entorno con valor por defecto. Sin valor por defecto
+    hardcodeado sensible: si no hay entorno ni .env, se impide arrancar."""
+    return os.environ.get(nombre, "").strip() or defecto
+
+
+MYSQL_HOST = _cfg("MYSQL_HOST", "localhost")
+MYSQL_USER = _cfg("MYSQL_USER")
+MYSQL_PASS = _cfg("MYSQL_PASS")
+MYSQL_DB = _cfg("MYSQL_DB", "pollos_lucho")
+
+
+def requerir_credenciales():
+    """Devuelve True si MYSQL_USER/MYSQL_PASS están definidos (desde .env o env).
+    Sin esto no se puede conectar; el error al arrancar será claro."""
+    return bool(MYSQL_USER and MYSQL_PASS)
 
 
 class MysqlRow(dict):
@@ -141,6 +175,10 @@ class MysqlConnection:
 
 
 def get_conn():
+    if not requerir_credenciales():
+        raise RuntimeError(
+            "Faltan credenciales de MySQL (MYSQL_USER/MYSQL_PASS). "
+            "Defínelas en el archivo .env o como variables de entorno.")
     conn = pymysql.connect(
         host=MYSQL_HOST,
         user=MYSQL_USER,
@@ -172,177 +210,193 @@ def init_db():
     db = get_conn()
     cur = db.cursor()
 
+    # Esquema objetivo (idéntico al generado por mysqldump en producción).
+    # Orden: las tablas referenciadas se crean antes que las que las usan.
     cur.execute("SET FOREIGN_KEY_CHECKS = 0")
     try:
+        cur.execute("CREATE TABLE IF NOT EXISTS sucursales ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "nombre VARCHAR(255) NOT NULL UNIQUE,"
+                    "direccion VARCHAR(255) DEFAULT '',"
+                    "principal TINYINT DEFAULT 0)")
         cur.execute("CREATE TABLE IF NOT EXISTS almacenes ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "nombre VARCHAR(255) NOT NULL UNIQUE,"
-                    "ubicacion VARCHAR(255) DEFAULT '')")
+                    "sucursal_id INT,"
+                    "ubicacion VARCHAR(255) DEFAULT '',"
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS categorias ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "nombre VARCHAR(255) NOT NULL UNIQUE)")
+        cur.execute("CREATE TABLE IF NOT EXISTS proveedores ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "nombre VARCHAR(255) NOT NULL,"
+                    "telefono VARCHAR(100) DEFAULT '',"
+                    "email VARCHAR(255) DEFAULT '',"
+                    "direccion VARCHAR(255) DEFAULT '',"
+                    "sucursal_id INT)")
+        cur.execute("CREATE TABLE IF NOT EXISTS productos ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "codigo VARCHAR(255) UNIQUE,"
+                    "nombre VARCHAR(255) NOT NULL,"
+                    "marca VARCHAR(100),"
+                    "categoria_id INT,"
+                    "unidad VARCHAR(50) DEFAULT 'unidad',"
+                    "stock_minimo DOUBLE DEFAULT 0,"
+                    "costo_promedio DOUBLE DEFAULT 0,"
+                    "precio_venta DOUBLE DEFAULT 0,"
+                    "vencimiento VARCHAR(50),"
+                    "almacen_id INT,"
+                    "proveedor_id INT,"
+                    "sucursal_id INT,"
+                    "activo TINYINT DEFAULT 1,"
+                    "FOREIGN KEY (categoria_id) REFERENCES categorias(id),"
+                    "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
+                    "FOREIGN KEY (proveedor_id) REFERENCES proveedores(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS lotes ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "producto_id INT NOT NULL,"
+                    "sucursal_id INT NOT NULL,"
+                    "lote VARCHAR(100),"
+                    "cantidad DOUBLE NOT NULL DEFAULT 0,"
+                    "fecha_ingreso VARCHAR(50) NOT NULL,"
+                    "fecha_vencimiento DATE,"
+                    "FOREIGN KEY (producto_id) REFERENCES productos(id),"
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS movimientos ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "producto_id INT NOT NULL,"
+                    "tipo VARCHAR(10) NOT NULL,"
+                    "cantidad DOUBLE NOT NULL,"
+                    "precio_unitario DOUBLE DEFAULT 0,"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "almacen_id INT,"
+                    "nota TEXT,"
+                    "usuario VARCHAR(255) DEFAULT '',"
+                    "sucursal_id INT,"
+                    "proveedor_id INT,"
+                    "lote_id INT,"
+                    "vencimiento DATE,"
+                    "FOREIGN KEY (producto_id) REFERENCES productos(id),"
+                    "FOREIGN KEY (almacen_id) REFERENCES almacenes(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS gastos ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "categoria VARCHAR(255) NOT NULL,"
+                    "descripcion TEXT,"
+                    "monto DOUBLE NOT NULL,"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "proveedor_id INT,"
+                    "sucursal_id INT,"
+                    "FOREIGN KEY (proveedor_id) REFERENCES proveedores(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS usuarios ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "usuario VARCHAR(255) NOT NULL UNIQUE,"
+                    "password_hash VARCHAR(255) NOT NULL,"
+                    "nombre VARCHAR(255) DEFAULT '',"
+                    "rol VARCHAR(50) DEFAULT 'encargado',"
+                    "sucursal_id INT,"
+                    "activo TINYINT DEFAULT 1)")
+        cur.execute("CREATE TABLE IF NOT EXISTS ventas ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "total DOUBLE NOT NULL,"
+                    "sucursal_id INT,"
+                    "usuario VARCHAR(255) DEFAULT '',"
+                    "nota TEXT)")
+        cur.execute("CREATE TABLE IF NOT EXISTS venta_detalle ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "venta_id INT NOT NULL,"
+                    "producto_id INT NOT NULL,"
+                    "producto_nombre VARCHAR(255) DEFAULT '',"
+                    "cantidad DOUBLE NOT NULL,"
+                    "precio_unitario DOUBLE DEFAULT 0,"
+                    "costo_unitario DOUBLE DEFAULT 0,"
+                    "subtotal DOUBLE DEFAULT 0,"
+                    "FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,"
+                    "FOREIGN KEY (producto_id) REFERENCES productos(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS auditoria ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "usuario VARCHAR(255) DEFAULT '',"
+                    "accion VARCHAR(255) NOT NULL,"
+                    "detalle TEXT)")
+        cur.execute("CREATE TABLE IF NOT EXISTS pedidos ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "nro_ticket VARCHAR(30) NOT NULL UNIQUE,"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "sucursal_id INT NOT NULL,"
+                    "estado VARCHAR(20) DEFAULT 'pendiente',"
+                    "total DOUBLE DEFAULT 0,"
+                    "usuario VARCHAR(255) DEFAULT '',"
+                    "nota TEXT,"
+                    "destino_id INT,"
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS pedido_detalle ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "pedido_id INT NOT NULL,"
+                    "producto_id INT NOT NULL,"
+                    "producto_nombre VARCHAR(255) DEFAULT '',"
+                    "cantidad DOUBLE NOT NULL,"
+                    "destino_id INT,"
+                    "unidad VARCHAR(50) DEFAULT 'unidad',"
+                    "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
+                    "FOREIGN KEY (producto_id) REFERENCES productos(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS repartos ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "origen_sucursal_id INT,"
+                    "sucursal_id INT NOT NULL,"
+                    "total DOUBLE NOT NULL,"
+                    "usuario VARCHAR(255) DEFAULT '',"
+                    "nota TEXT,"
+                    "pedido_id INT,"
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
+                    "CONSTRAINT fk_repartos_pedido FOREIGN KEY (pedido_id) REFERENCES pedidos(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS reparto_detalle ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "reparto_id INT NOT NULL,"
+                    "producto_id INT NOT NULL,"
+                    "producto_nombre VARCHAR(255) DEFAULT '',"
+                    "cantidad DOUBLE NOT NULL,"
+                    "costo_unitario DOUBLE DEFAULT 0,"
+                    "subtotal DOUBLE DEFAULT 0,"
+                    "FOREIGN KEY (reparto_id) REFERENCES repartos(id) ON DELETE CASCADE,"
+                    "FOREIGN KEY (producto_id) REFERENCES productos(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS stock ("
+                    "producto_id INT,"
+                    "sucursal_id INT,"
+                    "cantidad DOUBLE NOT NULL DEFAULT 0,"
+                    "PRIMARY KEY (producto_id, sucursal_id),"
+                    "FOREIGN KEY (producto_id) REFERENCES productos(id),"
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
     finally:
         cur.execute("SET FOREIGN_KEY_CHECKS = 1")
-
-    cur.execute("CREATE TABLE IF NOT EXISTS categorias ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "nombre VARCHAR(255) NOT NULL UNIQUE)")
-    cur.execute("CREATE TABLE IF NOT EXISTS proveedores ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "nombre VARCHAR(255) NOT NULL,"
-                "telefono VARCHAR(100) DEFAULT '',"
-                "email VARCHAR(255) DEFAULT '',"
-                "direccion VARCHAR(255) DEFAULT '')")
-    cur.execute("CREATE TABLE IF NOT EXISTS productos ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "codigo VARCHAR(255) UNIQUE,"
-                "nombre VARCHAR(255) NOT NULL,"
-                "categoria_id INT,"
-                "unidad VARCHAR(50) DEFAULT 'unidad',"
-                "stock_minimo DOUBLE DEFAULT 0,"
-                "costo_promedio DOUBLE DEFAULT 0,"
-                "precio_venta DOUBLE DEFAULT 0,"
-                "vencimiento VARCHAR(50),"
-                "almacen_id INT,"
-                "proveedor_id INT,"
-                "activo TINYINT DEFAULT 1,"
-                "FOREIGN KEY (categoria_id) REFERENCES categorias(id),"
-                "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
-                "FOREIGN KEY (proveedor_id) REFERENCES proveedores(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS sucursales ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "nombre VARCHAR(255) NOT NULL UNIQUE,"
-                "direccion VARCHAR(255) DEFAULT '',"
-                "principal TINYINT DEFAULT 0)")
-    cur.execute("CREATE TABLE IF NOT EXISTS lotes ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "producto_id INT NOT NULL,"
-                "sucursal_id INT NOT NULL,"
-                "lote VARCHAR(100),"
-                "cantidad DOUBLE NOT NULL DEFAULT 0,"
-                "fecha_ingreso VARCHAR(50) NOT NULL,"
-                "fecha_vencimiento DATE,"
-                "FOREIGN KEY (producto_id) REFERENCES productos(id),"
-                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS movimientos ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "producto_id INT NOT NULL,"
-                "tipo VARCHAR(10) NOT NULL,"
-                "cantidad DOUBLE NOT NULL,"
-                "precio_unitario DOUBLE DEFAULT 0,"
-                "fecha VARCHAR(50) NOT NULL,"
-                "sucursal_id INT,"
-                "almacen_id INT,"
-                "lote_id INT,"
-                "vencimiento DATE,"
-                "nota TEXT,"
-                "usuario VARCHAR(255) DEFAULT '',"
-                "FOREIGN KEY (producto_id) REFERENCES productos(id),"
-                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
-                "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
-                "FOREIGN KEY (lote_id) REFERENCES lotes(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS gastos ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "categoria VARCHAR(255) NOT NULL,"
-                "descripcion TEXT,"
-                "monto DOUBLE NOT NULL,"
-                "fecha VARCHAR(50) NOT NULL,"
-                "sucursal_id INT,"
-                "proveedor_id INT,"
-                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
-                "FOREIGN KEY (proveedor_id) REFERENCES proveedores(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS usuarios ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "usuario VARCHAR(255) NOT NULL UNIQUE,"
-                "password_hash VARCHAR(255) NOT NULL,"
-                "nombre VARCHAR(255) DEFAULT '',"
-                "rol VARCHAR(50) DEFAULT 'encargado',"
-                "sucursal_id INT,"
-                "activo TINYINT DEFAULT 1)")
-    cur.execute("CREATE TABLE IF NOT EXISTS ventas ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "fecha VARCHAR(50) NOT NULL,"
-                "total DOUBLE NOT NULL,"
-                "sucursal_id INT,"
-                "usuario VARCHAR(255) DEFAULT '',"
-                "nota TEXT,"
-                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS venta_detalle ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "venta_id INT NOT NULL,"
-                "producto_id INT NOT NULL,"
-                "producto_nombre VARCHAR(255) DEFAULT '',"
-                "cantidad DOUBLE NOT NULL,"
-                "precio_unitario DOUBLE DEFAULT 0,"
-                "costo_unitario DOUBLE DEFAULT 0,"
-                "subtotal DOUBLE DEFAULT 0,"
-                "FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,"
-                "FOREIGN KEY (producto_id) REFERENCES productos(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS auditoria ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "fecha VARCHAR(50) NOT NULL,"
-                "usuario VARCHAR(255) DEFAULT '',"
-                "accion VARCHAR(255) NOT NULL,"
-                "detalle TEXT)")
-    cur.execute("CREATE TABLE IF NOT EXISTS repartos ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "fecha VARCHAR(50) NOT NULL,"
-                "origen_sucursal_id INT,"
-                "sucursal_id INT NOT NULL,"
-                "total DOUBLE NOT NULL,"
-                "usuario VARCHAR(255) DEFAULT '',"
-                "nota TEXT,"
-                "FOREIGN KEY (origen_sucursal_id) REFERENCES sucursales(id),"
-                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS reparto_detalle ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "reparto_id INT NOT NULL,"
-                "producto_id INT NOT NULL,"
-                "producto_nombre VARCHAR(255) DEFAULT '',"
-                "cantidad DOUBLE NOT NULL,"
-                "costo_unitario DOUBLE DEFAULT 0,"
-                "subtotal DOUBLE DEFAULT 0,"
-                "FOREIGN KEY (reparto_id) REFERENCES repartos(id) ON DELETE CASCADE,"
-                "FOREIGN KEY (producto_id) REFERENCES productos(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS stock ("
-                "producto_id INT,"
-                "sucursal_id INT,"
-                "cantidad DOUBLE NOT NULL DEFAULT 0,"
-                "PRIMARY KEY (producto_id, sucursal_id),"
-                "FOREIGN KEY (producto_id) REFERENCES productos(id),"
-                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS pedidos ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "nro_ticket VARCHAR(30) NOT NULL UNIQUE,"
-                "fecha VARCHAR(50) NOT NULL,"
-                "sucursal_id INT NOT NULL,"
-                "destino_id INT,"
-                "estado VARCHAR(20) DEFAULT 'pendiente',"
-                "total DOUBLE DEFAULT 0,"
-                "usuario VARCHAR(255) DEFAULT '',"
-                "nota TEXT,"
-                "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
-                "FOREIGN KEY (destino_id) REFERENCES sucursales(id))")
-    cur.execute("CREATE TABLE IF NOT EXISTS pedido_detalle ("
-                "id INT AUTO_INCREMENT PRIMARY KEY,"
-                "pedido_id INT NOT NULL,"
-                "producto_id INT NOT NULL,"
-                "producto_nombre VARCHAR(255) DEFAULT '',"
-                "cantidad DOUBLE NOT NULL,"
-                "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
-                "FOREIGN KEY (producto_id) REFERENCES productos(id))")
 
     # Índices (MySQL no soporta CREATE INDEX IF NOT EXISTS, se verifica antes)
     _INDICES = {
         "idx_mov_producto": "CREATE INDEX idx_mov_producto ON movimientos(producto_id)",
         "idx_mov_fecha": "CREATE INDEX idx_mov_fecha ON movimientos(fecha)",
+        "idx_mov_sucursal": "CREATE INDEX idx_mov_sucursal ON movimientos(sucursal_id)",
         "idx_ventas_fecha": "CREATE INDEX idx_ventas_fecha ON ventas(fecha)",
+        "idx_ventas_sucursal": "CREATE INDEX idx_ventas_sucursal ON ventas(sucursal_id)",
         "idx_venta_detalle_venta": "CREATE INDEX idx_venta_detalle_venta ON venta_detalle(venta_id)",
+        "idx_venta_detalle_producto": "CREATE INDEX idx_venta_detalle_producto ON venta_detalle(producto_id)",
         "idx_repartos_fecha": "CREATE INDEX idx_repartos_fecha ON repartos(fecha)",
+        "idx_repartos_sucursal": "CREATE INDEX idx_repartos_sucursal ON repartos(sucursal_id)",
         "idx_reparto_detalle_reparto": "CREATE INDEX idx_reparto_detalle_reparto ON reparto_detalle(reparto_id)",
         "idx_auditoria_fecha": "CREATE INDEX idx_auditoria_fecha ON auditoria(fecha)",
         "idx_gastos_fecha": "CREATE INDEX idx_gastos_fecha ON gastos(fecha)",
+        "idx_prod_nombre": "CREATE INDEX idx_prod_nombre ON productos(nombre)",
+        "idx_prod_categoria": "CREATE INDEX idx_prod_categoria ON productos(categoria_id)",
+        "idx_pedidos_fecha": "CREATE INDEX idx_pedidos_fecha ON pedidos(fecha)",
+        "idx_pedidos_sucursal": "CREATE INDEX idx_pedidos_sucursal ON pedidos(sucursal_id)",
+        "idx_lotes_prod_suc": "CREATE INDEX idx_lotes_prod_suc ON lotes(producto_id, sucursal_id)",
+        "idx_mov_lote": "CREATE INDEX idx_mov_lote ON movimientos(lote_id)",
+        "idx_pedido_detalle_pedido": "CREATE INDEX idx_pedido_detalle_pedido ON pedido_detalle(pedido_id)",
     }
     cur.execute(
         "SELECT DISTINCT INDEX_NAME FROM information_schema.STATISTICS "
-        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME IN ('movimientos','ventas','venta_detalle','repartos','reparto_detalle','auditoria','gastos')",
+        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME IN ('movimientos','ventas','venta_detalle','repartos','reparto_detalle','auditoria','gastos', 'productos','pedidos','pedido_detalle','lotes')",
         (MYSQL_DB,))
     existentes = {r["INDEX_NAME"] for r in cur.fetchall()}
     for nombre, ddl in _INDICES.items():
@@ -427,12 +481,18 @@ def migrar_esquema():
             _add_columna(cur, "repartos", "origen_sucursal_id INT")
         if not _col_existe(cur, "pedidos", "destino_id"):
             _add_columna(cur, "pedidos", "destino_id INT")
+        if not _col_existe(cur, "pedido_detalle", "destino_id"):
+            _add_columna(cur, "pedido_detalle", "destino_id INT")
+        if not _col_existe(cur, "pedido_detalle", "unidad"):
+            _add_columna(cur, "pedido_detalle", "unidad VARCHAR(50) DEFAULT 'unidad'")
         if not _col_existe(cur, "movimientos", "proveedor_id"):
             _add_columna(cur, "movimientos", "proveedor_id INT")
         if not _col_existe(cur, "proveedores", "sucursal_id"):
             _add_columna(cur, "proveedores", "sucursal_id INT")
         if not _col_existe(cur, "productos", "sucursal_id"):
             _add_columna(cur, "productos", "sucursal_id INT")
+        if not _col_existe(cur, "repartos", "pedido_id"):
+            _add_columna(cur, "repartos", "pedido_id INT")
         db.commit()
         # Backfill: proveedores existentes van al primer almacén principal
         if _col_existe(cur, "proveedores", "sucursal_id"):
@@ -448,6 +508,51 @@ def migrar_esquema():
             if _prim:
                 cur.execute("UPDATE pedidos SET destino_id = %s WHERE destino_id IS NULL", (_prim["id"],))
                 db.commit()
+        # Backfill: cada línea de pedido hereda el proveedor del pedido y su unidad
+        if _col_existe(cur, "pedido_detalle", "destino_id"):
+            cur.execute("""UPDATE pedido_detalle d JOIN pedidos p ON p.id = d.pedido_id
+                           SET d.destino_id = COALESCE(p.destino_id,
+                               (SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1))
+                           WHERE d.destino_id IS NULL""")
+            db.commit()
+        # Backfill: vincular repartos de despacho con su pedido (via nota) y FK si no existe
+        if _col_existe(cur, "repartos", "pedido_id"):
+            cur.execute("""UPDATE repartos r JOIN pedidos p
+                           ON CONCAT('Despacho del pedido ', p.nro_ticket)
+                               COLLATE utf8mb4_unicode_ci = r.nota COLLATE utf8mb4_unicode_ci
+                           SET r.pedido_id = p.id WHERE r.pedido_id IS NULL""")
+            db.commit()
+            cur.execute(
+                "SELECT COUNT(*) c FROM information_schema.TABLE_CONSTRAINTS "
+                "WHERE CONSTRAINT_SCHEMA = %s AND TABLE_NAME = 'repartos' "
+                "AND CONSTRAINT_NAME = 'fk_repartos_pedido'",
+                (MYSQL_DB,))
+            if cur.fetchone()["c"] == 0:
+                try:
+                    cur.execute("ALTER TABLE repartos ADD CONSTRAINT fk_repartos_pedido "
+                                "FOREIGN KEY (pedido_id) REFERENCES pedidos(id)")
+                    db.commit()
+                except Exception:
+                    pass
+            # Backfill: totales de repartos de despacho y de su pedido, a partir del detalle.
+            # Solo corrige los que quedaron en 0 (no altera totales ya válidos).
+            cur.execute("""UPDATE repartos r
+                           JOIN (SELECT reparto_id, ROUND(SUM(subtotal), 2) s
+                                 FROM reparto_detalle GROUP BY reparto_id) t ON t.reparto_id = r.id
+                           SET r.total = t.s
+                           WHERE r.pedido_id IS NOT NULL AND (r.total IS NULL OR r.total = 0)""")
+            cur.execute("""UPDATE pedidos p
+                           JOIN (SELECT r.pedido_id pid, ROUND(SUM(rd.subtotal), 2) s
+                                 FROM repartos r JOIN reparto_detalle rd ON rd.reparto_id = r.id
+                                 GROUP BY r.pedido_id) t ON t.pid = p.id
+                           SET p.total = t.s
+                           WHERE p.total IS NULL OR p.total = 0""")
+            db.commit()
+        if _col_existe(cur, "pedido_detalle", "unidad"):
+            cur.execute("""UPDATE pedido_detalle d JOIN productos p ON p.id = d.producto_id
+                           SET d.unidad = COALESCE(NULLIF(TRIM(p.unidad), ''), 'unidad')
+                           WHERE d.unidad IS NULL OR d.unidad = ''""")
+            db.commit()
 
         # 2) Migrar tabla stock a PK compuesta (producto_id, sucursal_id)
         if _col_existe(cur, "stock", "sucursal_id") is False:

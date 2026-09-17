@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket {{ data.pedido.nro_ticket }} - Pollos Lucho</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Jost', 'Segoe UI', sans-serif; background: #f4f2ed; color: #0C0908; padding: 20px; }
+        .topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+        .topbar h1 { font-size: 18px; flex: 1; }
+        .btn {
+            padding: 9px 16px; border-radius: 8px; border: 1px solid #d8d4cc; background: #fff;
+            cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 600; color: #0C0908;
+        }
+        .btn-primary { background: #FCC302; border-color: #FCC302; }
+        .btn-primary:hover { background: #e5b900; }
+        .ticket { background: #fff; max-width: 820px; margin: 0 auto; border-radius: 10px; padding: 22px 26px; box-shadow: 0 1px 5px rgba(0,0,0,.08); }
+        .ticket-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #FCC302; padding-bottom: 14px; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
+        .ticket-head .brand { font-family: 'Passione One', 'Arial Black', sans-serif; font-size: 24px; letter-spacing: .03em; color: #0C0908; }
+        .ticket-head .brand small { display: block; font-size: 11px; font-family: 'Jost', 'Segoe UI', sans-serif; letter-spacing: 2px; color: #8a8a8a; }
+        .ticket-head .nro { font-size: 20px; font-weight: 700; color: #0C0908; }
+        .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 18px; font-size: 13px; margin-bottom: 18px; }
+        .meta div span { color: #8a8a8a; display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+        .meta div b { font-size: 14px; }
+        .proveedor { margin-bottom: 18px; page-break-inside: avoid; }
+        .proveedor-titulo { background: #0C0908; color: #fff; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+        .proveedor-titulo .est { color: #FCC302; font-size: 12px; }
+        .categoria-titulo { font-size: 12.5px; font-weight: 700; color: #8a6d00; text-transform: uppercase; letter-spacing: .6px; margin: 10px 0 6px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+        th { text-align: left; font-size: 11px; text-transform: uppercase; color: #8a8a8a; letter-spacing: .5px; padding: 4px 8px; border-bottom: 1px solid #eee; }
+        td { padding: 7px 8px; border-bottom: 1px solid #f2f0ea; }
+        td.cant { text-align: center; font-weight: 700; }
+        td.unid { text-align: center; color: #555; }
+        tr.item:last-child td { border-bottom: none; }
+        .resumen { border-top: 2px solid #FCC302; margin-top: 16px; padding-top: 12px; font-size: 13px; color: #555; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+        .firma { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 34px; text-align: center; font-size: 12px; color: #555; }
+        .firma div { border-top: 1px solid #bbb; padding-top: 6px; }
+        @media print {
+            body { background: #fff; padding: 0; }
+            .topbar { display: none !important; }
+            .ticket { box-shadow: none; max-width: none; padding: 0; }
+            @page { size: letter; margin: 12mm; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Ticket de pedido</h1>
+        <button class="btn" onclick="window.print()">Imprimir</button>
+        <button class="btn" onclick="location.href='/'">Volver al sistema</button>
+    </div>
+    <div class="ticket">
+        <div class="ticket-head">
+            <div class="brand">POLLOS LUCHO <small>ORDEN DE PEDIDO A PROVEEDORES</small></div>
+            <div class="nro">{{ data.pedido.nro_ticket }}</div>
+        </div>
+        <div class="meta">
+            <div><span>Fecha y hora</span><b>{{ data.pedido.fecha }}</b></div>
+            <div><span>Sucursal que solicita</span><b>{{ data.pedido.sucursal_nombre or '—' }}</b></div>
+            <div><span>Estado</span><b>{{ data.pedido.estado }}</b></div>
+            <div><span>Usuario</span><b>{{ data.pedido.usuario or '—' }}</b></div>
+        </div>
+        {% if data.pedido.nota %}
+        <div class="meta"><div><span>Nota</span><b>{{ data.pedido.nota }}</b></div></div>
+        {% endif %}
+        {% for prov in data.proveedores %}
+        <div class="proveedor">
+            <div class="proveedor-titulo">
+                ENTREGAR A: {{ prov.nombre }}
+                {% if prov.principal %}<span class="est">(ALMACÉN PRINCIPAL)</span>{% endif %}
+            </div>
+            <table>
+                <thead><tr><th>Categoría</th><th style="width:46%">Producto</th><th class="unid" style="width:18%">Unidad</th><th class="cant" style="width:10%">Cant.</th></tr></thead>
+                <tbody>
+                    {% for cat in prov.categorias %}
+                        {% for item in cat['items'] %}
+                        <tr class="item">
+                            <td style="font-size:12px;color:#8a6d00">{{ cat.nombre }}</td>
+                            <td>{{ item.producto }}</td>
+                            <td class="unid">{{ item.unidad }}</td>
+                            <td class="cant">{{ item.cantidad }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p style="color:#999;text-align:center;padding:20px 0">El pedido no tiene productos.</p>
+        {% endfor %}
+        <div class="resumen">
+            <span><strong>{{ data.num_items }}</strong> producto(s) solicitado(s)</span>
+            <span>Total de proveedores: <strong>{{ data.proveedores|length }}</strong></span>
+        </div>
+        <div class="firma">
+            <div>Firma / sello del proveedor</div>
+            <div>Firma de recepción de la sucursal</div>
+        </div>
+    </div>
+</body>
+</html>

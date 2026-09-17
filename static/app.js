@@ -5,12 +5,21 @@ const on = (sel, ev, fn) => { const el = $(sel); if (el) el.addEventListener(ev,
 const fmtNum = (n) => Number(n ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d) => {
     if (!d) return '—';
+    d = String(d);
+    const gmt = d.match(/^[A-Za-z]{3}, (\d{2}) ([A-Za-z]{3}) (\d{4}) (\d{2}):(\d{2})(:\d{2})? GMT(?:[+-]\d+)?$/);
+    if (gmt) {
+        const meses = { 'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12 };
+        const mes = String(meses[gmt[2]] || 0).padStart(2, '0');
+        const dma = gmt[1] + '/' + mes + '/' + gmt[3];
+        return (gmt[4] + ':' + gmt[5]) === '00:00' ? dma : dma + ' ' + gmt[4] + ':' + gmt[5];
+    }
     const parts = d.split(' ');
     const datePart = parts[0] || '';
     const timePart = parts[1] || '';
     const dp = datePart.split('-');
     if (dp.length !== 3) return d;
     const formatted = dp[2] + '/' + dp[1] + '/' + dp[0];
+    if (timePart === '00:00:00' || timePart === '00:00') return formatted;
     return timePart ? formatted + ' ' + timePart.substring(0, 5) : formatted;
 };
 
@@ -49,12 +58,77 @@ async function request(url, opts = {}) {
     return data ?? { message: json.message || '' };
 }
 
+// Previene el doble envío: desactiva el/los botón(es) del formulario mientras
+// `fn` termina y les muestra "Procesando...". Devuelve el resultado de `fn`.
+async function conSubmit(fn, botonesSeleccion = 'button[type="submit"]') {
+    const btns = Array.from(document.querySelectorAll(botonesSeleccion));
+    const textos = btns.map((b) => b.innerHTML);
+    btns.forEach((b) => { b.disabled = true; b.innerHTML = 'Procesando...'; });
+    try {
+        return await fn();
+    } finally {
+        btns.forEach((b, i) => { b.disabled = false; b.innerHTML = textos[i]; });
+    }
+}
+
 function toast(msg, type = 'ok') {
     const t = $('#toast');
     t.textContent = msg;
     t.className = `toast show ${type}`;
-    setTimeout(() => t.classList.remove('show'), 3000);
+    clearTimeout(t._toastTimer);
+    t._toastTimer = setTimeout(() => {
+        t.classList.remove('show');
+        setTimeout(() => { if (!t.classList.contains('show')) t.textContent = ''; }, 300);
+    }, 3000);
 }
+
+// ---------------- Modales (accesibilidad) ----------------
+const modalStack = [];
+let modalReturnFocus = null;
+
+function openModal(id) {
+    const m = $('#' + id);
+    if (!m) return;
+    modalReturnFocus = document.activeElement;
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+    const h = m.querySelector('.modal-content h1, .modal-content h2, .modal-content h3');
+    if (h) {
+        if (!h.id) h.id = id + '-titulo';
+        m.setAttribute('aria-labelledby', h.id);
+    }
+    m.classList.add('open');
+    modalStack.push(m);
+    const first = m.querySelector('input, select, textarea, button, [tabindex]');
+    if (first) first.focus();
+    else {
+        const content = m.querySelector('.modal-content');
+        if (content) { content.tabIndex = -1; content.focus(); }
+    }
+}
+
+function closeModal(id) {
+    const m = $('#' + id);
+    if (!m) return;
+    m.classList.remove('open');
+    const i = modalStack.indexOf(m);
+    if (i >= 0) modalStack.splice(i, 1);
+    if (modalStack.length === 0 && modalReturnFocus && document.contains(modalReturnFocus)) {
+        modalReturnFocus.focus();
+        modalReturnFocus = null;
+    }
+}
+
+$$('.modal').forEach((m) => {
+    m.setAttribute('role', 'dialog');
+    m.setAttribute('aria-modal', 'true');
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const m = modalStack[modalStack.length - 1];
+    if (m) { e.preventDefault(); closeModal(m.id); }
+});
 
 // ---------------- Navegación ----------------
 function cerrarMenu() {
@@ -68,6 +142,11 @@ $('#btn-menu').addEventListener('click', () => {
     const overlay = $('#sidebar-overlay');
     if (overlay) overlay.classList.toggle('open');
 });
+
+$('#sidebar-overlay')?.addEventListener('click', cerrarMenu);
+
+$('#btn-sidebar-toggle')?.addEventListener('click', () => document.body.classList.add('sidebar-collapsed'));
+$('#btn-sidebar-abrir')?.addEventListener('click', () => document.body.classList.remove('sidebar-collapsed'));
 
 $$('.menu-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -136,6 +215,13 @@ async function loadCatalogos() {
     fill('#gasto-sucursal-select', catalogos.sucursales, 'Seleccione una sucursal...');
     fill('#venta-sucursal-select', catalogos.sucursales, 'Seleccione una sucursal...');
     fill('#reparto-sucursal-select', catalogos.sucursales, 'Seleccione una sucursal...');
+    fill('#mov-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
+    fill('#gasto-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
+    fill('#venta-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
+    fill('#reparto-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
+    const esGestion = window.ROL === 'admin' || window.ROL === 'superadmin';
+    ['#mov-export-sucursal', '#gasto-export-sucursal', '#venta-export-sucursal', '#reparto-export-sucursal']
+        .forEach((id) => { const el = $(id); if (el) el.style.display = esGestion ? 'inline-flex' : 'none'; });
 }
 
 // ---------------- Dashboard ----------------
@@ -410,11 +496,11 @@ async function loadProductos() {
                 const esPropio = window.ROL === 'encargado' && p.sucursal_id === window.SUCURSAL_ID;
                 const puedeEditar = esGestion || esPropio;
                 const acciones = estado === 'inactivos'
-                    ? (esAdmin() ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
-                    : `<button class="btn btn-icon" data-hist-prod="${p.id}" title="Historial"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>${
+                    ? (esAdmin() ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar" aria-label="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
+                    : `<button class="btn btn-icon" data-hist-prod="${p.id}" title="Historial" aria-label="Historial"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>${
                         puedeEditar
-                            ? `<button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
-                        <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
+                            ? `<button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
+                        <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
                             : ''}`;
                 return `<tr>
                     <td><strong>${nomProd(p)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
@@ -441,6 +527,7 @@ async function loadProductos() {
                         ? bloques.map((b) => `
                             <div class="subcat-titulo">${esc(b.c.nombre)} · ${b.items.length}</div>
                             <div class="categoria-table-wrap">
+                                <div class="table-scroll">
                                 <table class="data-table">
                                     <thead>
                                         <tr>
@@ -451,6 +538,7 @@ async function loadProductos() {
                                     </thead>
                                     <tbody>${filas(b.items)}</tbody>
                                 </table>
+                                </div>
                             </div>`).join('')
                         : '<div class="empty">Sin productos registrados</div>'}
                 </div>`;
@@ -514,7 +602,7 @@ async function verHistorialProducto(id) {
                 <td>${m.usuario || '—'}</td>
             </tr>
         `).join('') || '<tr><td colspan="6" class="empty">Sin movimientos</td></tr>';
-        $('#modal-hist-producto').classList.add('open');
+        openModal('modal-hist-producto');
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -525,10 +613,10 @@ $('#btn-exportar-productos').addEventListener('click', () => {
     if (sel) sel.value = _prodSuc;
     const selCat = $('#exportar-categoria');
     if (selCat) selCat.value = ($('#prod-categoria') || {}).value || '';
-    $('#modal-exportar-prod').classList.add('open');
+    openModal('modal-exportar-prod');
 });
 $('#btn-confirmar-exportar').addEventListener('click', () => {
-    $('#modal-exportar-prod').classList.remove('open');
+    closeModal('modal-exportar-prod');
     exportarProductos();
 });
 
@@ -537,7 +625,7 @@ $('#btn-importar-prod').addEventListener('click', () => {
     $('#importar-nombre-archivo').textContent = '';
     $('#importar-archivo').value = '';
     $('#btn-ejecutar-importar').disabled = true;
-    $('#modal-importar-prod').classList.add('open');
+    openModal('modal-importar-prod');
 });
 $('#btn-seleccionar-archivo').addEventListener('click', () => $('#importar-archivo').click());
 $('#importar-archivo').addEventListener('change', () => {
@@ -599,11 +687,11 @@ async function openProductoModal(id, lista) {
     $('#campo-stock-inicial').style.display = 'flex';
     $('#campo-stock-actual').style.display = 'none';
     $('#prod-stock-hint').style.display = 'none';
-    const esGestionDlg = esCentral();
+    const esGestionDlg = esAdmin();
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
-    $('#prod-sucursal').value = esGestionDlg ? (window.SUCURSAL_ID || '') : '';
-    if (!id && esGestionDlg) {
+    $('#prod-sucursal').value = (window.SUCURSAL_ID || '');
+    if (!id) {
         const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === +($('#prod-sucursal').value || 0));
         if (match) $('#prod-almacen').value = match.id;
     }
@@ -633,7 +721,7 @@ async function openProductoModal(id, lista) {
         $('#prod-stock-hint').style.display = 'block';
         $('#prod-stock-actual').value = p.stock;
     }
-    $('#modal-producto').classList.add('open');
+    openModal('modal-producto');
 }
 
 $('#form-producto').addEventListener('submit', async (e) => {
@@ -657,20 +745,22 @@ $('#form-producto').addEventListener('submit', async (e) => {
         proveedor_id: +$('#prod-proveedor').value || null,
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
-    if (esCentral()) {
+    if (esAdmin()) {
         body.sucursal_id = +$('#prod-sucursal').value || null;
     }
     if (id) body.stock = +$('#prod-stock-actual').value || 0;
     try {
         let resp = null;
         if (id) {
-            resp = await request(API + '/productos/' + id, { method: 'PUT', body: JSON.stringify(body) });
+            resp = await conSubmit(() => request(API + '/productos/' + id, { method: 'PUT', body: JSON.stringify(body) }),
+                '#form-producto button[type="submit"]');
         } else {
-            resp = await request(API + '/productos', { method: 'POST', body: JSON.stringify(body) });
+            resp = await conSubmit(() => request(API + '/productos', { method: 'POST', body: JSON.stringify(body) }),
+                '#form-producto button[type="submit"]');
         }
         toast(id ? 'Producto actualizado' : 'Producto creado');
         if (resp && resp.aviso) setTimeout(() => toast('⚠ ' + resp.aviso, 'err'), 400);
-        $('#modal-producto').classList.remove('open');
+        closeModal('modal-producto');
         loadProductos();
     } catch (err) {
         toast(err.message, 'err');
@@ -846,7 +936,8 @@ $('#form-movimiento').addEventListener('submit', async (e) => {
     };
     if (!body.producto_id) return toast('Seleccione un producto', 'err');
     try {
-        await request(API + '/movimientos', { method: 'POST', body: JSON.stringify(body) });
+        await conSubmit(() => request(API + '/movimientos', { method: 'POST', body: JSON.stringify(body) }),
+            '#form-movimiento button[type="submit"]');
         toast('Movimiento registrado');
         e.target.reset();
         listarMovimientos();
@@ -864,10 +955,13 @@ $('#btn-filtrar-mov').addEventListener('click', () => { pagState['#movimientos-p
 on('#mov-filtro', 'input', debounce(() => { pagState['#movimientos-paginacion'] = 1; listarMovimientos(); }, 300));
 $('#mov-filtro-tipo').addEventListener('change', listarMovimientos);
 $('#btn-exportar-mov').addEventListener('click', () => {
+    const tipo = (($('#mov-export-tipo') || {}).value || '') || (($('#mov-filtro-tipo') || {}).value || '');
+    const expSuc = (($('#mov-export-sucursal') || {}).value || '');
     const tabSucursales = $('#btn-hist-sucursales');
     const select = $('#hist-sucursal-select');
-    const enSucursales = tabSucursales && tabSucursales.classList.contains('active') && select && select.value;
-    window.location.href = '/api/exportar/movimientos?desde=' + ($('#mov-desde') || {}).value + '&hasta=' + ($('#mov-hasta') || {}).value + '&tipo=' + ($('#mov-filtro-tipo') || {}).value + '&filtro=' + ($('#mov-filtro') || {}).value + (enSucursales ? '&sucursal_id=' + select.value : '');
+    const enSucursales = (tabSucursales && tabSucursales.classList.contains('active') && select && select.value) ? '&sucursal_id=' + select.value : '';
+    const suc = expSuc ? '&sucursal_id=' + expSuc : enSucursales;
+    window.location.href = '/api/exportar/movimientos?desde=' + ($('#mov-desde') || {}).value + '&hasta=' + ($('#mov-hasta') || {}).value + '&tipo=' + tipo + '&filtro=' + ($('#mov-filtro') || {}).value + suc;
 });
 vincularEscaneo('#mov-escaneo', '#mov-producto', '#mov-cantidad');
 $('#mov-tipo').addEventListener('change', () => {
@@ -896,11 +990,11 @@ function actQrItems() {
             <td>${esc(it.codigo || '—')}</td>
             <td>${esc(it.unidad)}</td>
             <td>
-                <button class="btn btn-icon" onclick="qrCant('${k}', -1)">−</button>
+                <button class="btn btn-icon" aria-label="Restar cantidad" onclick="qrCant('${k}', -1)">−</button>
                 <strong style="margin:0 8px">${it.cantidad}</strong>
-                <button class="btn btn-icon" onclick="qrCant('${k}', 1)">+</button>
+                <button class="btn btn-icon" aria-label="Sumar cantidad" onclick="qrCant('${k}', 1)">+</button>
             </td>
-            <td><button class="btn btn-icon btn-danger" onclick="qrRemove('${k}')">✕</button></td>
+            <td><button class="btn btn-icon btn-danger" aria-label="Quitar producto" onclick="qrRemove('${k}')">✕</button></td>
         </tr>`;
     }).join('');
 }
@@ -1002,8 +1096,8 @@ async function loadProveedores() {
                 <td>${p.direccion || '—'}</td>
                 <td>${p.sucursal_nombre || '—'}</td>
                 <td>
-                    <button class="btn btn-icon" data-edit-prov="${p.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
-                    <button class="btn btn-icon btn-danger" data-del-prov="${p.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                    <button class="btn btn-icon" data-edit-prov="${p.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
+                    <button class="btn btn-icon btn-danger" data-del-prov="${p.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                 </td>
             </tr>`).join('') || '<tr><td colspan="6" class="empty">Sin proveedores</td></tr>';
 
@@ -1051,7 +1145,7 @@ function openProveedorModal(id, lista) {
         $('#prov-direccion').value = p.direccion;
         if (esGestion) $('#prov-sucursal').value = p.sucursal_id || '';
     }
-    $('#modal-proveedor').classList.add('open');
+    openModal('modal-proveedor');
 }
 
 $('#form-proveedor').addEventListener('submit', async (e) => {
@@ -1073,7 +1167,7 @@ $('#form-proveedor').addEventListener('submit', async (e) => {
             await request(API + '/proveedores', { method: 'POST', body: JSON.stringify(body) });
         }
         toast(id ? 'Proveedor actualizado' : 'Proveedor creado');
-        $('#modal-proveedor').classList.remove('open');
+        closeModal('modal-proveedor');
         loadProveedores();
     } catch (err) {
         toast(err.message, 'err');
@@ -1126,8 +1220,8 @@ async function loadGastos() {
                 <td>${g.sucursal_nombre || '—'}</td>
                 <td><strong>Bs ${fmtNum(g.monto)}</strong></td>
                 <td>
-                    <button class="btn btn-icon" data-edit-gasto="${g.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-                    <button class="btn btn-icon btn-danger" data-del-gasto="${g.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                    <button class="btn btn-icon" data-edit-gasto="${g.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                    <button class="btn btn-icon btn-danger" data-del-gasto="${g.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                 </td>
             </tr>`).join('') || '<tr><td colspan="7" class="empty">Sin gastos registrados</td></tr>';
         $$('[data-del-gasto]').forEach((b) => b.addEventListener('click', () => delGasto(b.dataset.delGasto)));
@@ -1183,9 +1277,10 @@ $('#form-gasto').addEventListener('submit', async (e) => {
 $('#btn-filtrar-gastos').addEventListener('click', () => { pagState['#gastos-paginacion'] = 1; loadGastos(); });
 on('#gasto-filtro', 'input', debounce(() => { pagState['#gastos-paginacion'] = 1; loadGastos(); }, 300));
 $('#btn-exportar-gastos').addEventListener('click', () => {
+    const expSuc = (($('#gasto-export-sucursal') || {}).value || '');
     const select = $('#gasto-sucursal-select');
-    const enSucursales = select && select.value;
-    window.location.href = '/api/exportar/gastos?desde=' + ($('#gasto-desde') || {}).value + '&hasta=' + ($('#gasto-hasta') || {}).value + '&filtro=' + ($('#gasto-filtro') || {}).value + (enSucursales ? '&sucursal_id=' + select.value : '');
+    const enSucursales = !expSuc && select && select.value;
+    window.location.href = '/api/exportar/gastos?desde=' + ($('#gasto-desde') || {}).value + '&hasta=' + ($('#gasto-hasta') || {}).value + '&filtro=' + ($('#gasto-filtro') || {}).value + ((expSuc || enSucursales) ? '&sucursal_id=' + (expSuc || select.value) : '');
 });
 
 async function delGasto(id) {
@@ -1211,7 +1306,7 @@ function editGasto(g) {
     $('#edit-gasto-proveedor').innerHTML = '<option value="">Sin proveedor</option>' +
         catalogos.proveedores.map((p) => '<option value="' + p.id + '">' + esc(p.nombre) + '</option>').join('');
     $('#edit-gasto-proveedor').value = g.proveedor_id || '';
-    $('#modal-editar-gasto').classList.add('open');
+    openModal('modal-editar-gasto');
 }
 $('#form-editar-gasto').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1227,7 +1322,7 @@ $('#form-editar-gasto').addEventListener('submit', async (e) => {
             }),
         });
         toast('Gasto actualizado');
-        $('#modal-editar-gasto').classList.remove('open');
+        closeModal('modal-editar-gasto');
         loadGastos();
     } catch (err) {
         toast(err.message, 'err');
@@ -1243,8 +1338,8 @@ async function loadAlmacenes() {
                 <td>${esc(a.nombre)}</td>
                 <td>${esc(a.ubicacion) || '—'}</td>
                 <td>
-                    <button class="btn btn-icon" data-edit-alm="${a.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-                    <button class="btn btn-icon btn-danger" data-del-alm="${a.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                    <button class="btn btn-icon" data-edit-alm="${a.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                    <button class="btn btn-icon btn-danger" data-del-alm="${a.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                 </td>
             </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin almacenes</td></tr>';
         $$('[data-edit-alm]').forEach((b) => b.addEventListener('click', () => {
@@ -1254,7 +1349,7 @@ async function loadAlmacenes() {
                 $('#alm-nombre').value = a.nombre;
                 $('#alm-ubicacion').value = a.ubicacion || '';
                 $('#modal-almacen-title').textContent = 'Editar almacén';
-                $('#modal-almacen').classList.add('open');
+                openModal('modal-almacen');
             }
         }));
         $$('[data-del-alm]').forEach((b) => b.addEventListener('click', async () => {
@@ -1271,7 +1366,7 @@ $('#btn-nuevo-almacen').addEventListener('click', () => {
     $('#alm-id').value = '';
     $('#form-almacen').reset();
     $('#modal-almacen-title').textContent = 'Nuevo almacén';
-    $('#modal-almacen').classList.add('open');
+    openModal('modal-almacen');
 });
 $('#form-almacen').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1284,7 +1379,7 @@ $('#form-almacen').addEventListener('submit', async (e) => {
             await request(API + '/almacenes', { method: 'POST', body: JSON.stringify(body) });
         }
         toast(id ? 'Almacén actualizado' : 'Almacén creado');
-        $('#modal-almacen').classList.remove('open');
+        closeModal('modal-almacen');
         loadAlmacenes();
         loadCatalogos();
     } catch (err) { toast(err.message, 'err'); }
@@ -1298,8 +1393,8 @@ async function loadCategorias() {
             <tr>
                 <td>${esc(c.nombre)}</td>
                 <td>
-                    <button class="btn btn-icon" data-edit-cat="${c.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-                    <button class="btn btn-icon btn-danger" data-del-cat="${c.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                    <button class="btn btn-icon" data-edit-cat="${c.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+                    <button class="btn btn-icon btn-danger" data-del-cat="${c.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                 </td>
             </tr>`).join('') || '<tr><td colspan="2" class="empty">Sin categorías</td></tr>';
         $$('[data-edit-cat]').forEach((b) => b.addEventListener('click', () => {
@@ -1308,7 +1403,7 @@ async function loadCategorias() {
                 $('#cat-id').value = c.id;
                 $('#cat-nombre').value = c.nombre;
                 $('#modal-categoria-title').textContent = 'Editar categoría';
-                $('#modal-categoria').classList.add('open');
+                openModal('modal-categoria');
             }
         }));
         $$('[data-del-cat]').forEach((b) => b.addEventListener('click', async () => {
@@ -1325,7 +1420,7 @@ $('#btn-nueva-categoria').addEventListener('click', () => {
     $('#cat-id').value = '';
     $('#form-categoria').reset();
     $('#modal-categoria-title').textContent = 'Nueva categoría';
-    $('#modal-categoria').classList.add('open');
+    openModal('modal-categoria');
 });
 $('#form-categoria').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1338,48 +1433,31 @@ $('#form-categoria').addEventListener('submit', async (e) => {
             await request(API + '/categorias', { method: 'POST', body: JSON.stringify(body) });
         }
         toast(id ? 'Categoría actualizada' : 'Categoría creada');
-        $('#modal-categoria').classList.remove('open');
+        closeModal('modal-categoria');
         loadCategorias();
         loadCatalogos();
     } catch (err) { toast(err.message, 'err'); }
 });
 
 // ---------------- Reportes ----------------
+function fichaRep(n, lab, ok = true) {
+    return `<div class="sinc-ficha ${ok ? 'sinc-ok' : 'sinc-mal'}"><div class="sinc-num">${n}</div><div class="sinc-lab">${esc(lab)}</div></div>`;
+}
+
 async function loadReportes() {
     try {
+        const desde = ($('#rep-desde') || {}).value || '';
+        const hasta = ($('#rep-hasta') || {}).value || '';
         const qs = new URLSearchParams();
-        if ($('#rep-desde').value) qs.set('desde', $('#rep-desde').value);
-        if ($('#rep-hasta').value) qs.set('hasta', $('#rep-hasta').value);
-        const consumo = await request(API + '/reportes/consumo?' + qs.toString());
-        $('#rep-consumo').innerHTML = consumo.map((c) => `
-            <tr>
-                <td>${c.nombre}</td>
-                <td><span class="badge badge-${c.tipo}">${c.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
-                <td>${c.cantidad} ${c.unidad}</td>
-                <td>Bs ${fmtNum(c.total)}</td>
-            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin datos</td></tr>';
+        if (desde) qs.set('desde', desde);
+        if (hasta) qs.set('hasta', hasta);
 
-        const valorizacion = await request(API + '/reportes/valorizacion');
-        $('#rep-valorizacion').innerHTML = valorizacion.map((v) => `
-            <tr>
-                <td>${v.nombre}</td><td>${v.stock} ${v.unidad}</td>
-                <td>Bs ${fmtNum(v.costo_promedio)}</td><td><strong>Bs ${fmtNum(v.valor)}</strong></td>
-            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin productos con stock</td></tr>';
-
-        const venc = await request(API + '/reportes/vencimientos');
-        $('#rep-vencimientos').innerHTML = venc.map((v) => `
-            <tr><td>${esc(v.nombre)}</td><td>${v.sucursal || '—'}</td><td>${fmtDate(v.vencimiento)}</td><td>${v.stock} ${v.unidad}</td></tr>`).join('')
-            || '<tr><td colspan="4" class="empty">Sin lotes con vencimiento</td></tr>';
-
-        const repartos = await request(API + '/reportes/repartos?' + qs.toString());
-        $('#rep-repartos').innerHTML = repartos.map((r) => `
-            <tr>
-                <td>${r.nombre}${r.principal ? ' <span class="badge badge-bajo">Principal</span>' : ''}</td>
-                <td>${r.principal ? 'Principal' : 'Sucursal'}</td>
-                <td>${r.num_repartos}</td>
-                <td><strong>Bs ${fmtNum(r.total_repartido)}</strong></td>
-            </tr>`).join('')
-            || '<tr><td colspan="4" class="empty">Sin datos</td></tr>';
+        const res = await request(API + '/reportes/resumen?' + qs.toString());
+        $('#rep-resumen').innerHTML =
+            fichaRep('Bs ' + fmtNum(res.ventas.total), `${res.ventas.n} venta(s) del período · Ventas`) +
+            fichaRep('Bs ' + fmtNum(res.ganancias), 'Ganancia del período') +
+            fichaRep('Bs ' + fmtNum(res.repartos.total), `${res.repartos.n} reparto(s) · Repartos`) +
+            fichaRep('Bs ' + fmtNum(res.valorizacion.total), 'Valorización del inventario');
 
         const ganancias = await request(API + '/reportes/ganancias?' + qs.toString());
         let totVenta = 0, totCosto = 0, totUtil = 0;
@@ -1402,108 +1480,69 @@ async function loadReportes() {
                     <td><strong>Bs ${fmtNum(totUtil)}</strong></td>
                 </tr>`;
         }
+
+        const vSuc = await request(API + '/reportes/ventas_sucursal?' + qs.toString());
+        let vsTot = 0, vsUtil = 0;
+        $('#rep-ventas-suc').innerHTML = vSuc.map((v) => {
+            vsTot += v.total; vsUtil += v.utilidad;
+            return `<tr><td><strong>${esc(v.sucursal)}</strong></td><td>${v.num_ventas}</td><td>Bs ${fmtNum(v.total)}</td><td>Bs ${fmtNum(v.utilidad)}</td></tr>`;
+        }).join('') || '<tr><td colspan="4" class="empty">Sin ventas en el período</td></tr>';
+        if (vSuc.length) {
+            $('#rep-ventas-suc').innerHTML += `
+                <tr class="total-row"><td><strong>TOTAL</strong></td><td></td>
+                <td><strong>Bs ${fmtNum(vsTot)}</strong></td><td><strong>Bs ${fmtNum(vsUtil)}</strong></td></tr>`;
+        }
+
+        const repartos = await request(API + '/reportes/repartos?' + qs.toString());
+        let repTot = 0, repN = 0;
+        $('#rep-repartos').innerHTML = repartos.map((r) => {
+            repTot += r.total_repartido; repN += r.num_repartos;
+            return `<tr><td><strong>${esc(r.nombre)}</strong></td><td>${r.num_repartos}</td><td>Bs ${fmtNum(r.total_repartido)}</td></tr>`;
+        }).join('') || '<tr><td colspan="3" class="empty">Sin repartos en el período</td></tr>';
+        if (repartos.length) {
+            $('#rep-repartos').innerHTML += `
+                <tr class="total-row"><td><strong>TOTAL</strong></td><td><strong>${repN}</strong></td><td><strong>Bs ${fmtNum(repTot)}</strong></td></tr>`;
+        }
+
+        const valorizacion = await request(API + '/reportes/valorizacion');
+        let valTot = 0, valUnid = 0;
+        $('#rep-valorizacion').innerHTML = valorizacion.map((v) => {
+            valTot += v.valor; valUnid += v.unid;
+            return `<tr><td><strong>${esc(v.sucursal)}</strong></td><td>${v.unid}</td><td><strong>Bs ${fmtNum(v.valor)}</strong></td></tr>`;
+        }).join('') || '<tr><td colspan="3" class="empty">Sin stock valorizable</td></tr>';
+        if (valorizacion.length) {
+            $('#rep-valorizacion').innerHTML += `
+                <tr class="total-row"><td><strong>TOTAL</strong></td><td><strong>${valUnid}</strong></td><td><strong>Bs ${fmtNum(valTot)}</strong></td></tr>`;
+        }
+
+        const venc = await request(API + '/reportes/vencimientos');
+        const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+        $('#rep-vencimientos').innerHTML = venc.map((v) => {
+            const dif = Math.round((new Date(v.vencimiento + 'T00:00:00') - hoy) / 86400000);
+            const cls = dif < 0 ? 'text-red' : (dif <= 14 ? 'text-orange' : '');
+            const urg = dif < 0 ? ' (VENCIDO)' : (dif <= 14 ? ' (pronto)' : '');
+            return `<tr><td><strong>${esc(v.nombre)}</strong></td><td>${esc(v.sucursal || '—')}</td><td>${fmtDate(v.vencimiento)}</td><td>${v.stock} ${v.unidad}</td><td class="${cls}"><strong>${dif}${urg}</strong></td></tr>`;
+        }).join('') || '<tr><td colspan="5" class="empty">Sin lotes con vencimiento</td></tr>';
+
+        const consumo = await request(API + '/reportes/consumo?' + qs.toString());
+        $('#rep-consumo').innerHTML = consumo.map((c) => `
+            <tr>
+                <td>${esc(c.nombre)}</td>
+                <td><span class="badge badge-${c.tipo}">${c.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
+                <td>${c.cantidad} ${c.unidad}</td>
+                <td>Bs ${fmtNum(c.total)}</td>
+            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin movimientos en el período</td></tr>';
     } catch (e) {
         toast(e.message, 'err');
     }
 }
 
 $('#btn-generar-reporte').addEventListener('click', loadReportes);
-$('#btn-exportar-rep-sucursal').addEventListener('click', () => {
-    window.location.href = '/api/exportar/repartos?desde=' + $('#rep-desde').value + '&hasta=' + $('#rep-hasta').value;
-});
-$('#btn-exportar-ganancias').addEventListener('click', () => {
-    window.location.href = '/api/exportar/ganancias?desde=' + $('#rep-desde').value + '&hasta=' + $('#rep-hasta').value;
-});
+$$('#view-reportes [data-xls]').forEach((b) => b.addEventListener('click', () => {
+    window.location.href = b.dataset.xls + '?desde=' + ($('#rep-desde') || {}).value + '&hasta=' + ($('#rep-hasta') || {}).value;
+}));
 $('#btn-imprimir-reporte').addEventListener('click', () => window.print());
 $('#btn-etiquetas').addEventListener('click', () => window.open('/etiquetas', '_blank'));
-
-// ---------------- Sincronía de inventario (admins) ----------------
-function hacerFicha(n, ok, lab) {
-    return `<div class="sinc-ficha ${ok ? 'sinc-ok' : 'sinc-mal'}"><div class="sinc-num">${n}</div><div class="sinc-lab">${esc(lab)}</div></div>`;
-}
-
-function renderAuditoria(a, titulo) {
-    const vm = +a.ventas.m_total + (+a.ventas.m_vacio);
-    const rm = +a.repartos.m_total + (+a.repartos.m_vacio);
-    let html = `<h3>${esc(titulo)}</h3><div class="sinc-fichas">`;
-    html += hacerFicha(a.descuadres.length, a.descuadres.length === 0, 'Descuadres stock/mov.');
-    html += hacerFicha(vm, vm === 0, 'Ventas con error');
-    html += hacerFicha(rm, rm === 0, 'Repartos con error');
-    html += hacerFicha(a.productos_con_vencimiento, true, 'Con vencimiento');
-    html += `</div>`;
-    html += `<p class="sinc-val"><strong>Valorización total: Bs ${fmtNum(a.total_valorizacion)}</strong> · Productos con stock: ${a.productos_con_stock} · Proveedores: ${a.proveedores}</p>`;
-    if (a.valorizacion.length) {
-        html += `<table class="data-table"><thead><tr><th>Sucursal</th><th>Unidades</th><th>Valor (Bs)</th></tr></thead><tbody>` +
-            a.valorizacion.map((v) => `<tr><td>${esc(v.sucursal)}</td><td>${v.unid}</td><td><strong>Bs ${fmtNum(v.valor)}</strong></td></tr>`).join('') + `</tbody></table>`;
-    }
-    if (a.descuadres.length) {
-        html += `<table class="data-table"><thead><tr><th>Producto</th><th>Sucursal</th><th>Stock tabla</th><th>Según movimientos</th><th>Diferencia</th></tr></thead><tbody>` +
-            a.descuadres.map((d) => `<tr class="sinc-mal-row"><td>${esc(d.nombre)}</td><td>${esc(d.sucursal)}</td><td>${d.stock_tab}</td><td>${d.mov}</td><td><strong>${d.dif}</strong></td></tr>`).join('') + `</tbody></table>`;
-    }
-    return html;
-}
-
-async function cargarAuditoria() {
-    const caja = $('#sincronia-resultado');
-    caja.innerHTML = 'Auditando...';
-    try {
-        const a = await request(API + '/reportes/auditoria');
-        caja.innerHTML = renderAuditoria(a, 'Resultado de la auditoría');
-    } catch (e) {
-        caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
-    }
-}
-
-async function reconciliarInventario() {
-    if (!confirm('Se eliminarán movimientos huérfanos (ventas/repartos ya inexistentes), se recalculará el stock desde los movimientos y se re-calcularán los totales. ¿Continuar?')) return;
-    const caja = $('#sincronia-resultado');
-    caja.innerHTML = 'Reconciliando...';
-    try {
-        const r = await request(API + '/reportes/reconciliar', { method: 'POST' });
-        let html = `<p class="sinc-val">Reconciliación aplicada: <strong>${r.movimientos_huerfanos_borrados}</strong> movimiento(s) huérfano(s) eliminados.</p>`;
-        if (r.antes.descuadres.length) html += `<p>Descuadres antes: ${r.antes.descuadres.length} · Descuadres después: ${r.despues.descuadres.length}</p>`;
-        caja.innerHTML = html + renderAuditoria(r.despues, 'Resultado de la reconciliación');
-        loadReportes();
-    } catch (e) {
-        caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
-    }
-}
-
-$('#btn-auditar').addEventListener('click', cargarAuditoria);
-$('#btn-reconciliar').addEventListener('click', reconciliarInventario);
-
-function hacerFicha(n, ok, lab) {
-    return `<div class="sinc-ficha ${ok ? 'sinc-ok' : 'sinc-mal'}"><div class="sinc-num">${n}</div><div class="sinc-lab">${esc(lab)}</div></div>`;
-}
-
-async function cargarAuditoria() {
-    const caja = $('#sincronia-resultado');
-    caja.innerHTML = 'Auditando...';
-    try {
-        const a = await request(API + '/reportes/auditoria');
-        caja.innerHTML = renderAuditoria(a, 'Auditoría');
-    } catch (e) {
-        caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
-    }
-}
-
-async function reconciliarInventario() {
-    if (!confirm('Se eliminarán movimientos huérfanos (ventas/repartos ya inexistentes), se recalculará el stock desde los movimientos y se re-calcularán los totales. ¿Continuar?')) return;
-    const caja = $('#sincronia-resultado');
-    caja.innerHTML = 'Reconciliando...';
-    try {
-        const r = await request(API + '/reportes/reconciliar', { method: 'POST' });
-        let html = `<p class="sinc-val">Reconciliación aplicada: <strong>${r.movimientos_huerfanos_borrados}</strong> movimiento(s) huérfano(s) eliminados.</p>`;
-        if (r.antes.descuadres.length) html += `<p>Descuadres antes: ${r.antes.descuadres.length} · Descuadres después: ${r.despues.descuadres.length}</p>`;
-        caja.innerHTML = html + renderAuditoria(r.despues, 'Reconciliación');
-        loadReportes();
-    } catch (e) {
-        caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
-    }
-}
-
-$('#btn-auditar').addEventListener('click', cargarAuditoria);
-$('#btn-reconciliar').addEventListener('click', reconciliarInventario);
 
 // ---------------- Escaneo de código de barras ----------------
 function abrirNuevoProductoConCodigo(codigo) {
@@ -1614,14 +1653,14 @@ $('#form-venta').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!ventaItems.length) return toast('La venta no tiene productos', 'err');
     try {
-        const res = await request(API + '/ventas', {
+        const res = await conSubmit(() => request(API + '/ventas', {
             method: 'POST',
             body: JSON.stringify({
                 fecha: fechaISO($('#venta-fecha').value) || undefined,
                 nota: $('#venta-nota').value,
                 detalle: ventaItems,
             }),
-        });
+        }), '#form-venta button[type="submit"]');
         toast('Venta registrada por Bs ' + fmtNum(res.total));
         ventaItems = [];
         actVentaItems();
@@ -1667,8 +1706,8 @@ async function listarVentas() {
             <td>${esc(v.nota) || '—'}</td>
             <td>${v.usuario || '—'}</td>
             <td>
-                <button class="btn btn-icon" onclick="verVenta(${v.id})" title="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-                ${window.ROL !== 'encargado' ? `<button class="btn btn-icon btn-danger" onclick="anularVenta(${v.id})" title="Anular venta"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg></button>` : ''}
+                <button class="btn btn-icon" onclick="verVenta(${v.id})" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                ${window.ROL !== 'encargado' ? `<button class="btn btn-icon btn-danger" onclick="anularVenta(${v.id})" title="Anular venta" aria-label="Anular venta"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg></button>` : ''}
             </td>
         </tr>`).join('') || '<tr><td colspan="8" class="empty">Sin ventas registradas</td></tr>';
     renderPagination('#ventas-paginacion', total, pagina, porPagina, listarVentas);
@@ -1723,7 +1762,7 @@ window.verVenta = async (id) => {
                 <td>${fmtNum(d.precio_unitario)}</td>
                 <td><strong>${fmtNum(d.subtotal)}</strong></td>
             </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin items</td></tr>';
-        $('#modal-detalle-venta').classList.add('open');
+        openModal('modal-detalle-venta');
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -1734,10 +1773,12 @@ on('#venta-filtro', 'input', debounce(() => { pagState['#ventas-paginacion'] = 1
 $('#btn-exportar-ventas').addEventListener('click', () => {
     const select = $('#venta-sucursal-select');
     const enSucursales = select && select.value;
+    const expSuc = (($('#venta-export-sucursal') || {}).value || '');
     const qs = new URLSearchParams();
     if ($('#venta-desde').value) qs.set('desde', $('#venta-desde').value);
     if ($('#venta-hasta').value) qs.set('hasta', $('#venta-hasta').value);
-    if (enSucursales) qs.set('sucursal_id', select.value);
+    if (expSuc) qs.set('sucursal_id', expSuc);
+    else if (enSucursales) qs.set('sucursal_id', select.value);
     const filtro = (($('#venta-filtro') || {}).value || '').trim();
     if (filtro) qs.set('filtro', filtro);
     window.location.href = '/api/exportar/ventas?' + qs.toString();
@@ -1840,7 +1881,7 @@ $('#form-reparto').addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!repartoItems.length) return toast('El reparto no tiene productos', 'err');
     try {
-        const res = await request(API + '/repartos', {
+        const res = await conSubmit(() => request(API + '/repartos', {
             method: 'POST',
             body: JSON.stringify({
                 fecha: fechaISO($('#reparto-fecha').value) || undefined,
@@ -1848,7 +1889,7 @@ $('#form-reparto').addEventListener('submit', async (e) => {
                 nota: $('#reparto-nota').value,
                 detalle: repartoItems,
             }),
-        });
+        }), '#form-reparto button[type="submit"]');
         toast('Reparto registrado por Bs ' + fmtNum(res.total));
         repartoItems = [];
         actRepartoItems();
@@ -1883,15 +1924,18 @@ async function listarRepartos() {
             <td>#${r.id}</td>
             <td>${fmtDate(r.fecha)}</td>
             <td><strong>${esc(r.origen_nombre || '—')} → ${esc(r.sucursal_nombre)}</strong></td>
+            <td>${r.pedido_ticket
+                ? `<span class="badge badge-entrada" style="cursor:pointer" onclick="verPedido(${r.pedido_id}, false)" title="Ver pedido">${esc(r.pedido_ticket)}</span>`
+                : '—'}</td>
             <td class="items-detalle">${esc(r.items_detalle) || r.num_items + ' items'}</td>
             <td><strong>Bs ${fmtNum(r.total)}</strong></td>
             <td>${esc(r.nota) || '—'}</td>
             <td>${r.usuario || '—'}</td>
             <td>
-                <button class="btn btn-icon" onclick="verReparto(${r.id})" title="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-                ${window.ROL === 'superadmin' ? `<button class="btn btn-icon btn-danger" onclick="anularReparto(${r.id})" title="Anular reparto"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg></button>` : ''}
+                <button class="btn btn-icon" onclick="verReparto(${r.id})" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                ${window.ROL === 'superadmin' ? `<button class="btn btn-icon btn-danger" onclick="anularReparto(${r.id})" title="Anular reparto" aria-label="Anular reparto"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/></svg></button>` : ''}
             </td>
-        </tr>`).join('') || '<tr><td colspan="8" class="empty">Sin repartos registrados</td></tr>';
+        </tr>`).join('') || '<tr><td colspan="9" class="empty">Sin repartos registrados</td></tr>';
     renderPagination('#repartos-paginacion', total, pagina, porPagina, listarRepartos);
 }
 
@@ -1915,8 +1959,15 @@ window.verReparto = async (id) => {
         $('#det-reparto-fecha').textContent = fmtDate(r.fecha);
         $('#det-reparto-sucursal').textContent = r.sucursal_nombre || '—';
         $('#det-reparto-usuario').textContent = r.usuario || '—';
+        const detPed = $('#det-reparto-pedido');
+        if (detPed) {
+            detPed.innerHTML = r.pedido_ticket
+                ? `<a href="#" onclick="verPedido(${r.pedido_id}, false); return false;" style="cursor:pointer">${esc(r.pedido_ticket)}</a>`
+                : '—';
+        }
         $('#det-reparto-nota').textContent = r.nota || 'Sin nota';
-        $('#det-reparto-estado').textContent = r.id ? 'Registrado' : '—';
+        const estRep = r.pedido_estado ? (r.pedido_estado.charAt(0).toUpperCase() + r.pedido_estado.slice(1)) : 'Registrado';
+        $('#det-reparto-estado').textContent = r.pedido_id ? estRep : 'Registrado';
         $('#det-reparto-total').textContent = fmtNum(r.total);
         $('#det-reparto-items').innerHTML = data.detalle.map((d) => `
             <tr>
@@ -1925,7 +1976,7 @@ window.verReparto = async (id) => {
                 <td>${fmtNum(d.costo_unitario)}</td>
                 <td><strong>${fmtNum(d.subtotal)}</strong></td>
             </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin items</td></tr>';
-        $('#modal-detalle-reparto').classList.add('open');
+        openModal('modal-detalle-reparto');
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -1935,14 +1986,15 @@ $('#btn-filtrar-repartos').addEventListener('click', () => { pagState['#repartos
 on('#reparto-filtro', 'input', debounce(() => { pagState['#repartos-paginacion'] = 1; listarRepartos(); }, 300));
 $('#btn-exportar-repartos').addEventListener('click', () => {
     const select = $('#reparto-sucursal-select');
-    const enSucursales = $('.menu-btn').length && $('#btn-reparto-sucursales') && $('#btn-reparto-sucursales').classList.contains('active') && select.value;
-    window.location.href = '/api/exportar/repartos?desde=' + $('#reparto-desde').value + '&hasta=' + $('#reparto-hasta').value + (enSucursales ? '&sucursal_id=' + select.value : '');
+    const expSuc = (($('#reparto-export-sucursal') || {}).value || '');
+    const enSucursales = !expSuc && $('.menu-btn').length && $('#btn-reparto-sucursales') && $('#btn-reparto-sucursales').classList.contains('active') && select.value;
+    window.location.href = '/api/exportar/repartos?desde=' + $('#reparto-desde').value + '&hasta=' + $('#reparto-hasta').value + ((expSuc || enSucursales) ? '&sucursal_id=' + (expSuc || select.value) : '');
 });
 vincularEscaneo('#reparto-escaneo', '#reparto-producto', '#reparto-cantidad');
 
 // ---------------- Gestión de sucursales (admin) ----------------
 $('#btn-gestionar-sucursales').addEventListener('click', () => {
-    $('#modal-sucursales').classList.add('open');
+    openModal('modal-sucursales');
     cargarSucursales();
 });
 
@@ -1956,8 +2008,8 @@ async function cargarSucursales() {
             <td>${s.num_repartos}</td>
             <td>Bs ${fmtNum(s.total_repartido)}</td>
             <td>
-                <button class="btn btn-icon" data-edit-suc="${s.id}" title="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
-                <button class="btn btn-icon btn-danger" data-del-suc="${s.id}" title="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+                <button class="btn btn-icon" data-edit-suc="${s.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
+                <button class="btn btn-icon btn-danger" data-del-suc="${s.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
             </td>
         </tr>`).join('');
     $$('[data-edit-suc]').forEach((b) => b.addEventListener('click', () => {
@@ -2043,7 +2095,7 @@ async function loadUsuarios() {
             $('#user-password').value = '';
             $('#user-password').placeholder = 'Dejar en blanco para no cambiar';
             $('#modal-usuario-title').textContent = 'Editar usuario';
-            $('#modal-usuario').classList.add('open');
+            openModal('modal-usuario');
         }));
         $$('[data-del-user]').forEach((b) => b.addEventListener('click', async () => {
             if (!confirm('¿Eliminar este usuario?')) return;
@@ -2079,7 +2131,7 @@ $('#btn-nuevo-usuario').addEventListener('click', () => {
     $('#user-usuario').disabled = false;
     $('#user-password').placeholder = 'Mínimo 4 caracteres';
     $('#modal-usuario-title').textContent = 'Nuevo usuario';
-    $('#modal-usuario').classList.add('open');
+    openModal('modal-usuario');
 });
 
 $('#form-usuario').addEventListener('submit', async (e) => {
@@ -2094,12 +2146,12 @@ $('#form-usuario').addEventListener('submit', async (e) => {
     };
     try {
         if (id) {
-            await request(API + '/usuarios/' + id, { method: 'PUT', body: JSON.stringify(body) });
+            await conSubmit(() => request(API + '/usuarios/' + id, { method: 'PUT', body: JSON.stringify(body) }));
         } else {
-            await request(API + '/usuarios', { method: 'POST', body: JSON.stringify(body) });
+            await conSubmit(() => request(API + '/usuarios', { method: 'POST', body: JSON.stringify(body) }));
         }
         toast(id ? 'Usuario actualizado' : 'Usuario creado');
-        $('#modal-usuario').classList.remove('open');
+        closeModal('modal-usuario');
         loadUsuarios();
     } catch (err) {
         toast(err.message, 'err');
@@ -2109,19 +2161,81 @@ $('#form-usuario').addEventListener('submit', async (e) => {
 // ---------------- Auditoría ----------------
 async function loadAuditoria() {
     try {
-        const registros = await request(API + '/auditoria?limite=300');
+        const desde = ($('#aud-desde') || {}).value || '';
+        const hasta = ($('#aud-hasta') || {}).value || '';
+        let url = API + '/auditoria?limite=300';
+        if (desde) url += '&desde=' + desde;
+        if (hasta) url += '&hasta=' + hasta;
+        const registros = await request(url);
         $('#auditoria-tbody').innerHTML = registros.map((r) => `
             <tr>
                 <td>${fmtDate(r.fecha)}</td>
                 <td><strong>${r.usuario || '—'}</strong></td>
                 <td>${r.accion}</td>
                 <td>${r.detalle || ''}</td>
-            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin registros</td></tr>';
+            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin registros en el período</td></tr>';
     } catch (e) {
         toast(e.message, 'err');
     }
 }
 $('#btn-refrescar-auditoria').addEventListener('click', loadAuditoria);
+$('#aud-desde').addEventListener('change', loadAuditoria);
+$('#aud-hasta').addEventListener('change', loadAuditoria);
+
+// ---------------- Sincronía de inventario (admins) ----------------
+function hacerFicha(n, ok, lab) {
+    return `<div class="sinc-ficha ${ok ? 'sinc-ok' : 'sinc-mal'}"><div class="sinc-num">${n}</div><div class="sinc-lab">${esc(lab)}</div></div>`;
+}
+
+function renderAuditoria(a, titulo) {
+    const vm = +a.ventas.m_total + (+a.ventas.m_vacio);
+    const rm = +a.repartos.m_total + (+a.repartos.m_vacio);
+    let html = `<h3>${esc(titulo)}</h3><div class="sinc-fichas">`;
+    html += hacerFicha(a.descuadres.length, a.descuadres.length === 0, 'Descuadres stock/mov.');
+    html += hacerFicha(vm, vm === 0, 'Ventas con error');
+    html += hacerFicha(rm, rm === 0, 'Repartos con error');
+    html += hacerFicha(a.productos_con_vencimiento, true, 'Con vencimiento');
+    html += `</div>`;
+    html += `<p class="sinc-val"><strong>Valorización total: Bs ${fmtNum(a.total_valorizacion)}</strong> · Productos con stock: ${a.productos_con_stock} · Proveedores: ${a.proveedores}</p>`;
+    if (a.valorizacion.length) {
+        html += `<div class="table-scroll"><table class="data-table"><thead><tr><th>Sucursal</th><th>Unidades</th><th>Valor (Bs)</th></tr></thead><tbody>` +
+            a.valorizacion.map((v) => `<tr><td>${esc(v.sucursal)}</td><td>${v.unid}</td><td><strong>Bs ${fmtNum(v.valor)}</strong></td></tr>`).join('') + `</tbody></table></div>`;
+    }
+    if (a.descuadres.length) {
+        html += `<div class="table-scroll"><table class="data-table"><thead><tr><th>Producto</th><th>Sucursal</th><th>Stock tabla</th><th>Según movimientos</th><th>Diferencia</th></tr></thead><tbody>` +
+            a.descuadres.map((d) => `<tr class="sinc-mal-row"><td>${esc(d.nombre)}</td><td>${esc(d.sucursal)}</td><td>${d.stock_tab}</td><td>${d.mov}</td><td><strong>${d.dif}</strong></td></tr>`).join('') + `</tbody></table></div>`;
+    }
+    return html;
+}
+
+async function cargarAuditoria() {
+    const caja = $('#sincronia-resultado');
+    caja.innerHTML = 'Auditando...';
+    try {
+        const a = await request(API + '/reportes/auditoria');
+        caja.innerHTML = renderAuditoria(a, 'Resultado de la auditoría');
+    } catch (e) {
+        caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
+    }
+}
+
+async function reconciliarInventario() {
+    if (!confirm('Se eliminarán movimientos huérfanos (ventas/repartos ya inexistentes), se recalculará el stock desde los movimientos y se re-calcularán los totales. ¿Continuar?')) return;
+    const caja = $('#sincronia-resultado');
+    caja.innerHTML = 'Reconciliando...';
+    try {
+        const r = await request(API + '/reportes/reconciliar', { method: 'POST' });
+        let html = `<p class="sinc-val">Reconciliación aplicada: <strong>${r.movimientos_huerfanos_borrados}</strong> movimiento(s) huérfano(s) eliminados.</p>`;
+        if (r.antes.descuadres.length) html += `<p>Descuadres antes: ${r.antes.descuadres.length} · Descuadres después: ${r.despues.descuadres.length}</p>`;
+        caja.innerHTML = html + renderAuditoria(r.despues, 'Resultado de la reconciliación');
+        loadReportes();
+    } catch (e) {
+        caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
+    }
+}
+
+$('#btn-auditar').addEventListener('click', cargarAuditoria);
+$('#btn-reconciliar').addEventListener('click', reconciliarInventario);
 
 // ---------------- Respaldo ----------------
 $('#btn-backup').addEventListener('click', () => {
@@ -2181,7 +2295,7 @@ if (tSes) {
             $('#perfil-nombre').value = s.nombre || '';
             $('#perfil-pass-actual').value = '';
             $('#perfil-pass-nueva').value = '';
-            $('#modal-perfil').classList.add('open');
+            openModal('modal-perfil');
         } catch (e) {
             toast('Error al cargar perfil', 'err');
         }
@@ -2201,7 +2315,7 @@ $('#form-perfil').addEventListener('submit', async (e) => {
         }
         await request(API + '/perfil', { method: 'PUT', body: JSON.stringify(body) });
         toast('Perfil actualizado');
-        $('#modal-perfil').classList.remove('open');
+        closeModal('modal-perfil');
         init();
     } catch (err) {
         toast(err.message, 'err');
@@ -2215,9 +2329,17 @@ $('#btn-salir').addEventListener('click', async () => {
     window.location.href = '/login';
 });
 
-$$('.close').forEach((c) => c.addEventListener('click', () => $('#' + c.dataset.close).classList.remove('open')));
+$('#btn-salir-top')?.addEventListener('click', async () => {
+    cerrarMenu();
+    try {
+        await request(API + '/logout', { method: 'POST' });
+    } catch (e) { /* ignora errores al salir */ }
+    window.location.href = '/login';
+});
+
+$$('.close').forEach((c) => c.addEventListener('click', () => closeModal(c.dataset.close)));
 window.addEventListener('click', (e) => {
-    if (e.target.classList && e.target.classList.contains('modal')) e.target.classList.remove('open');
+    if (e.target.classList && e.target.classList.contains('modal')) closeModal(e.target.id);
 });
 
 // Fechas por defecto en movimientos, gastos, ventas y repartos
@@ -2228,24 +2350,155 @@ $('#reparto-fecha').value = nowLocal();
 $('#pedido-fecha').value = nowLocal();
 
 // ---------------- Pedidos ----------------
-let pedidoItems = [];
 let pedidoProdsAll = [];
+let pedidoSel = {};            // producto_id -> cantidad
+let pedidoSucursal = null;     // sucursal que hace el pedido
+const esEncargadoPed = () => window.ROL === 'encargado';
+const ESTADO_LAB = { pendiente: 'Pidiendo', despachado: 'En camino', cumplido: 'Entregado' };
 
-function popPedidoProductos(sid) {
-    const sel = $('#pedido-producto');
-    if (!sel) return;
-    const lista = sid ? pedidoProdsAll.filter((p) => +p.sucursal_id === sid) : [];
-    sel.innerHTML = !sid
-        ? '<option value="">Primero selecciona la sucursal que provee...</option>'
-        : (lista.length
-            ? '<option value="">Seleccione producto...</option>' +
-                lista.map((p) => `<option value="${p.id}">${nomProd(p)} (${p.unidad})</option>`).join('')
-            : '<option value="">Esa sucursal no tiene productos aún</option>');
+function nombreSucursalPed(id) {
+    const s = (catalogos.sucursales || []).find((x) => x.id === id);
+    return s ? (s.principal ? '★ ' : '') + s.nombre : ('Sucursal ' + id);
 }
 
-$('#pedido-destino').addEventListener('change', () => {
-    popPedidoProductos(+$('#pedido-destino').value || null);
+function sucPrincipalPed() {
+    return (catalogos.sucursales || []).find((x) => x.principal) || null;
+}
+
+function proveedorCantShow(p) {
+    if (p.sucursal_id) return p.sucursal_nombre || String(p.sucursal_id);
+    return (sucPrincipalPed() || {}).nombre || 'Almacén Principal';
+}
+
+function irPaso(n) {
+    if (esEncargadoPed() && n === 1) n = 2;
+    $$('.wiz-paso').forEach((el) => el.classList.toggle('active', +el.dataset.dest === n));
+    $$('.wiz-panel').forEach((el) => { el.style.display = (+el.dataset.paso === n) ? 'block' : 'none'; });
+    if (n === 3) renderRevisionPedido();
+}
+
+function renderTarjetasPedido() {
+    const cont = $('#pedido-listado');
+    if (!cont) return;
+    const sid = pedidoSucursal;
+    const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
+    const ppal = sucPrincipalPed();
+    const provs = {};
+    (pedidoProdsAll || []).forEach((p) => {
+        const provId = p.sucursal_id || (ppal ? ppal.id : null);
+        if (!provId) return;
+        if (sid && provId === sid) return;
+        const buscar = (p.nombre + ' ' + (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
+        if (q && !buscar.includes(q)) return;
+        const key = String(provId);
+        if (!provs[key]) {
+            const su = (catalogos.sucursales || []).find((s) => s.id === provId);
+            provs[key] = {
+                id: provId,
+                nombre: su ? su.nombre : (p.sucursal_nombre || ('Sucursal ' + provId)),
+                principal: !!(su && su.principal),
+                prod: [],
+            };
+        }
+        provs[key].prod.push(p);
+    });
+    const keys = Object.keys(provs);
+    if (!keys.length) {
+        cont.innerHTML = '<p class="empty">No hay productos con ese nombre. Prueba con otra palabra.</p>';
+        return;
+    }
+    keys.sort((a, b) => {
+        const A = provs[a], B = provs[b];
+        if (A.principal !== B.principal) return A.principal ? -1 : 1;
+        return A.nombre.localeCompare(B.nombre);
+    });
+    cont.innerHTML = keys.map((k) => `
+        <div class="cat-bloque">
+            <h4 class="prov-titulo">${provs[k].principal ? '★ ' : ''}Lo provee ${esc(provs[k].nombre)}</h4>
+            ${provs[k].prod.map((p) => {
+                const qty = pedidoSel[p.id] || 0;
+                return `
+                <div class="prod-card ${qty > 0 ? 'seleccionado' : ''}" data-id="${p.id}">
+                    <div class="prod-card-info">
+                        <div class="prod-card-nombre">${esc(p.nombre)}</div>
+                        <div class="prod-card-meta">${esc(p.unidad || 'unidad')}</div>
+                    </div>
+                    <div class="stepper">
+                        <button type="button" class="ste ste-menos" data-id="${p.id}">−</button>
+                        <input type="number" class="prod-q" id="pq-${p.id}" value="${qty}" min="0" step="any" data-id="${p.id}">
+                        <button type="button" class="ste ste-mas" data-id="${p.id}">+</button>
+                    </div>
+                </div>`;
+            }).join('')}
+        </div>`).join('');
+}
+
+function renderRevisionPedido() {
+    const cont = $('#pedido-revision');
+    if (!cont) return;
+    const items = [];
+    Object.keys(pedidoSel).forEach((id) => {
+        const v = pedidoSel[id];
+        if (v > 0) items.push({ id: +id, cantidad: v, p: (pedidoProdsAll || []).find((x) => x.id === +id) });
+    });
+    if (!items.length) {
+        cont.innerHTML = '<p class="empty">Todavía no elegiste productos. Vuelve al paso 2.</p>';
+        return;
+    }
+    let total = 0;
+    const rows = items.map((it) => {
+        total += it.cantidad;
+        return `<tr>
+            <td>${esc(it.p.nombre)}</td>
+            <td class="td-unidad">${esc(it.p.unidad || 'unidad')}</td>
+            <td class="td-cant"><strong>${it.cantidad}</strong></td>
+            <td class="td-prov">lo tiene ${esc(proveedorCantShow(it.p))}</td>
+        </tr>`;
+    }).join('');
+    cont.innerHTML = `
+        <p class="hint">Esto pedirá <strong>${esc(nombreSucursalPed(pedidoSucursal))}</strong>. Al enviar se genera su pedido imprimible.</p>
+        <table class="data-table compact"><thead><tr><th>Producto</th><th>Unidad</th><th>Cant.</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        <div class="total-row">${items.length} producto(s) · ${total} en total</div>`;
+}
+
+function marcarCantidad(id, cantidad) {
+    pedidoSel[id] = cantidad > 0 ? cantidad : 0;
+    const input = document.getElementById('pq-' + id);
+    if (input) input.value = pedidoSel[id];
+    const card = input ? input.closest('.prod-card') : null;
+    if (card) card.classList.toggle('seleccionado', pedidoSel[id] > 0);
+}
+
+const _listadoPed = $('#pedido-listado');
+if (_listadoPed) {
+    _listadoPed.addEventListener('click', (e) => {
+        const btn = e.target.closest('.ste');
+        if (!btn) return;
+        const id = +btn.dataset.id;
+        const actual = pedidoSel[id] || 0;
+        const delta = btn.classList.contains('ste-menos') ? -1 : 1;
+        marcarCantidad(id, actual + delta);
+    });
+    _listadoPed.addEventListener('input', (e) => {
+        if (!e.target.classList.contains('prod-q')) return;
+        marcarCantidad(+e.target.dataset.id, parseFloat(e.target.value) || 0);
+    });
+}
+
+$$('.wiz-paso').forEach((el) => el.addEventListener('click', () => irPaso(+el.dataset.dest)));
+on('#wiz-a-1-2', 'click', () => { if (!pedidoSucursal) return toast('Primero elige la sucursal', 'err'); renderTarjetasPedido(); irPaso(2); });
+on('#wiz-a-2-1', 'click', () => irPaso(1));
+on('#wiz-a-2-3', 'click', () => irPaso(3));
+on('#wiz-a-3-2', 'click', () => irPaso(2));
+on('#pedido-sucursal', 'change', () => {
+    pedidoSucursal = +$('#pedido-sucursal').value || null;
+    pedidoSel = {};
+    $('#pedido-buscar').value = '';
+    renderTarjetasPedido();
 });
+on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
 
 async function loadPedidos() {
     try {
@@ -2253,85 +2506,233 @@ async function loadPedidos() {
         const respP = await request(API + '/productos?por_pagina=1000');
         pedidoProdsAll = respP.data || respP;
         const sucursales = await request(API + '/sucursales');
-        $('#pedido-destino').innerHTML = '<option value="">Seleccione la sucursal que provee...</option>' +
-            sucursales.filter((s) => s.id !== window.SUCURSAL_ID).map((s) =>
+        const opciones = '<option value="">Todas las sucursales</option>' +
+            sucursales.map((s) =>
                 `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
-        if (window.ROL === 'encargado') {
+        const filtroSel = $('#pedido-sucursal-filtro');
+        if (filtroSel) filtroSel.innerHTML = opciones;
+        const filtroReal = $('#pedido-sucursal-realizados');
+        if (filtroReal) filtroReal.innerHTML = opciones;
+        const selSuc = $('#pedido-sucursal');
+        if (esEncargadoPed()) {
             const mie = sucursales.find((x) => x.id === window.SUCURSAL_ID);
-            $('#pedido-sucursal').innerHTML = mie
-                ? `<option value="${mie.id}">${mie.principal ? '★ ' : ''}${mie.nombre}</option>` : '';
+            selSuc.innerHTML = mie ? `<option value="${mie.id}">${mie.principal ? '★ ' : ''}${esc(mie.nombre)}</option>` : '';
             if (window.SUCURSAL_PRINCIPAL) {
                 const form = $('#form-pedido');
                 if (form && form.closest('.panel')) form.closest('.panel').style.display = 'none';
             }
+            pedidoSucursal = window.SUCURSAL_ID || (+selSuc.value || null);
+            const p1 = document.querySelector('.wiz-paso[data-dest="1"]');
+            if (p1) p1.style.display = 'none';
+            const volver2 = $('#wiz-a-2-1');
+            if (volver2) volver2.style.display = 'none';
+            irPaso(2);
         } else {
-            // El almacén no pide; recibe y despacha pedidos de las sucursales
-            if (window.SUCURSAL_PRINCIPAL) {
-                const form = $('#form-pedido');
-                if (form && form.closest('.panel')) form.closest('.panel').style.display = 'none';
-            }
-            $('#pedido-sucursal').innerHTML = sucursales.map((s) =>
+            selSuc.innerHTML = sucursales.map((s) =>
                 `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
+            pedidoSucursal = +selSuc.value || null;
+            irPaso(1);
         }
-        popPedidoProductos(+$('#pedido-destino').value || null);
-        $('#pedidos-info').textContent = `Tickets por pedido de sucursal.`;
-        await listarPedidos();
+        $('#pedidos-info').textContent = 'Cada sucursal llena su pedido en 3 pasos.';
+        renderTarjetasPedido();
+        inicializarPestanasPedidos();
+        cargarPestanaActiva();
     } catch (e) {
         toast(e.message, 'err');
     }
 }
 
-function actPedidoItems() {
-    $('#pedido-items-tbody').innerHTML = pedidoItems.length ? pedidoItems.map((it, i) => `
-        <tr>
-            <td><strong>${esc(it.nombre)}</strong></td>
-            <td>${it.cantidad}</td>
-            <td><button class="btn btn-icon btn-danger" onclick="quitarItemPedido(${i})">Quitar</button></td>
-        </tr>`).join('')
-        : '<tr><td colspan="3" class="empty">Agrega productos al pedido</td></tr>';
+let pestanaPedidos = 'mis-pedidos';
+
+function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
+
+// «Mis pedidos» (bandeja) es visible para admins y encargados cuya sucursal recibe
+// pedidos: almacén principal (30/36) o una sucursal que provee productos
+// (p. ej. América 35 / Simón López 33). Siglo XX no provee: no ve esta pestaña.
+function puedeVerMisPedidos() {
+    if (!window.ROL) return false;
+    if (esGestionPed()) return true;
+    if (window.ROL !== 'encargado') return false;
+    if (window.SUCURSAL_PRINCIPAL) return true;
+    const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
+    return !!(m && m.provee);
 }
 
-window.quitarItemPedido = (i) => { pedidoItems.splice(i, 1); actPedidoItems(); };
+function inicializarPestanasPedidos() {
+    const tabMis = $('#tab-hist-mis-pedidos');
+    const tabReal = $('#tab-hist-realizados');
+    const panelMis = $('#panel-hist-mis-pedidos');
+    const panelReal = $('#panel-hist-realizados');
+    const puede = puedeVerMisPedidos();
+    if (!puede && pestanaPedidos === 'mis-pedidos') pestanaPedidos = 'realizados';
+    if (tabMis) tabMis.style.display = puede ? '' : 'none';
+    if (tabReal) tabReal.style.display = '';
+    $$('#tabs-historial-pedidos .tab-log').forEach((b) =>
+        b.classList.toggle('active', b.dataset.tab === pestanaPedidos));
+    if (panelMis) panelMis.style.display = (puede && pestanaPedidos === 'mis-pedidos') ? '' : 'none';
+    if (panelReal) panelReal.style.display = pestanaPedidos === 'realizados' ? '' : 'none';
+}
 
-$('#btn-agregar-item-pedido').addEventListener('click', () => {
-    const sel = $('#pedido-producto');
-    const opt = sel.options[sel.selectedIndex];
-    const cantidad = +$('#pedido-cantidad').value || 0;
-    if (!opt || !opt.value) return toast('Seleccione un producto', 'err');
-    if (cantidad <= 0) return toast('Ingrese una cantidad', 'err');
-    pedidoItems.push({ producto_id: +opt.value, nombre: opt.textContent.split(' (')[0], cantidad });
-    $('#pedido-cantidad').value = '';
-    actPedidoItems();
-});
+function activarPestanaPedidos(nombre) {
+    if (nombre === 'mis-pedidos' && !puedeVerMisPedidos()) return;
+    pestanaPedidos = nombre;
+    inicializarPestanasPedidos();
+    cargarPestanaActiva();
+}
+
+function cargarPestanaActiva() {
+    if (pestanaPedidos === 'mis-pedidos') cargarBandeja();
+    else listarPedidos();
+}
+
+on('#tab-hist-mis-pedidos', 'click', () => activarPestanaPedidos('mis-pedidos'));
+on('#tab-hist-realizados', 'click', () => activarPestanaPedidos('realizados'));
 
 $('#form-pedido').addEventListener('submit', async (e) => {
     e.preventDefault();
-    if (!pedidoItems.length) return toast('El pedido no tiene productos', 'err');
-    const sucursal_id = +$('#pedido-sucursal').value;
-    if (!sucursal_id) return toast('Seleccione la sucursal que hace el pedido', 'err');
-    const destino_id = +$('#pedido-destino').value;
-    if (window.ROL === 'encargado' && !destino_id) return toast('Seleccione la sucursal a la que va el pedido', 'err');
+    const sucursal_id = pedidoSucursal || +$('#pedido-sucursal').value;
+    if (!sucursal_id) return toast('Primero elige la sucursal que pide', 'err');
+    const detalle = [];
+    Object.keys(pedidoSel).forEach((id) => {
+        const v = pedidoSel[id];
+        if (v > 0) {
+            const p = (pedidoProdsAll || []).find((x) => x.id === +id);
+            const ppal = sucPrincipalPed();
+            const destino = p ? (p.sucursal_id ? +p.sucursal_id : (ppal ? +ppal.id : undefined)) : undefined;
+            detalle.push({ producto_id: +id, cantidad: v, destino_id: destino });
+        }
+    });
+    if (!detalle.length) return toast('Aún no marcaste ningún producto', 'err');
     try {
-        const res = await request(API + '/pedidos', {
+        const res = await conSubmit(() => request(API + '/pedidos', {
             method: 'POST',
             body: JSON.stringify({
                 fecha: fechaISO($('#pedido-fecha').value) || undefined,
                 sucursal_id,
-                destino_id: destino_id || undefined,
                 nota: $('#pedido-nota').value,
-                detalle: pedidoItems,
+                detalle,
             }),
-        });
+        }), '#form-pedido button[type="submit"]');
         toast(res.message, 'ok');
-        pedidoItems = [];
-        actPedidoItems();
-        e.target.reset();
-        $('#pedido-fecha').value = nowLocal();
-        listarPedidos();
+        pedidoSel = {};
+        $('#pedido-nota').value = '';
+        $('#pedido-buscar').value = '';
+        renderTarjetasPedido();
+        irPaso(esEncargadoPed() ? 2 : 1);
+        cargarPestanaActiva();
+        syncPedidosNuevos();
     } catch (err) {
         toast(err.message, 'err');
     }
 });
+
+async function cargarBandeja() {
+    const panel = $('#panel-hist-mis-pedidos');
+    if (!panel) return;
+    const puede = puedeVerMisPedidos();
+    panel.style.display = puede ? '' : 'none';
+    if (!puede) return;
+    const eyeSvg = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    try {
+        const desde = ($('#pedido-bandeja-desde') || {}).value || '';
+        const hasta = ($('#pedido-bandeja-hasta') || {}).value || '';
+        const qs = new URLSearchParams();
+        if (desde) qs.set('desde', desde);
+        if (hasta) qs.set('hasta', hasta);
+        const gruposRaw = (await request(API + '/pedidos/bandeja' + (qs.toString() ? '?' + qs.toString() : ''))) || [];
+        // Para un encargado de sucursal receptora (p. ej. América) el filtro por
+        // sucursal NO aplica: su bandeja ya está limitada a los pedidos que le
+        // llegan a SU propia sucursal. Si `sucurFiltro` quedara guardado con un
+        // valor distinto (p. ej. su propio id) filtraría todos los grupos y la
+        // bandeja aparecería vacía aunque sí haya pedidos. Así que el encargado
+        // receptor SIEMPRE ve su bandeja completa.
+        const esReceptor = window.ROL === 'encargado' && !esGestionPed() && !esAlmacenPpal();
+        const sucF = esReceptor ? '' : (($('#pedido-sucursal-filtro') || {}).value || '');
+        const grupos = sucF ? gruposRaw.filter((g) => String(g.sucursal_id) === sucF) : gruposRaw;
+        const total = grupos.reduce((a, g) => a + g.pedidos.length, 0);
+        const resumen = $('#historial-resumen');
+        if (resumen) resumen.textContent = total ? `${total} pedido(s)` : '';
+        if (!total) {
+            $('#bandeja-contenido').innerHTML = '<p class="empty">No hay pedidos para mostrar.</p>';
+            return;
+        }
+        const puedeDespachar = esGestionPed() || esAlmacenPpal();
+        const miSuc = String(window.SUCURSAL_ID || '');
+        $('#bandeja-contenido').innerHTML = grupos.map((g) => `
+            <div class="bandeja-sucursal">
+                <h3>${esc(g.nombre)} <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
+                ${g.pedidos.map((p) => {
+                    // Permiso: el usuario solo puede cambiar estado/despachar pedidos
+                    // que llegan a SU propia sucursal (destino = su sucursal).
+                    const esDestinoMio = p.items.some((it) => String(it.destino_id || '') === miSuc);
+                    const editControl = esDestinoMio
+                        ? (puedeDespachar
+                            ? `<button class="btn btn-sm" onclick="despacharPedido(${p.id})">Entregar</button>`
+                            : `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
+                                <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Pidiendo</option>
+                                <option value="despachado" ${p.estado === 'despachado' ? 'selected' : ''}>En camino</option>
+                                <option value="cumplido" ${p.estado === 'cumplido' ? 'selected' : ''}>Entregado</option>
+                              </select>`)
+                        : '';
+                    return `
+                    <div class="bandeja-pedido">
+                        <div class="bandeja-cab">
+                            <strong>${esc(p.nro_ticket)}</strong>
+                            <span>${fmtDate(p.fecha)}</span>
+                            <span>${esc(p.usuario || '—')}</span>
+                            <span class="${({ pendiente: 'badge-pendiente', despachado: 'badge-despachado', cumplido: 'badge-cumplido' })[p.estado] || 'badge-pendiente'}">${esc(ESTADO_LAB[p.estado] || p.estado)}</span>
+                            ${p.nota ? '<span class="respaldo-txt">' + esc(p.nota) + '</span>' : ''}
+                            <span class="flex-grow"></span>
+                            ${editControl}
+                            <button class="btn btn-sm" onclick="window.open('/pedidos/ticket/${p.id}', '_blank')">Imprimir</button>
+                            <button class="btn btn-icon" onclick="verPedido(${p.id}, true)" title="Ver detalle" aria-label="Ver detalle">${eyeSvg}</button>
+                        </div>
+                        <table class="data-table compact">
+                            <tbody>${p.items.map((it) => `
+                                <tr>
+                                    <td>${esc(it.producto_nombre)}</td>
+                                    <td class="td-unidad">${esc(it.unidad || 'unidad')}</td>
+                                    <td class="td-cant">${it.cantidad}</td>
+                                    <td class="td-prov">→ ${esc(it.destino_nombre || '—')}</td>
+                                </tr>`).join('') || '<tr><td class="empty">Sin líneas</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>`;}).join('')}
+            </div>`).join('');
+    } catch (e) {
+        const cont = $('#bandeja-contenido');
+        if (cont) cont.innerHTML = '<p class="empty">' + esc(e.message) + '</p>';
+    }
+}
+
+window.despacharPedido = async (id) => {
+    if (!confirm('¿Marcar este pedido como entregado? Se registrará la salida del almacén y la entrada a la sucursal.')) return;
+    try {
+        const res = await request(API + '/pedidos/' + id + '/despachar', { method: 'POST' });
+        toast(res.message, 'ok');
+        closeModal('modal-pedido');
+        cargarPestanaActiva();
+        syncPedidosNuevos();
+        loadDashboard();
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+};
+
+window.cambiarEstadoPedido = async (id, nuevo) => {
+    if (!nuevo) return;
+    try {
+        const res = await request(API + '/pedidos/' + id + '/estado', {
+            method: 'PUT',
+            body: JSON.stringify({ estado: nuevo }),
+        });
+        toast(res.message, 'ok');
+        cargarPestanaActiva();
+        syncPedidosNuevos();
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+};
 
 async function listarPedidos() {
     const qs = new URLSearchParams();
@@ -2339,10 +2740,17 @@ async function listarPedidos() {
     if (filtro) qs.set('filtro', filtro);
     const est = ($('#pedido-estado') || {}).value || '';
     if (est) qs.set('estado', est);
+    const sucF = ($('#pedido-sucursal-realizados') || {}).value || '';
+    if (sucF) qs.set('destino_id', sucF);
+    const desdeR = ($('#pedido-realizados-desde') || {}).value || '';
+    const hastaR = ($('#pedido-realizados-hasta') || {}).value || '';
+    if (desdeR) qs.set('desde', desdeR);
+    if (hastaR) qs.set('hasta', hastaR);
+    if (window.ROL === 'encargado' && window.SUCURSAL_ID) qs.set('sucursal_id', window.SUCURSAL_ID);
     qs.set('pagina', pagState['#pedidos-paginacion'] || 1);
     const resp = await request(API + '/pedidos?' + qs.toString());
     const pedidos = resp.data || resp;
-    const total = resp.total || pedidos.length;
+    const total = resp.total != null ? resp.total : pedidos.length;
     const pagina = resp.pagina || 1;
     const porPagina = resp.por_pagina || 50;
     const badges = { pendiente: 'badge-pendiente', despachado: 'badge-despachado', cumplido: 'badge-cumplido' };
@@ -2351,32 +2759,54 @@ async function listarPedidos() {
             <td><strong>${esc(p.nro_ticket)}</strong></td>
             <td>${fmtDate(p.fecha)}</td>
             <td><strong>${esc(p.sucursal_nombre)}</strong></td>
-            <td>${esc(p.destino_nombre) || '—'}</td>
+            <td>${p.num_destinos > 1 ? 'Varios (' + p.num_destinos + ')' : (esc(p.destino_nombre) || '—')}</td>
             <td>${p.num_items} item(s)</td>
-            <td><span class="${badges[p.estado] || 'badge-pendiente'}">${esc(p.estado)}</span></td>
+            <td>${p.num_repartos > 0
+                ? `<span class="badge badge-entrada" title="${p.num_repartos} reparto(s) por Bs ${fmtNum(p.total_repartos)}"
+                   style="cursor:pointer" onclick="verPedido(${p.id}, false)">#${p.num_repartos} · Bs ${fmtNum(p.total_repartos)}</span>`
+                : '—'}</td>
+            <td><span class="${badges[p.estado] || 'badge-pendiente'}">${esc(ESTADO_LAB[p.estado] || p.estado)}</span></td>
             <td>${esc(p.nota) || '—'}</td>
             <td>
-                <button class="btn btn-icon" onclick="verPedido(${p.id})" title="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                <button class="btn btn-icon" onclick="verPedido(${p.id}, false)" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             </td>
-        </tr>`).join('') || '<tr><td colspan="8" class="empty">Sin pedidos registrados</td></tr>';
+        </tr>`).join('') || '<tr><td colspan="9" class="empty">Sin pedidos registrados</td></tr>';
     renderPagination('#pedidos-paginacion', total, pagina, porPagina, listarPedidos);
     // contador de pendientes en el menú
     try {
-        const p = await request(API + '/pedidos?estado=pendiente&pagina=1&por_pagina=1000');
-        const n = (p.total != null ? p.total : (p.data || p).length);
-        const badge = $('#badge-pedidos');
-        if (badge) {
-            badge.textContent = n > 0 ? n : '';
-            badge.style.display = n > 0 ? 'inline-flex' : 'none';
-        }
+        await pintarBadgePedidos();
     } catch (_) { }
 }
 
-$('#btn-filtrar-pedidos').addEventListener('click', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
+function esCentralBadge() {
+    return esGestionPed() || esAlmacenPpal();
+}
+
+async function pintarBadgePedidos() {
+    // El punto rojo solo corresponde al encargado de la sucursal que RECIBE el pedido.
+    // Una sucursal filial solo cuenta los pendientes que le llegan como destino;
+    // admin/superadmin y almacén principal cuentan todos los pendientes.
+    const qs = new URLSearchParams({ estado: 'pendiente', pagina: 1, por_pagina: 1 });
+    if (window.ROL === 'encargado' && !esCentralBadge() && window.SUCURSAL_ID) {
+        qs.set('destino_id', window.SUCURSAL_ID);
+    }
+    const pend = await request(API + '/pedidos?' + qs.toString());
+    const n = (pend.total != null ? pend.total : (pend.data || pend).length);
+    const badge = $('#badge-pedidos');
+    if (badge) {
+        badge.textContent = n > 0 ? n : '';
+        badge.style.display = n > 0 ? 'inline-flex' : 'none';
+    }
+}
+
+$('#btn-filtrar-pedidos').addEventListener('click', cargarBandeja);
+on('#pedido-sucursal-filtro', 'change', cargarBandeja);
+$('#btn-filtrar-realizados').addEventListener('click', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
 on('#pedido-filtro', 'input', debounce(() => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); }, 300));
 on('#pedido-estado', 'change', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
+on('#pedido-sucursal-realizados', 'change', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
 
-window.verPedido = async (id) => {
+window.verPedido = async (id, accionables = true) => {
     try {
         const data = await request(API + '/pedidos/' + id);
         const p = data.pedido;
@@ -2384,37 +2814,65 @@ window.verPedido = async (id) => {
         $('#det-pedido-nro').textContent = p.nro_ticket;
         $('#det-pedido-fecha').textContent = fmtDate(p.fecha);
         $('#det-pedido-sucursal').textContent = p.sucursal_nombre || '—';
-        $('#det-pedido-destino').textContent = p.destino_nombre || '—';
+        const destIds = [...new Set(data.detalle.map((d) => d.destino_id).filter(Boolean))];
+        if (p.destino_id) destIds.push(p.destino_id);
+        $('#det-pedido-destino').textContent = destIds.length > 1
+            ? 'Varios (' + destIds.length + ')'
+            : (p.destino_nombre || p.destino_id || '—');
         $('#det-pedido-usuario').textContent = p.usuario || '—';
-        $('#det-pedido-estado').textContent = p.estado || '—';
+        $('#det-pedido-estado').textContent = ESTADO_LAB[p.estado] || p.estado || '—';
+        $('#det-pedido-total').textContent = p.total != null ? fmtNum(p.total) : '—';
         $('#det-pedido-nota').textContent = p.nota || 'Sin nota';
+        const sucMap = {}; (catalogos.sucursales || []).forEach((s) => { sucMap[s.id] = s.nombre; });
+        const repCont = $('#det-pedido-repartos');
+        const repItems = $('#det-pedido-repartos-items');
+        if (repCont && (data.repartos || []).length) {
+            repItems.innerHTML = data.repartos.map((rp) => `
+                <tr>
+                    <td><strong>#${rp.id}</strong></td>
+                    <td>${esc(rp.origen_id ? (sucMap[rp.origen_id] || '—') : '—')}</td>
+                    <td>${fmtDate(rp.fecha)}</td>
+                    <td>${fmtNum(rp.total)}</td>
+                    <td><button class="btn btn-sm" onclick="verReparto(${rp.id}); return false;">Ver reparto</button></td>
+                </tr>`).join('');
+            repCont.style.display = '';
+        } else if (repCont) {
+            repCont.style.display = 'none';
+        }
         $('#det-pedido-items').innerHTML = data.detalle.map((d) => `
-            <tr><td>${esc(d.producto_nombre)}</td><td>${d.cantidad}</td></tr>`).join('');
-        $('#modal-pedido').classList.add('open');
+            <tr><td>${esc(d.producto_nombre)}</td><td>${d.cantidad}</td>
+                <td>${esc(d.unidad || 'unidad')}</td>
+                <td>${esc(sucMap[d.destino_id] || '—')}</td></tr>`).join('');
+        openModal('modal-pedido');
         window._pedidoActual = { id, estado: p.estado };
         const despacharBtn = $('#btn-pedido-despachar');
         const cambia = $('#pedido-cambiar-estado');
         const esAdmin = window.ROL === 'superadmin' || window.ROL === 'admin';
         const esAlmacenPrincipal = window.ROL === 'encargado' && window.SUCURSAL_PRINCIPAL;
-        if (despacharBtn) despacharBtn.style.display = (esAdmin && p.estado === 'pendiente') ? 'inline-flex' : 'none';
-        if (cambia) { cambia.value = ''; cambia.style.display = (esAdmin || esAlmacenPrincipal) ? 'inline-flex' : 'none'; }
+        // Admins y sus encargados solo pueden cambiar estado/despachar pedidos que
+        // llegan a SU almacén (destino = su sucursal); los de otras sucursales solo lectura.
+        const esDestinoMio = destIds.includes(window.SUCURSAL_ID);
+        const involucrado = window.ROL === 'encargado' &&
+            (p.sucursal_id === window.SUCURSAL_ID || destIds.includes(window.SUCURSAL_ID));
+        if (accionables) {
+            if (despacharBtn) despacharBtn.style.display = (esAdmin || esAlmacenPrincipal) && esDestinoMio && p.estado === 'pendiente' ? 'inline-flex' : 'none';
+            if (cambia) { cambia.value = ''; cambia.style.display = (esAdmin || esAlmacenPrincipal ? esDestinoMio : involucrado) ? 'inline-flex' : 'none'; }
+        } else {
+            if (despacharBtn) despacharBtn.style.display = 'none';
+            if (cambia) cambia.style.display = 'none';
+        }
     } catch (e) {
         toast(e.message, 'err');
     }
 };
 
-$('#btn-pedido-despachar').addEventListener('click', async () => {
+$('#btn-pedido-ticket').addEventListener('click', () => {
     if (!window._pedidoActual) return;
-    if (!confirm('¿Despachar el pedido? Se creará el reparto real y saldrá del almacén.')) return;
-    try {
-        const res = await request(API + '/pedidos/' + window._pedidoActual.id + '/despachar', { method: 'POST' });
-        toast(res.message, 'ok');
-        $('#modal-pedido').classList.remove('open');
-        listarPedidos();
-        loadDashboard();
-    } catch (e) {
-        toast(e.message, 'err');
-    }
+    window.open('/pedidos/ticket/' + window._pedidoActual.id, '_blank');
+});
+
+$('#btn-pedido-despachar').addEventListener('click', () => {
+    if (window._pedidoActual) despacharPedido(window._pedidoActual.id);
 });
 
 $('#pedido-cambiar-estado').addEventListener('change', async () => {
@@ -2427,8 +2885,9 @@ $('#pedido-cambiar-estado').addEventListener('change', async () => {
             body: JSON.stringify({ estado: nuevo }),
         });
         toast(res.message, 'ok');
-        $('#modal-pedido').classList.remove('open');
-        listarPedidos();
+        closeModal('modal-pedido');
+        cargarPestanaActiva();
+        syncPedidosNuevos();
     } catch (e) {
         toast(e.message, 'err');
         $('#pedido-cambiar-estado').value = '';
@@ -2475,16 +2934,17 @@ async function syncPedidosNuevos() {
                 const dest = p.destino_nombre ? ' -> ' + p.destino_nombre : '';
                 toast('Nuevo ticket ' + p.nro_ticket + ' de ' + p.sucursal_nombre + dest, 'ok');
             });
-            if (nuevos.length) beepTickets();
+            if (nuevos.length) {
+                beepTickets();
+                // Sincronía en vivo: al llegar un pedido pendiente recargamos la
+                // bandeja / historial de la pestaña abierta para que la sucursal
+                // receptora lo vea al instante. (Sin recursión: solo se refresca
+                // la pestaña; no se vuelve a llamar a syncPedidosNuevos).
+                cargarPestanaActiva();
+            }
         }
         _lastTicketId = Math.max(_lastTicketId, maxId);
-        const pend = await request(API + '/pedidos?estado=pendiente&pagina=1&por_pagina=1000');
-        const n = pend.total != null ? pend.total : (pend.data || pend).length;
-        const badge = $('#badge-pedidos');
-        if (badge) {
-            badge.textContent = n > 0 ? n : '';
-            badge.style.display = n > 0 ? 'inline-flex' : 'none';
-        }
+        await pintarBadgePedidos();
     } catch (_) { }
 }
 
@@ -2502,19 +2962,15 @@ async function init() {
             if (btn) btn.style.display = 'none';
         };
         // Admin y encargado no gestionan administración global
-        if (s.rol !== 'superadmin') {
-            ['usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
-        }
-        // Encargado: solo operación de su sucursal (sin reportes)
         if (s.rol === 'encargado') {
-            ['reportes'].forEach(ocultar);
+            ['usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
+        } else if (s.rol === 'admin') {
+            ['usuarios', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
+        }
+        // Encargado: operación de su sucursal, pero ve SUS propios reportes
+        if (s.rol === 'encargado') {
             const nuevoProd = $('#btn-nuevo-producto');
             if (nuevoProd) nuevoProd.style.display = '';
-        }
-        // Sincronía de inventario: solo administradores
-        if (s.rol === 'admin' || s.rol === 'superadmin') {
-            const p = $('#panel-sincronia');
-            if (p) p.style.display = '';
         }
         // Solo el superadmin gestiona sucursales / reparte desde el almacén principal
         if (s.rol !== 'superadmin') {
@@ -2547,8 +3003,9 @@ const FILTROS_VISTAS = [
     { vista: 'gastos', inputs: ['gasto-filtro', 'gasto-desde', 'gasto-hasta', 'gasto-sucursal-select'] },
     { vista: 'ventas', inputs: ['venta-filtro', 'venta-desde', 'venta-hasta', 'venta-sucursal-select'] },
     { vista: 'repartos', inputs: ['reparto-filtro', 'reparto-desde', 'reparto-hasta', 'reparto-sucursal-select'] },
-    { vista: 'pedidos', inputs: ['pedido-filtro', 'pedido-estado'] },
+    { vista: 'pedidos', inputs: ['pedido-filtro', 'pedido-estado', 'pedido-bandeja-desde', 'pedido-bandeja-hasta', 'pedido-realizados-desde', 'pedido-realizados-hasta'] },
     { vista: 'reportes', inputs: ['rep-desde', 'rep-hasta'] },
+    { vista: 'auditoria', inputs: ['aud-desde', 'aud-hasta'] },
 ];
 const KEY_FILTROS = 'pollos_filtros_diarios';
 

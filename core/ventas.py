@@ -3,7 +3,9 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
-from .util import ok, err, login_requerido, registrar_auditoria, registrar_movimiento, stock_actual, ok_paginado, paginar_params, sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion
+from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
+                   stock_actual, ok_paginado, paginar_params, sucursal_actual,
+                   sucursal_operativa, clausula_sucursal, es_gestion, flotante)
 
 ventas_bp = Blueprint("ventas", __name__)
 
@@ -26,11 +28,14 @@ def ventas():
         sid = sucursal_operativa()
         for item in detalle:
             prod_id = item.get("producto_id")
-            cantidad = float(item.get("cantidad", 0) or 0)
-            precio = float(item.get("precio_unitario", 0) or 0)
-            if cantidad <= 0:
+            cantidad = flotante(item.get("cantidad"), 0)
+            precio = flotante(item.get("precio_unitario"), 0)
+            if cantidad is None or cantidad <= 0:
                 conn.close()
-                return err("La cantidad debe ser mayor a cero")
+                return err("La cantidad debe ser un número mayor a cero")
+            if precio is None or precio < 0:
+                conn.close()
+                return err("El precio unitario no es válido")
             fila = conn.execute("SELECT id, nombre, costo_promedio FROM productos WHERE id = ? AND activo = 1",
                                 (prod_id,)).fetchone()
             if not fila:

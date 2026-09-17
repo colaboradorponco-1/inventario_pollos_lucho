@@ -1,0 +1,22 @@
+# Caddy + Let's Encrypt – Producción (dominio real)
+# Copiar a /etc/caddy/Caddyfile en el droplet, luego:
+#   systemctl reload caddy
+#
+# El certificado TLS se obtiene automáticamente. Puerto 80 y 443 deben estar abiertos en ufw.
+
+inventariopolloslucho.com {
+    reverse_proxy 127.0.0.1:5000
+
+    # Headers de seguridad adicionales (Caddy los gestiona vía reverse_proxy)
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy same-origin
+        -Server
+    }
+}
+
+# Opcional: subdominio para pruebas
+# staging.inventariopolloslucho.com {
+#     reverse_proxy 127.0.0.1:5000
+# }

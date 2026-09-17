@@ -1,0 +1,8 @@
+# Caddy sin TLS – Red local / LAN (sin dominio)
+# Cuando NO hay dominio o el VPS no tiene internet para Let's Encrypt.
+# Dejar COOKIE_SECURE=0 en .env (las cookies no requieren HTTPS).
+# Acceder por: http://<IP_VPS>/
+
+:80 {
+    reverse_proxy 127.0.0.1:5000
+}

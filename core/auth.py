@@ -1,3 +1,5 @@
+import time
+
 from flask import Blueprint, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -6,9 +8,45 @@ from .util import ok, err, login_requerido, registrar_auditoria
 
 auth_bp = Blueprint("auth", __name__)
 
+# ---- Protección contra fuerza bruta (por IP): 5 intentos fallidos -> 15 min ----
+MAX_INTENTOS = 5
+BLOQUEO_MIN = 15
+_fallos = {}  # ip -> {"n": contador, "hasta": timestamp_unix}
+
+
+def _bloqueado():
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    fila = _fallos.get(ip)
+    if not fila:
+        return False, None
+    if fila["hasta"] and time.time() < fila["hasta"]:
+        return True, int((fila["hasta"] - time.time()) // 60)
+    if fila["hasta"] and time.time() >= fila["hasta"]:
+        _fallos.pop(ip, None)
+        return False, None
+    return False, None
+
+
+def _anotar_fallo():
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    fila = _fallos.get(ip, {"n": 0, "hasta": None})
+    fila["n"] += 1
+    if fila["n"] >= MAX_INTENTOS:
+        fila["hasta"] = time.time() + BLOQUEO_MIN * 60
+        fila["n"] = 0
+    _fallos[ip] = fila
+
+
+def _limpiar_fallos():
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+    _fallos.pop(ip, None)
+
 
 @auth_bp.route("/api/login", methods=["POST"])
 def login():
+    bloqueado, minutos = _bloqueado()
+    if bloqueado:
+        return err(f"Demasiados intentos fallidos. Espera {minutos} min. (tu IP fue bloqueada)", 429)
     data = request.get_json() or {}
     usuario = (data.get("usuario") or "").strip()
     password = data.get("password") or ""
@@ -20,9 +58,14 @@ def login():
         sucursal_nombre = s["nombre"] if s else ""
     conn.close()
     if not row or not check_password_hash(row["password_hash"], password):
+        _anotar_fallo()
         return err("Usuario o contraseña incorrectos")
     if not row["activo"]:
+        _anotar_fallo()
         return err("Usuario desactivado. Contacta al administrador")
+    _limpiar_fallos()
+    session.permanent = True  # respeta PERMANENT_SESSION_LIFETIME
+    session["_ultima_actividad"] = int(time.time())
     session["user_id"] = row["id"]
     session["usuario"] = row["usuario"]
     session["nombre"] = row["nombre"]

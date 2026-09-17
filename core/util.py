@@ -31,6 +31,17 @@ def err(message, status=400):
     return jsonify({"ok": False, "message": message}), status
 
 
+def flotante(valor, defecto=0.0):
+    """Convierte a float de forma segura. Devuelve None si el valor no es
+    numérico (para que el llamador responda 400 en vez de un 500)."""
+    if valor is None or valor == "":
+        return defecto
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return None
+
+
 def login_requerido(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -138,12 +149,13 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
                 varios movimientos si la salida abarca más de un lote.
     Si no se indica sucursal y el usuario (p. ej. superadmin) no tiene una asignada,
     se usa la primera sucursal principal como destino del stock."""
-    from .lotes import entrada_lote, salida_fefo
+    from .lotes import entrada_lote, salida_fefo, stock_lotes
     if sucursal_id is None:
         sucursal_id = sucursal_operativa()
     if sucursal_id is None:
         raise ValueError("No se puede registrar el movimiento sin una sucursal definida")
     if tipo == "entrada":
+        stock_previo = stock_lotes(conn, producto_id, sucursal_id)
         lote_id = entrada_lote(conn, producto_id, sucursal_id, cantidad, fecha,
                                vencimiento=vencimiento, lote_label=lote)
         conn.execute("""
@@ -152,6 +164,8 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (producto_id, tipo, cantidad, precio, fecha, sucursal_id, lote_id,
               vencimiento or None, nota, usuario, proveedor_id))
+        if precio and precio > 0:
+            _recalcular_costo_promedio(conn, producto_id, stock_previo, cantidad, precio)
         return lote_id
     consumidos = salida_fefo(conn, producto_id, sucursal_id, cantidad)
     for lote_id, take in consumidos:
@@ -161,6 +175,25 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (producto_id, tipo, take, precio, fecha, sucursal_id, lote_id, nota, usuario))
     return None
+
+
+def _recalcular_costo_promedio(conn, producto_id, stock_previo, cantidad, precio):
+    """Actualiza productos.costo_promedio con el método de promedio móvil tras una
+    entrada con precio: nuevo = (stock_previo*costo + cantidad*precio) / (stock_previo+cantidad).
+    Si no hay stock previo, el costo pasa a ser el precio de esta entrada."""
+    if cantidad <= 0:
+        return
+    fila = conn.execute("SELECT costo_promedio FROM productos WHERE id = ?", (producto_id,)).fetchone()
+    if not fila:
+        return
+    costo_previo = float(fila["costo_promedio"] or 0)
+    nuevo_stock = stock_previo + cantidad
+    if stock_previo <= 0:
+        costo_nuevo = float(precio)
+    else:
+        costo_nuevo = ((stock_previo * costo_previo) + (cantidad * float(precio))) / nuevo_stock
+    conn.execute("UPDATE productos SET costo_promedio = ? WHERE id = ?",
+                 (round(costo_nuevo, 2), producto_id))
 
 
 def responder_excel(nombre_archivo, encabezados, filas, ancho_col=None, titulo=None):

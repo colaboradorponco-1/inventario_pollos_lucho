@@ -78,7 +78,9 @@ CREATE TABLE IF NOT EXISTS `lotes` (
   CONSTRAINT `fk_lote_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Stock por producto Y por sucursal (PK compuesta)
+-- Stock por producto Y por sucursal (PK compuesta).
+-- OBSOLETA: la aplicación ya NO lee esta tabla; el stock real sale de la suma
+-- de `lotes` (stock_actual/stock_lotes). Se conserva solo por compatibilidad.
 CREATE TABLE IF NOT EXISTS `stock` (
   `producto_id` INT NOT NULL,
   `sucursal_id` INT NOT NULL,
@@ -103,7 +105,8 @@ CREATE TABLE IF NOT EXISTS `movimientos` (
   `sucursal_id` INT,
   CONSTRAINT `fk_mov_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`),
   CONSTRAINT `fk_mov_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`),
-  CONSTRAINT `fk_mov_lote` FOREIGN KEY (`lote_id`) REFERENCES `lotes`(`id`)
+  CONSTRAINT `fk_mov_lote` FOREIGN KEY (`lote_id`) REFERENCES `lotes`(`id`),
+  CONSTRAINT `fk_mov_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `gastos` (
@@ -114,7 +117,8 @@ CREATE TABLE IF NOT EXISTS `gastos` (
   `fecha` VARCHAR(50) NOT NULL,
   `proveedor_id` INT,
   `sucursal_id` INT,
-  CONSTRAINT `fk_gasto_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `proveedores`(`id`)
+  CONSTRAINT `fk_gasto_proveedor` FOREIGN KEY (`proveedor_id`) REFERENCES `proveedores`(`id`),
+  CONSTRAINT `fk_gasto_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Usuarios con rol jerárquico (superadmin/admin/encargado) y sucursal asignada
@@ -135,7 +139,8 @@ CREATE TABLE IF NOT EXISTS `ventas` (
   `total` DOUBLE NOT NULL,
   `usuario` VARCHAR(255) DEFAULT '',
   `nota` TEXT,
-  `sucursal_id` INT
+  `sucursal_id` INT,
+  CONSTRAINT `fk_venta_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `venta_detalle` (
@@ -159,7 +164,8 @@ CREATE TABLE IF NOT EXISTS `auditoria` (
   `detalle` TEXT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Repartos con sucursal origen (de dónde sale el stock)
+-- Repartos con sucursal origen (de dónde sale el stock).
+-- `pedido_id` vincula el reparto con el pedido que lo originó (despacho).
 CREATE TABLE IF NOT EXISTS `repartos` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `fecha` VARCHAR(50) NOT NULL,
@@ -168,7 +174,10 @@ CREATE TABLE IF NOT EXISTS `repartos` (
   `usuario` VARCHAR(255) DEFAULT '',
   `nota` TEXT,
   `origen_sucursal_id` INT,
-  CONSTRAINT `fk_rep_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
+  `pedido_id` INT,
+  CONSTRAINT `fk_rep_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`),
+  CONSTRAINT `fk_rep_origen` FOREIGN KEY (`origen_sucursal_id`) REFERENCES `sucursales`(`id`),
+  CONSTRAINT `fk_rep_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `reparto_detalle` (
@@ -192,11 +201,13 @@ CREATE TABLE IF NOT EXISTS `pedidos` (
   `nro_ticket` VARCHAR(30) NOT NULL UNIQUE,
   `fecha` VARCHAR(50) NOT NULL,
   `sucursal_id` INT NOT NULL,
+  `destino_id` INT,
   `estado` VARCHAR(20) DEFAULT 'pendiente',
   `total` DOUBLE DEFAULT 0,
   `usuario` VARCHAR(255) DEFAULT '',
   `nota` TEXT,
-  CONSTRAINT `fk_ped_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
+  CONSTRAINT `fk_ped_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`),
+  CONSTRAINT `fk_ped_destino` FOREIGN KEY (`destino_id`) REFERENCES `sucursales`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `pedido_detalle` (
@@ -205,8 +216,11 @@ CREATE TABLE IF NOT EXISTS `pedido_detalle` (
   `producto_id` INT NOT NULL,
   `producto_nombre` VARCHAR(255) DEFAULT '',
   `cantidad` DOUBLE NOT NULL,
+  `destino_id` INT,
+  `unidad` VARCHAR(50) DEFAULT 'unidad',
   CONSTRAINT `fk_pd_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_pd_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`)
+  CONSTRAINT `fk_pd_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`),
+  CONSTRAINT `fk_pd_destino` FOREIGN KEY (`destino_id`) REFERENCES `sucursales`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- =============================================================

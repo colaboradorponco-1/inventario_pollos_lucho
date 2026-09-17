@@ -68,7 +68,7 @@ def productos():
             conn.close()
             return err("Ya existe un producto con ese código")
         proveedor_id = data.get("proveedor_id")
-        if es_gestion() or es_encargado_almacen(conn):
+        if es_gestion():
             sid = data.get("sucursal_id")
         else:
             # El encargado crea productos de SU sucursal y con proveedor de su sucursal
@@ -276,7 +276,7 @@ def producto(prod_id):
         if dup:
             conn.close()
             return err("Ya existe otro producto con ese código de barras")
-    sid_p = fila["sucursal_id"] if not (es_gestion() or es_encargado_almacen(conn)) else (data.get("sucursal_id") or fila["sucursal_id"])
+    sid_p = fila["sucursal_id"] if not es_gestion() else (data.get("sucursal_id") or fila["sucursal_id"])
     if not sid_p:
         conn.close()
         return err("Debes asignar una sucursal al producto", 400)

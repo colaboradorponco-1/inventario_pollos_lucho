@@ -9,7 +9,9 @@ reportes_bp = Blueprint("reportes", __name__)
 
 
 def _cls(col):
-    """(condición, params) para filtrar por la sucursal del usuario (o vacío para superadmin)."""
+    """(condición, params) para filtrar por la sucursal del usuario (o vacío para admin/superadmin)."""
+    if es_gestion():
+        return "", []
     sid = sucursal_actual()
     if sid is None:
         return "", []
@@ -18,7 +20,6 @@ def _cls(col):
 
 @reportes_bp.route("/api/exportar/consumo")
 @login_requerido
-@rol_requerido("admin", "superadmin")
 def exportar_consumo():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
@@ -213,7 +214,6 @@ def exportar_repartos():
 
 @reportes_bp.route("/api/reportes/consumo")
 @login_requerido
-@rol_requerido("admin", "superadmin")
 def reporte_consumo():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
@@ -242,7 +242,6 @@ def reporte_consumo():
 
 @reportes_bp.route("/api/reportes/repartos")
 @login_requerido
-@rol_requerido("admin", "superadmin")
 def reporte_repartos():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
@@ -265,15 +264,115 @@ def reporte_repartos():
     if hasta:
         q += " AND (r.id IS NULL OR date(r.fecha) <= date(?))"
         params.append(hasta)
-    q += " GROUP BY s.id ORDER BY total_repartido DESC, s.nombre"
+    q += " GROUP BY s.id HAVING num_repartos > 0 ORDER BY total_repartido DESC, s.nombre"
     rows = conn.execute(q, params).fetchall()
     conn.close()
     return ok([dict(r) for r in rows])
 
 
+@reportes_bp.route("/api/reportes/ventas_sucursal")
+@login_requerido
+def reporte_ventas_sucursal():
+    desde = request.args.get("desde", "")
+    hasta = request.args.get("hasta", "")
+    conn = get_conn()
+    q = """
+        SELECT s.nombre AS sucursal,
+               COUNT(DISTINCT v.id) AS num_ventas,
+               COALESCE(SUM(v.total), 0) AS total,
+               COALESCE(SUM((d.precio_unitario - COALESCE(d.costo_unitario, 0)) * d.cantidad), 0) AS utilidad
+        FROM sucursales s
+        LEFT JOIN ventas v ON v.sucursal_id = s.id
+        LEFT JOIN venta_detalle d ON d.venta_id = v.id
+        WHERE 1=1
+    """
+    params = []
+    cls, cls_params = _cls("v.sucursal_id")
+    q += cls
+    params += cls_params
+    if desde:
+        q += " AND (v.id IS NULL OR date(v.fecha) >= date(%s))"
+        params.append(desde)
+    if hasta:
+        q += " AND (v.id IS NULL OR date(v.fecha) <= date(%s))"
+        params.append(hasta)
+    q += " GROUP BY s.id HAVING num_ventas > 0 ORDER BY total DESC"
+    rows = conn.execute(q, params).fetchall()
+    conn.close()
+    return ok([dict(r) for r in rows])
+
+
+@reportes_bp.route("/api/reportes/resumen")
+@login_requerido
+def reporte_resumen():
+    desde = request.args.get("desde", "")
+    hasta = request.args.get("hasta", "")
+    conn = get_conn()
+    sid = sucursal_actual()
+    lote_cond = "" if es_gestion() else (" AND l.sucursal_id = %s" if sid is not None else "")
+    params = []
+    q = "SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total FROM ventas WHERE 1=1"
+    cls, cls_params = _cls("sucursal_id")
+    q += cls
+    params += cls_params
+    if desde:
+        q += " AND date(fecha) >= date(%s)"
+        params.append(desde)
+    if hasta:
+        q += " AND date(fecha) <= date(%s)"
+        params.append(hasta)
+    ventas = conn.execute(q, params).fetchone()
+
+    params = list(cls_params)
+    venta_cls = _cls("v.sucursal_id")
+    q = ("SELECT COALESCE(SUM((d.precio_unitario - COALESCE(d.costo_unitario, 0)) * d.cantidad), 0) AS total,"
+         " COALESCE(SUM(d.subtotal), 0) AS venta"
+         " FROM venta_detalle d JOIN ventas v ON v.id = d.venta_id WHERE 1=1")
+    q += venta_cls[0]
+    params_gan = list(venta_cls[1])
+    if desde:
+        q += " AND date(v.fecha) >= date(%s)"
+        params_gan.append(desde)
+    if hasta:
+        q += " AND date(v.fecha) <= date(%s)"
+        params_gan.append(hasta)
+    gan = conn.execute(q, params_gan).fetchone()
+
+    params = []
+    params = []
+    q = "SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total FROM repartos WHERE 1=1"
+    cls2, cls2p = _cls("sucursal_id")
+    q += cls2
+    params += cls2p
+    if desde:
+        q += " AND date(fecha) >= date(%s)"
+        params.append(desde)
+    if hasta:
+        q += " AND date(fecha) <= date(%s)"
+        params.append(hasta)
+    rep = conn.execute(q, params).fetchone()
+
+    params_val = [] if es_gestion() or sid is None else [sid]
+    val = conn.execute("""
+        SELECT s.nombre AS sucursal, ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor,
+               SUM(l.cantidad) AS unid
+        FROM lotes l JOIN productos p ON p.id = l.producto_id JOIN sucursales s ON s.id = l.sucursal_id
+        WHERE l.cantidad <> 0{lote_cond} GROUP BY s.id ORDER BY valor DESC
+    """.format(lote_cond=lote_cond), params_val).fetchall()
+    conn.close()
+    return ok({
+        "ventas": dict(ventas),
+        "ganancias": round(float(gan["total"]), 2),
+        "repartos": dict(rep),
+        "valorizacion": {
+            "total": round(float(sum(f["valor"] or 0 for f in val)), 2),
+            "por_sucursal": [dict(f) for f in val],
+        },
+    })
+
+
 @reportes_bp.route("/api/reportes/ganancias")
 @login_requerido
-@rol_requerido("admin", "superadmin")
 def reporte_ganancias():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
@@ -282,8 +381,8 @@ def reporte_ganancias():
         SELECT d.producto_nombre AS nombre,
                SUM(d.cantidad) AS cantidad,
                SUM(d.subtotal) AS venta,
-               SUM(d.costo_unitario * d.cantidad) AS costo,
-               SUM((d.precio_unitario - d.costo_unitario) * d.cantidad) AS utilidad
+               SUM(COALESCE(d.costo_unitario, 0) * d.cantidad) AS costo,
+               SUM((d.precio_unitario - COALESCE(d.costo_unitario, 0)) * d.cantidad) AS utilidad
         FROM venta_detalle d JOIN ventas v ON v.id = d.venta_id
         WHERE 1=1
     """
@@ -305,7 +404,6 @@ def reporte_ganancias():
 
 @reportes_bp.route("/api/exportar/ganancias")
 @login_requerido
-@rol_requerido("admin", "superadmin")
 def exportar_ganancias():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
@@ -314,8 +412,8 @@ def exportar_ganancias():
         SELECT d.producto_nombre AS nombre,
                SUM(d.cantidad) AS cantidad,
                SUM(d.subtotal) AS venta,
-               SUM(d.costo_unitario * d.cantidad) AS costo,
-               SUM((d.precio_unitario - d.costo_unitario) * d.cantidad) AS utilidad
+               SUM(COALESCE(d.costo_unitario, 0) * d.cantidad) AS costo,
+               SUM((d.precio_unitario - COALESCE(d.costo_unitario, 0)) * d.cantidad) AS utilidad
         FROM venta_detalle d JOIN ventas v ON v.id = d.venta_id WHERE 1=1
     """
     params = []
@@ -340,36 +438,35 @@ def exportar_ganancias():
 
 @reportes_bp.route("/api/reportes/valorizacion")
 @login_requerido
-@rol_requerido("admin", "superadmin")
 def reporte_valorizacion():
     conn = get_conn()
     sid = sucursal_actual()
-    if sid is None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
-        params = []
-    else:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = %s GROUP BY producto_id) s ON s.producto_id = p.id"
+    params = []
+    lote_cond = ""
+    if not es_gestion() and sid is not None:
+        lote_cond = " AND l.sucursal_id = %s"
         params = [sid]
     rows = conn.execute("""
-        SELECT p.nombre, p.unidad, p.costo_promedio, p.precio_venta,
-               COALESCE(s.cantidad, 0) AS stock,
-               ROUND(p.costo_promedio * COALESCE(s.cantidad, 0), 2) AS valor
-        FROM productos p
-        {join_stock}
-        WHERE p.activo = 1 AND COALESCE(s.cantidad, 0) > 0
+        SELECT s.nombre AS sucursal,
+               SUM(l.cantidad) AS unid,
+               ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor
+        FROM lotes l
+        JOIN productos p ON p.id = l.producto_id
+        JOIN sucursales s ON s.id = l.sucursal_id
+        WHERE l.cantidad <> 0{lote_cond}
+        GROUP BY s.id
         ORDER BY valor DESC
-    """.format(join_stock=join_stock), params).fetchall()
+    """.format(lote_cond=lote_cond), params).fetchall()
     conn.close()
     return ok([dict(r) for r in rows])
 
 
 @reportes_bp.route("/api/reportes/vencimientos")
 @login_requerido
-@rol_requerido("admin", "superadmin")
 def reporte_vencimientos():
     conn = get_conn()
     sid = sucursal_actual()
-    if sid is None:
+    if es_gestion() or sid is None:
         params = []
         lote_cond = ""
     else:

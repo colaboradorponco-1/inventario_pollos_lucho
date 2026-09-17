@@ -12,6 +12,9 @@ venv/
 *.db
 *.sqlite3
 
+# Respaldos de BD (contienen datos/sesiones; nunca al repo)
+respaldo_*.sql
+
 # Editor/IDE
 .vscode/
 .idea/
