@@ -699,11 +699,10 @@ async function openProductoModal(id, lista) {
         $('#prod-almacen').disabled = false;
     } else if (!esAdminDlg) {
         $('#prod-sucursal').disabled = true;
+        $('#prod-almacen').disabled = true;
     }
-    if (!id) {
-        const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === +($('#prod-sucursal').value || 0));
-        if (match) $('#prod-almacen').value = match.id;
-    }
+    // Cargar en el selector "Almacén" solo los almacenes de la sucursal elegida.
+    poblarAlmacenes(+$('#prod-sucursal').value || 0);
 
     if (id) {
         const p = lista.find((x) => x.id === id);
@@ -721,6 +720,7 @@ async function openProductoModal(id, lista) {
         $('#prod-vencimiento').value = p.vencimiento || '';
         $('#prod-proveedor').value = p.proveedor_id || '';
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
+        if (esGestionDlg) poblarAlmacenes(+$('#prod-sucursal').value || 0);
         if (esGestionDlg && p.sucursal_id && !p.almacen_id) {
             const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === p.sucursal_id);
             if (match) $('#prod-almacen').value = match.id;
@@ -787,14 +787,22 @@ async function delProducto(id) {
     }
 }
 
-// Al elegir sucursal en el modal de producto, preseleccionar su almacén
-$('#prod-sucursal').addEventListener('change', () => {
-    const sel = +$('#prod-sucursal').value;
+// Cargar en el selector "Almacén" solo los almacenes de una sucursal concreta
+function poblarAlmacenes(sid) {
     const alm = $('#prod-almacen');
-    if (alm && sel) {
-        const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === sel);
-        if (match) alm.value = match.id;
-    }
+    if (!alm) return;
+    const previo = alm.value;
+    const lista = sid ? (catalogos.almacenes || []).filter((a) => +a.sucursal_id === +sid)
+                      : (catalogos.almacenes || []);
+    alm.innerHTML = '<option value="">— Sin almacén —</option>' +
+        lista.map((a) => `<option value="${a.id}">${esc(a.nombre)}</option>`).join('');
+    if (lista.some((a) => +a.id === +previo)) alm.value = previo;
+    else if (lista.length) alm.value = String(lista[0].id);
+}
+
+// Al elegir sucursal en el modal de producto, cargar los almacenes de esa sucursal
+$('#prod-sucursal').addEventListener('change', () => {
+    poblarAlmacenes(+$('#prod-sucursal').value || 0);
 });
 
 // ---------------- Movimientos ----------------

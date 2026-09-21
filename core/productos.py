@@ -83,6 +83,11 @@ def productos():
             conn.close()
             return err("Debes asignar una sucursal al producto", 400)
         sid = int(sid)
+        if data.get("almacen_id"):
+            if not conn.execute("SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id = ?",
+                                (int(data["almacen_id"]), sid)).fetchone():
+                conn.close()
+                return err("El almacén no pertenece a esa sucursal", 400)
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
                                    precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, activo)
@@ -282,6 +287,11 @@ def producto(prod_id):
         conn.close()
         return err("Debes asignar una sucursal al producto", 400)
     sid_p = int(sid_p)
+    if data.get("almacen_id"):
+        if not conn.execute("SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id = ?",
+                            (int(data["almacen_id"]), sid_p)).fetchone():
+            conn.close()
+            return err("El almacén no pertenece a esa sucursal", 400)
     conn.execute("""
         UPDATE productos SET codigo=?, nombre=?, marca=?, categoria_id=?, unidad=?, stock_minimo=?,
                costo_promedio=?, precio_venta=?, almacen_id=?, proveedor_id=?, sucursal_id=?
