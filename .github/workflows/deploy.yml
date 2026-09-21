@@ -18,4 +18,6 @@ jobs:
           command_timeout: "10m"
           script: |
             set -e
+            curl -fsSL -o /root/desplegar.sh https://raw.githubusercontent.com/colaboradorponco-1/inventario_pollos_lucho/main/deploy/desplegar.sh
+            chmod +x /root/desplegar.sh
             bash /root/desplegar.sh
