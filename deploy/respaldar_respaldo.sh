@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-#  Respaldo diario de pollos_lucho + subida a DigitalOcean Spaces
+#  Respaldo diario de pollos_lucho + subida a Google Drive
 #  Ejecuta: cd /opt/pollos-lucho && ./deploy/respaldar_respaldo.sh
 #  (se ejecuta automáticamente a las 03:00 via /etc/cron.d/pollos-lucho-respaldo)
 # =====================================================================
@@ -8,10 +8,11 @@ set -euo pipefail
 
 APP_DIR="/opt/pollos-lucho"
 VENV="$APP_DIR/venv"
+export RCLONE_CONFIG="$APP_DIR/.rclone.conf"   # config de rclone (usuario pollos sin home)
 FECHA=$(date +%Y%m%d_%H%M%S)
-RCLONE_REMOTE="spaces"          # nombre del remote en rclone (ver abajo)
-RCLOME_BUCKET="backups-pollos-lucho"
-RETENCION_DIAS=30
+RCLONE_REMOTE="gdrive"                 # nombre del remote en rclone (Google Drive)
+RCLONE_BUCKET="RespaldosPollosLucho"   # carpeta en Google Drive
+RETENCION_DIAS=365
 
 cd "$APP_DIR"
 
@@ -31,13 +32,13 @@ echo "  → Exportado: $DUMP ($(stat -c%s "$DUMP") bytes)"
 echo "  → Verificando integridad (probar_respaldo.py)..."
 "$VENV/bin/python" probar_respaldo.py && echo "  → Integrity OK" || echo "  → AVISO: verificación falló (revisar logs)"
 
-# 3) Subir a Spaces (si rclone está configurado)
+# 3) Subir a Google Drive (si rclone está configurado)
 if command -v rclone &>/dev/null; then
-  echo "  → Subiendo a Spaces: ${RCLONE_REMOTE}:${RCLOME_BUCKET}/pollos-lucho/${DUMP}"
-  rclone copy "$DUMP" "${RCLONE_REMOTE}:${RCLOME_BUCKET}/pollos-lucho/${DUMP}" --stats-one-line 2>/dev/null || \
-    echo "  → AVISO: falló la subida a Spaces (¿rclone configurado?). Ver: sudo -u pollos rclone config"
+  echo "  → Subiendo a Google Drive: ${RCLONE_REMOTE}:${RCLONE_BUCKET}/pollos-lucho/${DUMP}"
+  rclone copyto "$DUMP" "${RCLONE_REMOTE}:${RCLONE_BUCKET}/pollos-lucho/${DUMP}" --stats-one-line 2>/dev/null || \
+    echo "  → AVISO: falló la subida a Google Drive (¿rclone configurado?). Ver: sudo -u pollos rclone config"
 else
-  echo "  → rclone no instalado, subida a Spaces omitida"
+  echo "  → rclone no instalado, subida a Google Drive omitida"
 fi
 
 # 4) Retención local: borrar respaldos mayores a RETENCION_DIAS días
@@ -45,10 +46,10 @@ echo "  → Limpiando respaldos locales > ${RETENCION_DIAS} días..."
 find "$APP_DIR" -name 'respaldo_pollos_lucho_*.sql' -mtime +${RETENCION_DIAS} -delete -print | \
   xargs -r -I{} echo "    eliminado: {}"
 
-# 5) Retención en Spaces: borrar respaldos > RETENCION_DIAS días
+# 5) Retención en Google Drive: borrar respaldos > RETENCION_DIAS días
 if command -v rclone &>/dev/null; then
-  echo "  → Limpiando respaldos antiguos en Spaces (> ${RETENCION_DIAS} días)..."
-  rclone delete "${RCLONE_REMOTE}:${RCLOME_BUCKET}/pollos-lucho/" \
+  echo "  → Limpiando respaldos antiguos en Google Drive (> ${RETENCION_DIAS} días)..."
+  rclone delete "${RCLONE_REMOTE}:${RCLONE_BUCKET}/pollos-lucho/" \
     --min-age "${RETENCION_DIAS}d" --stats-one-line 2>/dev/null || true
 fi
 
