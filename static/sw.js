@@ -1,7 +1,7 @@
 /* Service worker de Inventario Pollos Lucho.
-   Objetivo: permitir instalar la app (PWA) y que los archivos base
-   (CSS, JS, fuentes, iconos) carguen rápido o sin internet.
-   Regla de oro: los datos (/api/) NUNCA se cachean, siempre van al servidor. */
+   Estrategia: si hay internet, SIEMPRE se sirve la última versión de los
+   archivos (red primero). La caché solo se usa como respaldo sin conexión.
+   Los datos (/api/) NUNCA se cachean, siempre van al servidor. */
 const CACHE = 'pollos-lucho-v3';
 
 const PRECACHE = [
@@ -36,19 +36,17 @@ self.addEventListener('activate', (e) => {
     );
 });
 
-async function cacheFirst(req) {
+async function networkFirst(req) {
     const cache = await caches.open(CACHE);
-    const cached = await cache.match(req);
-    if (cached) {
-        /* Actualiza en segundo plano para la próxima visita. */
-        fetch(req).then((res) => {
-            if (res && res.ok) cache.put(req, res.clone());
-        }).catch(() => null);
-        return cached;
+    try {
+        const res = await fetch(req);
+        if (res && res.ok) cache.put(req, res.clone());
+        return res;
+    } catch (_) {
+        const cached = await cache.match(req);
+        if (cached) return cached;
+        throw _;
     }
-    const res = await fetch(req);
-    if (res && res.ok) cache.put(req, res.clone());
-    return res;
 }
 
 self.addEventListener('fetch', (e) => {
@@ -71,8 +69,8 @@ self.addEventListener('fetch', (e) => {
         return;
     }
 
-    /* Archivos estáticos: caché primero (con actualización en segundo plano). */
+    /* Archivos estáticos: red primero, caché como respaldo offline. */
     if (url.pathname.startsWith('/static/')) {
-        e.respondWith(cacheFirst(req));
+        e.respondWith(networkFirst(req));
     }
 });

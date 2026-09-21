@@ -210,6 +210,11 @@ function refrescarPanelActivo() {
 }
 
 function autoRefrescar() {
+    if (_recargaPendiente && estadoSeguroParaRecargar()) {
+        _recargaPendiente = false;
+        recargarNuevaVersion();
+        return;
+    }
     if (document.visibilityState !== 'visible') return;
     if (document.querySelector('.modal.open')) return;
     const a = document.activeElement;
@@ -226,6 +231,102 @@ function autoRefrescar() {
         _refrescoActivo = false;
     }
 }
+
+// ---------------- Configuración y actualización automática ----------------
+const APP_VERSION = '2026-09-21';
+const KEY_AUTOREFRESCO = 'pollos_autorefresco';
+let _autoRefrescoTimer = null;
+let _recargaPendiente = false;
+
+function intervaloAutoRefresco() {
+    const v = localStorage.getItem(KEY_AUTOREFRESCO) || '60000';
+    return ['off', '30000', '60000'].includes(v) ? v : '60000';
+}
+
+function configurarAutoRefresco() {
+    if (_autoRefrescoTimer) { clearInterval(_autoRefrescoTimer); _autoRefrescoTimer = null; }
+    const v = intervaloAutoRefresco();
+    if (v !== 'off') {
+        _autoRefrescoTimer = setInterval(autoRefrescar, parseInt(v, 10));
+    }
+}
+
+function estadoSeguroParaRecargar() {
+    if (document.querySelector('.modal.open')) return false;
+    const a = document.activeElement;
+    if (a && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName)) return false;
+    const nombre = nombreVistaActiva();
+    if ((nombre === 'ventas' && ventaItems.length) || (nombre === 'repartos' && repartoItems.length)) return false;
+    return true;
+}
+
+function recargarNuevaVersion() {
+    if (!estadoSeguroParaRecargar()) {
+        toast('Hay una versión nueva: se aplicará en cuanto termines', 'info');
+        _recargaPendiente = true;
+        return;
+    }
+    toast('Actualizando a la nueva versión...', 'ok');
+    window.location.reload();
+}
+
+async function vigilarActualizaciones() {
+    if (!('serviceWorker' in navigator)) return;
+    try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) return;
+        let nueva = false;
+        reg.addEventListener('updatefound', () => {
+            const sw = reg.installing;
+            if (!sw) return;
+            sw.addEventListener('statechange', () => {
+                if (sw.state === 'installed' && navigator.serviceWorker.controller) nueva = true;
+            });
+        });
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (nueva) recargarNuevaVersion();
+        });
+        setInterval(() => { reg.update().catch(() => null); }, 45000);
+    } catch (_) { }
+}
+
+async function buscarActualizacion() {
+    const est = $('#cfg-estado');
+    if (est) est.textContent = 'Buscando actualizaciones...';
+    try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) {
+            await navigator.serviceWorker.register('/sw.js');
+            if (est) est.textContent = 'Sin novedades: la app está al día.';
+            return;
+        }
+        await reg.update();
+        if (est) est.textContent = 'Sin novedades: ya tienes la última versión.';
+    } catch (e) {
+        if (est) est.textContent = 'No se pudo buscar (revisa la conexión).';
+    }
+}
+
+function abrirConfiguracion() {
+    const v = $('#cfg-version');
+    if (v) v.textContent = APP_VERSION;
+    const s = $('#cfg-autorefresco');
+    if (s) s.value = intervaloAutoRefresco();
+    const est = $('#cfg-estado');
+    if (est) est.textContent = 'La app se actualiza sola cuando hay una versión nueva (mientras no estés escribiendo).';
+    openModal('modal-configuracion');
+}
+
+const _selAutoref = document.getElementById('cfg-autorefresco');
+if (_selAutoref) {
+    _selAutoref.addEventListener('change', () => {
+        localStorage.setItem(KEY_AUTOREFRESCO, _selAutoref.value);
+        configurarAutoRefresco();
+        toast('Refresco automático: ' + ({ off: 'No', '30000': 'cada 30 s', '60000': 'cada 60 s' })[_selAutoref.value] || 'no definido', 'ok');
+    });
+}
+const _btnBuscar = document.getElementById('cfg-buscar-act');
+if (_btnBuscar) _btnBuscar.addEventListener('click', buscarActualizacion);
 
 // ---------------- Catálogos ----------------
 async function loadCatalogos() {
@@ -3076,7 +3177,10 @@ async function init() {
     setInterval(syncPedidosNuevos, 30000);
     const btnRef = document.getElementById('btn-refrescar-top');
     if (btnRef) btnRef.addEventListener('click', refrescarPanelActivo);
-    setInterval(autoRefrescar, 60000);
+    const btnCfg = document.getElementById('btn-config-top');
+    if (btnCfg) btnCfg.addEventListener('click', abrirConfiguracion);
+    configurarAutoRefresco();
+    vigilarActualizaciones();
 }
 
 const FILTROS_VISTAS = [
