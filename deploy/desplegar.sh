@@ -25,6 +25,8 @@ rsync -a --delete \
   --exclude='__pycache__' \
   --exclude='respaldo_*.sql' \
   --exclude='*.log' \
+  --exclude='gunicorn.conf.py' \
+  --exclude='logs' \
   "$STAGE/" "$APP_DIR/"
 
 echo "==> Dependencias de Python"
