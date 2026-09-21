@@ -1,0 +1,21 @@
+name: Desplegar a DigitalOcean
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    name: Desplegar en el droplet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ejecutar despliegue via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          command_timeout: "10m"
+          script: |
+            set -e
+            bash /root/desplegar.sh
