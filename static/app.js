@@ -127,7 +127,10 @@ $$('.modal').forEach((m) => {
 document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     const m = modalStack[modalStack.length - 1];
-    if (m) { e.preventDefault(); closeModal(m.id); }
+    if (!m) return;
+    e.preventDefault();
+    if (m.id === 'modal-camara') cerrarEscannerCamara();
+    else closeModal(m.id);
 });
 
 // ---------------- Navegación ----------------
@@ -1724,6 +1727,104 @@ $('#btn-imprimir-reporte').addEventListener('click', () => window.print());
 $('#btn-etiquetas').addEventListener('click', () => window.open('/etiquetas', '_blank'));
 
 // ---------------- Escaneo de código de barras ----------------
+function beepOk() {
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = new Ctx();
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.value = 1320;
+        o.connect(g); g.connect(ctx.destination);
+        const t = ctx.currentTime;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.25, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+        o.start(t); o.stop(t + 0.3);
+        setTimeout(() => { try { ctx.close(); } catch (_) { } }, 600);
+    } catch (_) { }
+}
+
+let _camStream = null;
+let _camTimer = null;
+let _camBd = null;
+
+function cerrarEscannerCamara() {
+    if (_camStream) { _camStream.getTracks().forEach((t) => t.stop()); _camStream = null; }
+    if (_camTimer) { clearTimeout(_camTimer); _camTimer = null; }
+    _camBd = null;
+    const v = $('#cam-video');
+    if (v) v.srcObject = null;
+    closeModal('modal-camara');
+}
+
+function simularEnterEscaner(inputSel, codigo) {
+    const inp = $(inputSel);
+    if (!inp) return;
+    inp.value = codigo;
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+}
+
+async function escanearConCamara(inputSel) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast('Este navegador no permite usar la cámara', 'err');
+        return;
+    }
+    openModal('modal-camara');
+    const vid = $('#cam-video');
+    const estado = $('#cam-estado');
+    if (estado) estado.textContent = 'Solicitando permiso de la cámara...';
+    try {
+        _camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+        vid.srcObject = _camStream;
+        try { await vid.play(); } catch (_) { }
+        _camBd = null;
+        if ('BarcodeDetector' in window) {
+            try {
+                _camBd = new BarcodeDetector({ formats: ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'codabar', 'itf', 'data_matrix'] });
+            } catch (_) { _camBd = null; }
+        }
+        if (!_camBd) {
+            if (estado) estado.textContent = 'Este navegador/celular aún no permite lectura con cámara. Usa un escáner físico o abre la app en Android (Chrome).';
+            return;
+        }
+        if (estado) estado.textContent = 'Apunta la cámara al código de barras o QR...';
+        let ultimo = '', ultimoT = 0;
+        const leer = async () => {
+            if (!_camStream) return;
+            if (vid.readyState >= 2) {
+                try {
+                    const cods = await _camBd.detect(vid);
+                    if (cods && cods.length && cods[0].rawValue) {
+                        const c = String(cods[0].rawValue).trim();
+                        const ahora = Date.now();
+                        if (c !== ultimo || ahora - ultimoT > 800) {
+                            ultimo = c; ultimoT = ahora;
+                            beepOk();
+                            cerrarEscannerCamara();
+                            simularEnterEscaner(inputSel, c);
+                            return;
+                        }
+                    }
+                } catch (_) { }
+            }
+            _camTimer = setTimeout(leer, 150);
+        };
+        _camTimer = setTimeout(leer, 150);
+    } catch (e) {
+        cerrarEscannerCamara();
+        toast('No se pudo abrir la cámara (revisa el permiso)', 'err');
+    }
+}
+
+[['#btn-cam-qr', '#qr-escaneo'], ['#btn-cam-prod', '#prod-escaneo'],
+ ['#btn-cam-mov', '#mov-escaneo'], ['#btn-cam-venta', '#venta-escaneo'],
+ ['#btn-cam-reparto', '#reparto-escaneo']].forEach(([b, i]) => {
+    const btn = $(b);
+    if (btn) btn.addEventListener('click', () => escanearConCamara(i));
+});
+const btnCamCerrar = $('#btn-cam-cerrar');
+if (btnCamCerrar) btnCamCerrar.addEventListener('click', cerrarEscannerCamara);
+
 function abrirNuevoProductoConCodigo(codigo) {
     openProductoModal();
     $('#prod-codigo').value = codigo;
@@ -1745,7 +1846,7 @@ function vincularEscaneo(inputSel, selectSel, cantSel) {
         try {
             const p = await buscarProductoPorCodigo(codigo);
             const sel = $(selectSel);
-            if (!sel.querySelector(`option[value="${p.id}"]`)) {
+            if (!esCentral() && !sel.querySelector(`option[value="${p.id}"]`)) {
                 toast('Ese producto no pertenece a esta sucursal', 'err');
                 return;
             }
