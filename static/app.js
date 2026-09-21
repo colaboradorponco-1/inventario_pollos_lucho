@@ -164,13 +164,13 @@ $$('.menu-btn').forEach((btn) => {
 
 function loadView(name) {
     if (name === 'dashboard') loadDashboard();
-    if (name === 'productos') { pintarProdScope(); loadProductos(); }
-    if (name === 'movimientos') loadMovimientos();
+    if (name === 'productos') { pintarProdScope(); loadProductos(); enfocarEscanorSiEscritorio('#prod-escaneo'); }
+    if (name === 'movimientos') { loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
     if (name === 'proveedores') loadProveedores();
     if (name === 'gastos') loadGastos();
     if (name === 'reportes') loadReportes();
-    if (name === 'ventas') loadVentas();
-    if (name === 'repartos') loadRepartos();
+    if (name === 'ventas') { loadVentas(); enfocarEscanorSiEscritorio('#venta-escaneo'); }
+    if (name === 'repartos') { loadRepartos(); enfocarEscanorSiEscritorio('#reparto-escaneo'); }
     if (name === 'pedidos') loadPedidos();
     if (name === 'usuarios') loadUsuarios();
     if (name === 'auditoria') loadAuditoria();
@@ -1219,7 +1219,7 @@ $('#qr-escaneo').addEventListener('keydown', async (e) => {
         actQrItems();
         toast(`${p.nombre} → ${qrItems[key].cantidad} ${p.unidad}`);
     } catch (err) {
-        toast('Código no registrado: ' + codigo, 'err');
+        toast((err && err.message) || 'Código no registrado: ' + codigo, 'err');
     }
 });
 
@@ -1824,6 +1824,42 @@ async function escanearConCamara(inputSel) {
 });
 const btnCamCerrar = $('#btn-cam-cerrar');
 if (btnCamCerrar) btnCamCerrar.addEventListener('click', cerrarEscannerCamara);
+
+// ---------------- Escáner físico (máquina lectora) ----------------
+function enfocarEscanorSiEscritorio(sel) {
+    if (window.matchMedia && window.matchMedia('(pointer: fine)').matches) {
+        const inp = $(sel);
+        if (inp) { inp.focus(); inp.select(); }
+    }
+}
+
+function activarCommitEscaneo(inputSel) {
+    const inp = $(inputSel);
+    if (!inp) return;
+    let buf = '', ult = 0, burst = 0, tim = null;
+    inp.addEventListener('input', (e) => {
+        if (tim) { clearTimeout(tim); tim = null; }
+        const ahora = performance.now();
+        const dt = ahora - ult;
+        ult = ahora;
+        const dato = (e && e.data) || '';
+        if (dato.length > 1 || dato === ' ') { buf = ''; burst = 0; return; }
+        if (dt > 80) { buf = ''; burst = 0; }
+        if (!burst && inp.value.length !== 1) { buf = ''; return; }
+        buf = (buf + (dato || inp.value.slice(-1))).replace(/\s+/g, '').slice(-14);
+        burst++;
+        if (burst < 3) return;
+        tim = setTimeout(() => {
+            if (!buf) return;
+            const c = buf; buf = ''; burst = 0; tim = null;
+            inp.value = '';
+            inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+        }, 120);
+    });
+    inp.addEventListener('keydown', () => { if (tim) { clearTimeout(tim); tim = null; } buf = ''; burst = 0; });
+}
+
+['#qr-escaneo', '#prod-escaneo', '#mov-escaneo', '#venta-escaneo', '#reparto-escaneo'].forEach(activarCommitEscaneo);
 
 function abrirNuevoProductoConCodigo(codigo) {
     openProductoModal();
