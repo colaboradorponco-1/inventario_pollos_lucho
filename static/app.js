@@ -1101,7 +1101,7 @@ $('#qr-escaneo').addEventListener('keydown', async (e) => {
     if (!codigo) return;
     try {
         const p = await request(API + '/productos/codigo?codigo=' + encodeURIComponent(codigo));
-        if (p.sucursal_id && p.sucursal_id !== window.SUCURSAL_ID) {
+        if (p.sucursal_id && !esCentral() && p.sucursal_id !== window.SUCURSAL_ID) {
             toast('Ese producto no pertenece a tu sucursal', 'err');
             return;
         }

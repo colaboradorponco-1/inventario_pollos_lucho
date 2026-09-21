@@ -2,7 +2,7 @@
    Objetivo: permitir instalar la app (PWA) y que los archivos base
    (CSS, JS, fuentes, iconos) carguen rápido o sin internet.
    Regla de oro: los datos (/api/) NUNCA se cachean, siempre van al servidor. */
-const CACHE = 'pollos-lucho-v2';
+const CACHE = 'pollos-lucho-v3';
 
 const PRECACHE = [
     '/static/style.css',
