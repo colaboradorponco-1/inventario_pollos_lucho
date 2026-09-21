@@ -339,20 +339,24 @@ def dashboard_graficos():
 def catalogos():
     conn = get_conn()
     sid = sucursal_operativa()
-    if es_gestion():
+    es_central = es_gestion() or es_encargado_almacen(conn)
+    if es_central:
+        # Central (admin/superadmin + encargados de Almacén Principal): todo el catálogo
         almacenes = [dict(r) for r in conn.execute("SELECT * FROM almacenes ORDER BY nombre").fetchall()]
+        proveedores = [dict(r) for r in conn.execute("SELECT * FROM proveedores ORDER BY nombre").fetchall()]
     else:
-        # Encargado: solo ve el almacén de SU sucursal
+        # Encargado de filial: solo el almacén y los proveedores de SU sucursal
         sid_alm = sucursal_actual() or sid
         almacenes = [dict(r) for r in conn.execute(
             "SELECT * FROM almacenes WHERE sucursal_id = %s ORDER BY nombre", (sid_alm,)).fetchall()]
+        proveedores = [dict(r) for r in conn.execute(
+            "SELECT * FROM proveedores WHERE sucursal_id = %s OR sucursal_id IS NULL ORDER BY nombre", (sid,)).fetchall()]
     ids_proveedoras = {r["sucursal_id"] for r in conn.execute(
         "SELECT DISTINCT sucursal_id FROM productos WHERE activo = 1 AND sucursal_id IS NOT NULL").fetchall()}
     data = {
         "almacenes": almacenes,
         "categorias": [dict(r) for r in conn.execute("SELECT * FROM categorias ORDER BY nombre").fetchall()],
-        "proveedores": [dict(r) for r in conn.execute(
-            "SELECT * FROM proveedores WHERE sucursal_id = %s OR sucursal_id IS NULL ORDER BY nombre", (sid,)).fetchall()],
+        "proveedores": proveedores,
         "sucursales": [
             dict(r, provee=(r["id"] in ids_proveedoras))
             for r in conn.execute("SELECT * FROM sucursales ORDER BY principal DESC, nombre").fetchall()

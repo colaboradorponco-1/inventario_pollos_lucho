@@ -687,10 +687,19 @@ async function openProductoModal(id, lista) {
     $('#campo-stock-inicial').style.display = 'flex';
     $('#campo-stock-actual').style.display = 'none';
     $('#prod-stock-hint').style.display = 'none';
-    const esGestionDlg = esAdmin();
+    const esGestionDlg = esCentral();
+    const esAdminDlg = esAdmin();
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
     $('#prod-sucursal').value = (window.SUCURSAL_ID || '');
+    // Al editar, la sucursal se mantiene fija salvo para admin (evita registrar
+    // almacenes ajenos); al crear, siempre es editable.
+    if (!id) {
+        $('#prod-sucursal').disabled = false;
+        $('#prod-almacen').disabled = false;
+    } else if (!esAdminDlg) {
+        $('#prod-sucursal').disabled = true;
+    }
     if (!id) {
         const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === +($('#prod-sucursal').value || 0));
         if (match) $('#prod-almacen').value = match.id;
@@ -745,7 +754,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         proveedor_id: +$('#prod-proveedor').value || null,
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
-    if (esAdmin()) {
+    if (esCentral()) {
         body.sucursal_id = +$('#prod-sucursal').value || null;
     }
     if (id) body.stock = +$('#prod-stock-actual').value || 0;

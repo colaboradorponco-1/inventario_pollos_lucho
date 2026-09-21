@@ -68,10 +68,11 @@ def productos():
             conn.close()
             return err("Ya existe un producto con ese código")
         proveedor_id = data.get("proveedor_id")
-        if es_gestion():
+        if es_gestion() or es_encargado_almacen(conn):
+            # Central: puede asignar el producto a cualquier sucursal
             sid = data.get("sucursal_id")
         else:
-            # El encargado crea productos de SU sucursal y con proveedor de su sucursal
+            # El encargado de filial crea productos de SU sucursal y con proveedor de su sucursal
             sid = sucursal_actual()
             if proveedor_id:
                 prov = conn.execute("SELECT sucursal_id FROM proveedores WHERE id = ?", (int(proveedor_id),)).fetchone()
