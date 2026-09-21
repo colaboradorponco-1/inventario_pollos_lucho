@@ -175,6 +175,58 @@ function loadView(name) {
     if (name === 'categorias') loadCategorias();
 }
 
+// ---------------- Refrescar ----------------
+let _refrescoActivo = false;
+const AUTOREFRESCO_EXCLUIDAS = ['reportes', 'auditoria', 'respaldo'];
+
+function nombreVistaActiva() {
+    const v = document.querySelector('.view.active');
+    return v ? v.id.replace('view-', '') : '';
+}
+
+function refrescarPanelActivo() {
+    if (_refrescoActivo) return;
+    const nombre = nombreVistaActiva();
+    if (!nombre) return;
+    if (nombre === 'respaldo') {
+        toast('La pantalla de respaldo no necesita refrescarse', 'info');
+        return;
+    }
+    if (nombre === 'ventas' && ventaItems.length) {
+        toast('Termina o cancela la venta en curso antes de refrescar', 'err');
+        return;
+    }
+    if (nombre === 'repartos' && repartoItems.length) {
+        toast('Termina o cancela el reparto en curso antes de refrescar', 'err');
+        return;
+    }
+    _refrescoActivo = true;
+    try {
+        loadView(nombre);
+        toast('Pantalla actualizada', 'ok');
+    } finally {
+        _refrescoActivo = false;
+    }
+}
+
+function autoRefrescar() {
+    if (document.visibilityState !== 'visible') return;
+    if (document.querySelector('.modal.open')) return;
+    const a = document.activeElement;
+    if (a && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName)) return;
+    const nombre = nombreVistaActiva();
+    if (!nombre || AUTOREFRESCO_EXCLUIDAS.includes(nombre)) return;
+    if (nombre === 'ventas' && ventaItems.length) return;
+    if (nombre === 'repartos' && repartoItems.length) return;
+    if (_refrescoActivo) return;
+    _refrescoActivo = true;
+    try {
+        loadView(nombre);
+    } finally {
+        _refrescoActivo = false;
+    }
+}
+
 // ---------------- Catálogos ----------------
 async function loadCatalogos() {
     catalogos = await request(API + '/catalogos');
@@ -2224,7 +2276,7 @@ function renderAuditoria(a, titulo) {
     html += `</div>`;
     html += `<p class="sinc-val"><strong>Valorización total: Bs ${fmtNum(a.total_valorizacion)}</strong> · Productos con stock: ${a.productos_con_stock} · Proveedores: ${a.proveedores}</p>`;
     if (a.valorizacion.length) {
-        html += `<div class="table-scroll"><table class="data-table"><thead><tr><th>Sucursal</th><th>Unidades</th><th>Valor (Bs)</th></tr></thead><tbody>` +
+        html += `<div class="table-scroll"><table class="data-table"><thead><tr><th>Sucursal</th><th>Prod. con stock</th><th>Valor (Bs)</th></tr></thead><tbody>` +
             a.valorizacion.map((v) => `<tr><td>${esc(v.sucursal)}</td><td>${v.unid}</td><td><strong>Bs ${fmtNum(v.valor)}</strong></td></tr>`).join('') + `</tbody></table></div>`;
     }
     if (a.descuadres.length) {
@@ -3022,6 +3074,9 @@ async function init() {
     loadDashboard();
     syncPedidosNuevos();
     setInterval(syncPedidosNuevos, 30000);
+    const btnRef = document.getElementById('btn-refrescar-top');
+    if (btnRef) btnRef.addEventListener('click', refrescarPanelActivo);
+    setInterval(autoRefrescar, 60000);
 }
 
 const FILTROS_VISTAS = [

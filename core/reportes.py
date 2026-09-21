@@ -355,7 +355,7 @@ def reporte_resumen():
     params_val = [] if es_gestion() or sid is None else [sid]
     val = conn.execute("""
         SELECT s.nombre AS sucursal, ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor,
-               SUM(l.cantidad) AS unid
+               COUNT(DISTINCT l.producto_id) AS unid
         FROM lotes l JOIN productos p ON p.id = l.producto_id JOIN sucursales s ON s.id = l.sucursal_id
         WHERE l.cantidad <> 0{lote_cond} GROUP BY s.id ORDER BY valor DESC
     """.format(lote_cond=lote_cond), params_val).fetchall()
@@ -448,7 +448,7 @@ def reporte_valorizacion():
         params = [sid]
     rows = conn.execute("""
         SELECT s.nombre AS sucursal,
-               SUM(l.cantidad) AS unid,
+               COUNT(DISTINCT l.producto_id) AS unid,
                ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor
         FROM lotes l
         JOIN productos p ON p.id = l.producto_id
@@ -517,7 +517,7 @@ def _auditar(conn):
     val = conn.execute("""
         SELECT s.nombre AS sucursal,
                ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor,
-               SUM(l.cantidad) AS unid
+               COUNT(DISTINCT l.producto_id) AS unid
         FROM lotes l
         JOIN productos p ON p.id = l.producto_id
         JOIN sucursales s ON s.id = l.sucursal_id
