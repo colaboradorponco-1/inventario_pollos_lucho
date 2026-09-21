@@ -691,7 +691,16 @@ async function openProductoModal(id, lista) {
     const esAdminDlg = esAdmin();
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
-    $('#prod-sucursal').value = (window.SUCURSAL_ID || '');
+    const selSuc = $('#prod-sucursal');
+    let sid0 = window.SUCURSAL_ID;
+    if (!sid0 && esGestionDlg) {
+        sid0 = ((catalogos.sucursales || []).find((s) => s.principal) || {}).id || '';
+    }
+    if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
+        selSuc.innerHTML = '<option value="">Seleccione una sucursal...</option>' +
+            catalogos.sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join('');
+    }
+    selSuc.value = sid0 || '';
     // Al editar, la sucursal se mantiene fija salvo para admin (evita registrar
     // almacenes ajenos); al crear, siempre es editable.
     if (!id) {
