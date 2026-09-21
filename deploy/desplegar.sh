@@ -8,10 +8,29 @@ APP_DIR="/opt/pollos-lucho"
 STAGE="/root/pollos-deploy"
 VENV="$APP_DIR/venv"
 REPO="https://github.com/colaboradorponco-1/inventario_pollos_lucho.git"
+SELF="/root/desplegar.sh"
+SELF_RAW="https://raw.githubusercontent.com/colaboradorponco-1/inventario_pollos_lucho/main/deploy/desplegar.sh"
+
+# Auto-actualizacion: si GitHub tiene este script mas nuevo, reemplazarse y reintentar.
+tmp_self="$(mktemp)"
+if curl -fsSL "$SELF_RAW" -o "$tmp_self" 2>/dev/null && [ -s "$tmp_self" ] && \
+   ! diff -q "$tmp_self" "$SELF" >/dev/null 2>&1; then
+  mv "$tmp_self" "$SELF"
+  chmod +x "$SELF"
+  echo "==> desplegar.sh actualizado, reintentando"
+  exec bash "$SELF"
+fi
+rm -f "$tmp_self"
 
 echo "==> Clonando ultima version ($(date '+%F %T'))"
 rm -rf "$STAGE"
 git clone --depth 1 --branch main "$REPO" "$STAGE"
+
+# Si falta gunicorn.conf.py (archivo generado, no esta en el repo), restaurarlo.
+if [ ! -f "$APP_DIR/gunicorn.conf.py" ] && [ -f "$STAGE/deploy/gunicorn.conf.py" ]; then
+  echo "==> Restaurando gunicorn.conf.py (archivo generado)"
+  cp "$STAGE/deploy/gunicorn.conf.py" "$APP_DIR/gunicorn.conf.py"
+fi
 
 echo "==> Actualizando archivos (preservando secretos y datos)"
 rsync -a --delete \
