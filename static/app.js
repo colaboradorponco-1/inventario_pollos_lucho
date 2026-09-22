@@ -2976,7 +2976,7 @@ async function loadPedidos() {
     }
 }
 
-let pestanaPedidos = 'mis-pedidos';
+let pestanaPedidos = puedeVerBandeja() ? 'realizados' : 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
 
@@ -3002,7 +3002,7 @@ function inicializarPestanasPedidos() {
     if (!puedeBandeja && pestanaPedidos === 'realizados') pestanaPedidos = 'mis-pedidos';
     if (tabMis) tabMis.style.display = '';
     if (tabReal) tabReal.style.display = puedeBandeja ? '' : 'none';
-    $$('#tabs-historial-pedidos .tab-log').forEach((b) =>
+    $$('#tabs-historial-pedidos .segment-tab').forEach((b) =>
         b.classList.toggle('active', b.dataset.tab === pestanaPedidos));
     if (panelMis) panelMis.style.display = pestanaPedidos === 'mis-pedidos' ? '' : 'none';
     if (panelReal) panelReal.style.display = (puedeBandeja && pestanaPedidos === 'realizados') ? '' : 'none';
