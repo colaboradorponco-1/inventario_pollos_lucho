@@ -389,17 +389,6 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 }
 .scan-input input::placeholder { color: #8a8a8a; }
 .scan-input:focus-within { border-color: var(--red); border-style: solid; }
-
-.btn-cam {
-    display: inline-flex; align-items: center; justify-content: center;
-    flex: 0 0 auto; width: 42px; height: 42px; border-radius: 10px;
-    border: 2px solid var(--primary); background: #fff; color: var(--primary);
-    cursor: pointer; padding: 0;
-}
-.btn-cam svg { width: 18px; height: 18px; }
-.btn-cam:hover { background: var(--primary); color: #fff; }
-.btn-cam:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-#cam-video { width: 100%; max-height: 55vh; object-fit: cover; border-radius: 10px; background: #000; margin: 12px 0; }
 .scan-hint { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
 
 /* Toast */

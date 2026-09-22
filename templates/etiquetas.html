@@ -37,7 +37,8 @@
             page-break-inside: avoid;
         }
         .et-nombre { font-size: 13px; font-weight: 700; line-height: 1.15; height: 30px; display: flex; align-items: center; }
-        .et-barcode svg { display: block; margin: 0 auto; }
+        .et-barcode svg { display: block; margin: 0 auto; height: 26px; width: auto; }
+        .et-qr svg { display: block; margin: 0 auto; height: 52px; width: auto; }
         .et-codigo { font-size: 10px; letter-spacing: 2px; color: #555; margin-top: 2px; }
         .et-precio { font-size: 12px; font-weight: 700; color: #0C0908; }
         .grid-etiquetas { display: grid; grid-template-columns: repeat(auto-fill, 5.7cm); gap: 10px; justify-content: start; margin-top: 12px; }
@@ -78,6 +79,7 @@
         </div>
     </div>
 
+    <script src="/static/qrcode-generator.js"></script>
     <script>
         let productos = [];
 
@@ -121,6 +123,15 @@
             for (const d of String(PAT[106])) { emit(+d, bar); bar = !bar; }
             emit(2, bar);
             return `<svg viewBox="0 0 ${x.toFixed(2)} 42" style="height:42px;width:auto">${out}</svg>`;
+        }
+
+        function qrSVG(texto) {
+            try {
+                const qr = qrcode(0, 'M');
+                qr.addData(texto || '');
+                qr.make();
+                return qr.createSvgTag(3, 1);
+            } catch (e) { return ''; }
         }
 
         const fmtNum = (n) => Number(n ?? 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -170,6 +181,7 @@
                         <div class="etiqueta">
                             <div class="et-nombre">${p.nombre}</div>
                             <div class="et-barcode">${barcodeSVG(p.codigo)}</div>
+                            <div class="et-qr">${qrSVG(p.codigo)}</div>
                             <div class="et-codigo">${p.codigo || ''}</div>
                             <div class="et-precio">Bs ${fmtNum(p.precio_venta)}</div>
                         </div>`;
