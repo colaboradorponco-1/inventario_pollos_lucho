@@ -893,6 +893,7 @@ async function openProductoModal(id, lista) {
         $('#prod-stock-actual').value = p.stock;
     }
     openModal('modal-producto');
+    if (!id) { const c = $('#prod-codigo'); if (c) { c.focus(); _scanDestino = c; } }
 }
 
 $('#form-producto').addEventListener('submit', async (e) => {
@@ -1769,9 +1770,9 @@ document.addEventListener('focusin', (ev) => {
     const t = ev.target;
     if (!t || !t.closest) return;
     if (!['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName)) return;
-    const cont = t.closest('#form-movimiento, #view-ventas, #view-repartos, .panel-accent, #view-productos');
+    const cont = t.closest('#form-movimiento, #view-ventas, #view-repartos, .panel-accent, #view-productos, #modal-producto');
     if (!cont) return;
-    const scan = cont.querySelector ? cont.querySelector('.scan-input input, #mov-escaneo') : null;
+    const scan = cont.querySelector ? cont.querySelector('.scan-input input, #mov-escaneo, #prod-codigo') : null;
     if (scan) _scanDestino = scan;
 });
 function _procesarEscaneoGlobal() {
@@ -1780,6 +1781,15 @@ function _procesarEscaneoGlobal() {
     if (codigo.length < 3) return;
     const ult = $('#qr-ultima');
     if (ult) ult.textContent = codigo;
+    const modal = modalStack[modalStack.length - 1];
+    const mEl = modal && modal.el ? modal.el : null;
+    const enModal = mEl ? mEl.querySelector('.scan-input input, #prod-codigo') : null;
+    if (enModal) {
+        enModal.value = codigo;
+        enModal.focus();
+        if (mEl.id === 'modal-producto') { const n = $('#prod-nombre'); if (n) n.focus(); }
+        return;
+    }
     const activa = document.querySelector('.view.active');
     let inp = _scanDestino || (activa ? activa.querySelector('.scan-input input') : null) || $('#qr-escaneo');
     if (!inp) { toast('Código leído: ' + codigo, 'info'); return; }
@@ -1798,7 +1808,7 @@ document.addEventListener('keydown', (e) => {
     const ahora = performance.now();
     const dt = ahora - _scanGLast;
     _scanGLast = ahora;
-    if (dt > 70) _scanG = '';
+    if (dt > 120) _scanG = '';
     if (_scanG.length >= 20) _scanG = _scanG.slice(1) + e.key;
     else _scanG += e.key;
     if (_scanG.length >= 3) {
