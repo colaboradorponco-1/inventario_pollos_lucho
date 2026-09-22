@@ -2639,6 +2639,8 @@ $('#pedido-fecha').value = nowLocal();
 let pedidoProdsAll = [];
 let pedidoSel = {};            // producto_id -> cantidad
 let pedidoSucursal = null;     // sucursal que hace el pedido
+let pedidoProvFiltro = '';     // filtrar el paso 2 por proveedor ('' = todos)
+let bandejaSucF = '';          // filtrar la bandeja por sucursal ('' = todas)
 const esEncargadoPed = () => window.ROL === 'encargado';
 const ESTADO_LAB = { pendiente: 'Pidiendo', despachado: 'En camino', cumplido: 'Entregado' };
 
@@ -2654,6 +2656,16 @@ function sucPrincipalPed() {
 function proveedorCantShow(p) {
     if (p.sucursal_id) return p.sucursal_nombre || String(p.sucursal_id);
     return (sucPrincipalPed() || {}).nombre || 'Almacén Principal';
+}
+
+// Solo las sucursales que PROVEEN pueden aparecer como proveedoras en el
+// pedido: los almacenes principales proveen a todos; América y Simón López
+// proveen a las demás. Siglo XX no provee y queda fuera.
+function proveeActivo(provId) {
+    const s = (catalogos.sucursales || []).find((x) => x.id === provId);
+    if (!s) return false;
+    if (s.principal) return true;
+    return !!s.provee;
 }
 
 function irPaso(n) {
@@ -2674,6 +2686,7 @@ function renderTarjetasPedido() {
         const provId = p.sucursal_id || (ppal ? ppal.id : null);
         if (!provId) return;
         if (sid && provId === sid) return;
+        if (!proveeActivo(provId)) return;
         const buscar = (p.nombre + ' ' + (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
         if (q && !buscar.includes(q)) return;
         const key = String(provId);
@@ -2698,20 +2711,36 @@ function renderTarjetasPedido() {
         if (A.principal !== B.principal) return A.principal ? -1 : 1;
         return A.nombre.localeCompare(B.nombre);
     });
-    cont.innerHTML = keys.map((k) => `
+    const bts = $('#pedido-prov-btns');
+    if (bts) {
+        bts.innerHTML = [''].concat(keys).map((k) => {
+            const id = k ? String(provs[k].id) : '';
+            const nombre = k ? (provs[k].principal ? '★ ' : '') + provs[k].nombre : 'Todos';
+            return `<button type="button" class="btn btn-sm ${pedidoProvFiltro === id ? 'btn-primary' : ''}" data-prov="${id}">${esc(nombre)}</button>`;
+        }).join('');
+    }
+    const keysV = pedidoProvFiltro ? keys.filter((k) => String(provs[k].id) === pedidoProvFiltro) : keys;
+    if (!keysV.length) {
+        cont.innerHTML = '<p class="empty">No hay productos de ese proveedor.</p>';
+        return;
+    }
+    cont.innerHTML = keysV.map((k) => `
         <div class="cat-bloque">
             <h4 class="prov-titulo">${provs[k].principal ? '★ ' : ''}Lo provee ${esc(provs[k].nombre)}</h4>
             ${provs[k].prod.map((p) => {
                 const qty = pedidoSel[p.id] || 0;
+                const max = maxPedido(p);
+                const excede = qty > max;
                 return `
-                <div class="prod-card ${qty > 0 ? 'seleccionado' : ''}" data-id="${p.id}">
+                <div class="prod-card ${qty > 0 ? 'seleccionado' : ''} ${excede ? 'sin-stock' : ''}" data-id="${p.id}">
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
                         <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${(p.stock_prov || 0) > 0 ? 'disp-ok' : 'disp-no'}">disponible: ${fmtNum(p.stock_prov || 0)} ${esc(p.unidad || 'unidad')}</span></div>
+                        <div class="aviso-stock" style="display:${excede ? '' : 'none'}">Máximo disponible: ${fmtNum(max)} ${esc(p.unidad || 'unidad')} (no se puede pedir más)</div>
                     </div>
                     <div class="stepper">
                         <button type="button" class="ste ste-menos" data-id="${p.id}">−</button>
-                        <input type="number" class="prod-q" id="pq-${p.id}" value="${qty}" min="0" step="any" data-id="${p.id}">
+                        <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0" step="any" data-id="${p.id}">
                         <button type="button" class="ste ste-mas" data-id="${p.id}">+</button>
                     </div>
                 </div>`;
@@ -2734,10 +2763,12 @@ function renderRevisionPedido() {
     let total = 0;
     const rows = items.map((it) => {
         total += it.cantidad;
+        const max = maxPedido(it.p);
+        const excedeR = it.cantidad > max;
         return `<tr>
             <td>${esc(it.p.nombre)}</td>
             <td class="td-unidad">${esc(it.p.unidad || 'unidad')}</td>
-            <td class="td-cant"><strong>${it.cantidad}</strong></td>
+            <td class="td-cant"><strong class="${excedeR ? 'stock-rojo' : ''}">${it.cantidad}</strong>${excedeR ? ` <span class="stock-rojo">(excede: solo ${fmtNum(max)})</span>` : ''}</td>
             <td class="td-prov">lo tiene ${esc(proveedorCantShow(it.p))}</td>
         </tr>`;
     }).join('');
@@ -2749,12 +2780,36 @@ function renderRevisionPedido() {
         <div class="total-row">${items.length} producto(s) · ${total} en total</div>`;
 }
 
+// Máximo que una sucursal puede pedir de un producto = lo "disponible" del
+// proveedor (stock del proveedor menos lo apartado en pedidos pendientes).
+function maxPedido(p) {
+    return Math.max(0, (p && p.stock_prov != null) ? p.stock_prov : 0);
+}
+
+function marcarExceso(id, max) {
+    const input = document.getElementById('pq-' + id);
+    const card = input ? input.closest('.prod-card') : null;
+    const qty = pedidoSel[id] || 0;
+    const excede = qty > max;
+    if (input) input.classList.toggle('prod-q-alto', excede);
+    if (card) card.classList.toggle('sin-stock', excede);
+    const nota = card ? card.querySelector('.aviso-stock') : null;
+    if (nota) {
+        nota.textContent = excede ? `Máximo disponible: ${fmtNum(max)} (no se puede pedir más)` : '';
+        nota.style.display = excede ? '' : 'none';
+    }
+}
+
 function marcarCantidad(id, cantidad) {
-    pedidoSel[id] = cantidad > 0 ? cantidad : 0;
+    const p = (pedidoProdsAll || []).find((x) => x.id === id);
+    const max = p ? maxPedido(p) : Infinity;
+    const v = Math.max(0, Math.min(cantidad, max));
+    pedidoSel[id] = v > 0 ? v : 0;
     const input = document.getElementById('pq-' + id);
     if (input) input.value = pedidoSel[id];
     const card = input ? input.closest('.prod-card') : null;
     if (card) card.classList.toggle('seleccionado', pedidoSel[id] > 0);
+    marcarExceso(id, max);
 }
 
 const _listadoPed = $('#pedido-listado');
@@ -2765,11 +2820,31 @@ if (_listadoPed) {
         const id = +btn.dataset.id;
         const actual = pedidoSel[id] || 0;
         const delta = btn.classList.contains('ste-menos') ? -1 : 1;
+        const p = (pedidoProdsAll || []).find((x) => x.id === id);
+        const max = p ? maxPedido(p) : Infinity;
+        if (delta > 0 && actual + delta > max) {
+            if (actual < max) marcarCantidad(id, max);
+            toast(`Solo hay ${fmtNum(max)} disponible de ese producto`, 'err');
+            return;
+        }
         marcarCantidad(id, actual + delta);
     });
     _listadoPed.addEventListener('input', (e) => {
         if (!e.target.classList.contains('prod-q')) return;
         marcarCantidad(+e.target.dataset.id, parseFloat(e.target.value) || 0);
+    });
+    _listadoPed.addEventListener('change', (e) => {
+        if (!e.target.classList.contains('prod-q')) return;
+        const id = +e.target.dataset.id;
+        const p = (pedidoProdsAll || []).find((x) => x.id === id);
+        const max = p ? maxPedido(p) : Infinity;
+        const v = pedidoSel[id] || 0;
+        if (v > max) {
+            marcarCantidad(id, max);
+            toast(`Solo hay ${fmtNum(max)} disponible de ese producto`, 'err');
+        } else {
+            marcarExceso(id, max);
+        }
     });
 }
 
@@ -2785,6 +2860,13 @@ on('#pedido-sucursal', 'change', () => {
     renderTarjetasPedido();
 });
 on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
+
+on('#pedido-prov-btns', 'click', (e) => {
+    const b = e.target.closest('[data-prov]');
+    if (!b) return;
+    pedidoProvFiltro = b.dataset.prov;
+    renderTarjetasPedido();
+});
 
 async function loadPedidos() {
     try {
@@ -2883,15 +2965,19 @@ $('#form-pedido').addEventListener('submit', async (e) => {
     const sucursal_id = pedidoSucursal || +$('#pedido-sucursal').value;
     if (!sucursal_id) return toast('Primero elige la sucursal que pide', 'err');
     const detalle = [];
+    const mal = [];
     Object.keys(pedidoSel).forEach((id) => {
         const v = pedidoSel[id];
         if (v > 0) {
             const p = (pedidoProdsAll || []).find((x) => x.id === +id);
+            const max = maxPedido(p);
+            if (v > max) mal.push(p ? p.nombre : ('#' + id));
             const ppal = sucPrincipalPed();
             const destino = p ? (p.sucursal_id ? +p.sucursal_id : (ppal ? +ppal.id : undefined)) : undefined;
             detalle.push({ producto_id: +id, cantidad: v, destino_id: destino });
         }
     });
+    if (mal.length) return toast('No se puede enviar, superan el disponible: ' + mal.slice(0, 3).join(', ') + (mal.length > 3 ? '…' : ''), 'err');
     if (!detalle.length) return toast('Aún no marcaste ningún producto', 'err');
     try {
         const res = await conSubmit(() => request(API + '/pedidos', {
@@ -2935,8 +3021,17 @@ async function cargarBandeja() {
         // bandeja aparecería vacía aunque sí haya pedidos. Así que el encargado
         // receptor SIEMPRE ve su bandeja completa.
         const esReceptor = window.ROL === 'encargado' && !esGestionPed() && !esAlmacenPpal();
-        const sucF = esReceptor ? '' : (($('#pedido-sucursal-filtro') || {}).value || '');
+        const selF = (($('#pedido-sucursal-filtro') || {}).value || '');
+        const sucF = esReceptor ? '' : (bandejaSucF || selF);
         const grupos = sucF ? gruposRaw.filter((g) => String(g.sucursal_id) === sucF) : gruposRaw;
+        const btsB = $('#bandeja-suc-btns');
+        if (btsB) {
+            btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
+                .concat(gruposRaw.map((g) => ({ id: String(g.sucursal_id), nombre: g.nombre })))
+                .map((b) => `
+                    <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
+                .join('');
+        }
         const total = grupos.reduce((a, g) => a + g.pedidos.length, 0);
         const resumen = $('#historial-resumen');
         if (resumen) resumen.textContent = total ? `${total} pedido(s)` : '';
@@ -3088,7 +3183,15 @@ async function pintarBadgePedidos() {
 }
 
 $('#btn-filtrar-pedidos').addEventListener('click', cargarBandeja);
-on('#pedido-sucursal-filtro', 'change', cargarBandeja);
+on('#pedido-sucursal-filtro', 'change', () => { bandejaSucF = ''; cargarBandeja(); });
+on('#bandeja-suc-btns', 'click', (e) => {
+    const b = e.target.closest('[data-bsuc]');
+    if (!b) return;
+    bandejaSucF = b.dataset.bSuc;
+    const sel = $('#pedido-sucursal-filtro');
+    if (sel) sel.value = bandejaSucF;
+    cargarBandeja();
+});
 $('#btn-filtrar-realizados').addEventListener('click', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
 on('#pedido-filtro', 'input', debounce(() => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); }, 300));
 on('#pedido-estado', 'change', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });

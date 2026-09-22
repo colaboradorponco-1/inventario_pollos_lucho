@@ -989,6 +989,10 @@ body.rol-encargado .panel-finance {
     text-align: center;
 }
 .prod-q:focus { border-color: var(--primary, #CF141D); outline: none; }
+.prod-q.prod-q-alto { border-color: #dc2626 !important; background: #fef2f2; }
+.prod-card.sin-stock { border-color: #dc2626; }
+.aviso-stock { color: #dc2626; font-size: 12px; margin-top: 4px; }
+.stock-rojo { color: #dc2626; font-weight: 700; }
 .total-row {
     margin-top: 10px;
     font-size: 13px;
