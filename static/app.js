@@ -3346,4 +3346,17 @@ document.addEventListener('change', (e) => {
 });
 window.addEventListener('pagehide', guardarFiltros);
 
+// Reseteo diario: si la app queda abierta pasando la medianoche, reinicia los
+// filtros al día nuevo y recarga la pantalla activa (reportes/ventas/etc).
+let _fechaReseteo = hoyISO();
+setInterval(() => {
+    const h = hoyISO();
+    if (h === _fechaReseteo) return;
+    _fechaReseteo = h;
+    if (document.querySelector('.modal.open')) return;
+    restaurarFiltros();
+    const nom = nombreVistaActiva();
+    if (nom && nom !== 'respaldo' && nom !== 'ventas' && nom !== 'repartos') loadView(nom);
+}, 30000);
+
 init();
