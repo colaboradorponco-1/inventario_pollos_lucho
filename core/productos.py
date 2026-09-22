@@ -150,6 +150,17 @@ def productos():
     else:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
+    # Disponibilidad en el proveedor (para armar pedidos):
+    # "para_pedido=1" agrega stock_prov = stock que tiene la sucursal que provee
+    # el producto (los globales pertenecen al almacén principal).
+    stock_prov_col = ""
+    if request.args.get("para_pedido", "").strip() in ("1", "true", "yes"):
+        ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
+        ppal_id = ppal["id"] if ppal else None
+        if ppal_id is not None:
+            stock_prov_col = (", (SELECT COALESCE(SUM(l3.cantidad), 0) FROM lotes l3"
+                              " WHERE l3.producto_id = p.id AND l3.cantidad > 0"
+                              " AND l3.sucursal_id = COALESCE(p.sucursal_id, " + str(ppal_id) + ")) AS stock_prov")
     q = """
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
@@ -170,17 +181,6 @@ def productos():
     params = []
     if stock_sid is not None:
         params.append(stock_sid)
-    # Disponibilidad en el proveedor (para armar pedidos):
-    # "para_pedido=1" agrega stock_prov = stock que tiene la sucursal que provee
-    # el producto (los globales pertenecen al almacén principal).
-    stock_prov_col = ""
-    if request.args.get("para_pedido", "").strip() in ("1", "true", "yes"):
-        ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
-        ppal_id = ppal["id"] if ppal else None
-        if ppal_id is not None:
-            stock_prov_col = (", (SELECT COALESCE(SUM(l3.cantidad), 0) FROM lotes l3"
-                              " WHERE l3.producto_id = p.id AND l3.cantidad > 0"
-                              " AND l3.sucursal_id = COALESCE(p.sucursal_id, " + str(ppal_id) + ")) AS stock_prov")
     if estado == "inactivos":
         params.append(0)
     else:
