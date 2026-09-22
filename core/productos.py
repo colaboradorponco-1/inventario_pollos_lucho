@@ -214,9 +214,12 @@ def productos():
     offset, limit, pagina, por_pagina = paginar_params()
     q += " LIMIT ? OFFSET ?"
     params += [limit, offset]
-    rows = conn.execute(q, params).fetchall()
+    rows = [dict(r) for r in conn.execute(q, params).fetchall()]
+    prov = _stock_disponible(conn)
+    for r in rows:
+        r["stock_prov"] = prov.get(r["id"], 0)
     conn.close()
-    return ok_paginado([dict(r) for r in rows], total, pagina, por_pagina)
+    return ok_paginado(rows, total, pagina, por_pagina)
 
 
 @productos_bp.route("/api/productos/codigo")
@@ -259,27 +262,40 @@ def producto_por_codigo():
     return ok(dict(row))
 
 
+def _stock_disponible(conn):
+    """Dict {producto_id: disponible}. "Disponible" = stock que tiene el proveedor
+    de cada producto menos lo ya apartado en pedidos pendientes (nadie pierde
+    stock por pedir lo mismo). Los productos globales se asocian al almacén
+    principal."""
+    ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
+    if not ppal:
+        return {}
+    try:
+        rows = conn.execute("""
+            SELECT l.producto_id AS id,
+                   (COALESCE(SUM(CASE WHEN l.sucursal_id = COALESCE(p.sucursal_id, %s)
+                                      THEN l.cantidad ELSE 0 END), 0)
+                    - COALESCE((SELECT SUM(d.cantidad) FROM pedido_detalle d
+                                JOIN pedidos pd ON pd.id = d.pedido_id
+                                WHERE d.producto_id = l.producto_id
+                                  AND pd.estado = 'pendiente'), 0)) AS disp
+            FROM lotes l JOIN productos p ON p.id = l.producto_id
+            WHERE l.cantidad > 0 AND p.activo = 1
+            GROUP BY l.producto_id""", (ppal["id"],)).fetchall()
+        return {int(r["id"]): float(max(0, r["disp"] or 0)) for r in rows}
+    except Exception:
+        return {}
+
+
 @productos_bp.route("/api/productos/disponible", methods=["GET"])
 @login_requerido
 def productos_disponible():
-    """Stock que tiene el proveedor de cada producto (para armar pedidos).
-    Devuelve {producto_id: disponible}; los productos globales se asocian al
-    almacén principal."""
+    """Disponible de cada producto para armar pedidos (stock del proveedor menos
+    lo apartado en pedidos pendientes)."""
     conn = get_conn()
-    ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
-    ppal_id = ppal["id"] if ppal else None
-    if ppal_id is None:
-        conn.close()
-        return ok({})
-    rows = conn.execute("""
-        SELECT l.producto_id AS id,
-               COALESCE(SUM(CASE WHEN l.sucursal_id = COALESCE(p.sucursal_id, %s)
-                                 THEN l.cantidad ELSE 0 END), 0) AS stock_prov
-        FROM lotes l JOIN productos p ON p.id = l.producto_id
-        WHERE l.cantidad > 0 AND p.activo = 1
-        GROUP BY l.producto_id""", (ppal_id,)).fetchall()
+    disp = _stock_disponible(conn)
     conn.close()
-    return ok({int(r["id"]): float(r["stock_prov"] or 0) for r in rows})
+    return ok(disp)
 
 
 @productos_bp.route("/api/productos/<int:prod_id>", methods=["PUT", "DELETE"])

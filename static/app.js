@@ -642,11 +642,16 @@ async function loadProductos() {
                 .filter((b) => b.items.length);
 
             const filas = (it) => it.map(p => {
-                let stockColor, stockIcon;
-                if (p.stock === 0) { stockColor = '#dc2626'; stockIcon = '🔴'; }
-                else if (p.stock <= (p.stock_minimo || 10)) { stockColor = '#d97706'; stockIcon = '🟡'; }
-                else { stockColor = '#16a34a'; stockIcon = '🟢'; }
+                const esFilial = window.ROL === 'encargado' && !esGestion && !esAlmacenPpal();
                 const esPropio = window.ROL === 'encargado' && p.sucursal_id === window.SUCURSAL_ID;
+                // En una filial, los productos que no son de su sucursal muestran el
+                // "disponible" del proveedor (lo real, no 0) con el nombre de quién lo tiene.
+                const provVista = esFilial && !esPropio;
+                const stockN = provVista ? (p.stock_prov ?? 0) : (p.stock ?? 0);
+                let stockColor, stockIcon;
+                if (stockN === 0) { stockColor = '#dc2626'; stockIcon = '🔴'; }
+                else if (stockN <= (p.stock_minimo || 10)) { stockColor = '#d97706'; stockIcon = '🟡'; }
+                else { stockColor = '#16a34a'; stockIcon = '🟢'; }
                 const puedeEditar = esGestion || esPropio;
                 const acciones = estado === 'inactivos'
                     ? (esAdmin() ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar" aria-label="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
@@ -656,9 +661,9 @@ async function loadProductos() {
                         <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
                             : ''}`;
                 return `<tr>
-                    <td><strong>${nomProd(p)}</strong><br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
+                    <td><strong>${nomProd(p)}</strong>${provVista ? `<small style="color:var(--muted)"> · devuelto por ${esc(p.sucursal_nombre || 'almacén')}</small>` : ''}<br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
                     <td>${esc(p.almacen_nombre || '—')}</td>
-                    <td style="color:${stockColor};font-weight:700">${stockIcon} ${p.stock} ${p.unidad}</td>
+                    <td style="color:${stockColor};font-weight:700">${stockIcon} ${fmtNum(stockN)} ${p.unidad}${provVista ? ' <small style="color:var(--muted)">disp.</small>' : ''}</td>
                     <td>${p.stock_minimo} ${p.unidad}</td>
                     <td>${p.unidad}</td>
                     <td>Bs ${fmtNum(p.costo_promedio)}</td>
@@ -2816,7 +2821,7 @@ async function loadPedidos() {
             pedidoSucursal = +selSuc.value || null;
             irPaso(1);
         }
-        $('#pedidos-info').textContent = 'Cada sucursal llena su pedido en 3 pasos.';
+        $('#pedidos-info').textContent = 'Cada sucursal llena su pedido en 3 pasos. El "disponible" descuenta lo que ya quedó apartado en pedidos pendientes.';
         renderTarjetasPedido();
         inicializarPestanasPedidos();
         cargarPestanaActiva();
