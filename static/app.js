@@ -875,7 +875,13 @@ async function openProductoModal(id, lista) {
         $('#prod-marca').value = p.marca || '';
         $('#prod-categoria-form').value = p.categoria_id || '';
         $('#prod-almacen').value = p.almacen_id || '';
-        $('#prod-unidad').value = p.unidad || 'unidad';
+        const uSel = $('#prod-unidad');
+        if (p.unidad && !Array.from(uSel.options).some((o) => o.value === p.unidad)) {
+            const o = document.createElement('option');
+            o.value = p.unidad; o.textContent = p.unidad;
+            uSel.appendChild(o);
+        }
+        uSel.value = p.unidad || 'unidad';
         $('#prod-minimo').value = p.stock_minimo;
         $('#prod-costo').value = p.costo_promedio;
         $('#prod-precio-venta').value = p.precio_venta;

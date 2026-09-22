@@ -856,10 +856,12 @@
                 </div>
                 <div class="grid-2">
                     <label>Unidad <select id="prod-unidad">
-                        <option>unidad</option><option>kg</option><option>g</option>
-                        <option>litro</option><option>bolsa</option><option>caja</option>
-                        <option>paquete</option><option>docena</option>
-                    </select></label>
+                        <option value="unidad">unidad</option><option value="kg">kg</option>
+                        <option value="litro">litro</option><option value="bolsa">bolsa (saco)</option>
+                        <option value="caja">caja</option><option value="paquete">paquete</option>
+                        <option value="docena">docena</option>
+                    </select>
+                    <small class="unit-hint">Todo lo que registres (compras, ventas, stock) cuenta en esta unidad.</small></label>
                     <label>Stock mínimo <input type="number" id="prod-minimo" step="any" min="0"></label>
                 </div>
                 <div class="grid-2">
