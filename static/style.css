@@ -310,8 +310,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; margin-left: 240px; }
     line-height: 1.4;
 }
 
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; min-width: 0; }
+.grid-2 > * { min-width: 0; }
+@media (max-width: 1024px) { .grid-2 { grid-template-columns: 1fr; } }
 
 /* Áreas claras y separadas para Filtros y Acciones (UX Minimalista) */
 .filter-container {
