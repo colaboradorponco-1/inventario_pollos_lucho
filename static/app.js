@@ -2784,8 +2784,10 @@ on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
 async function loadPedidos() {
     try {
         await loadCatalogos();
-        const respP = await request(API + '/productos?por_pagina=1000&para_pedido=1');
-        pedidoProdsAll = respP.data || respP;
+        const respP = await request(API + '/productos?por_pagina=1000');
+        const respD = await request(API + '/productos/disponible');
+        const disp = (respD.data && typeof respD.data === 'object') ? respD.data : {};
+        pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: disp[p.id] || 0 }));
         const sucursales = await request(API + '/sucursales');
         const opciones = '<option value="">Todas las sucursales</option>' +
             sucursales.map((s) =>

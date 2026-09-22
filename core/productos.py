@@ -150,17 +150,6 @@ def productos():
     else:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
-    # Disponibilidad en el proveedor (para armar pedidos):
-    # "para_pedido=1" agrega stock_prov = stock que tiene la sucursal que provee
-    # el producto (los globales pertenecen al almacén principal).
-    stock_prov_col = ""
-    if request.args.get("para_pedido", "").strip() in ("1", "true", "yes"):
-        ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
-        ppal_id = ppal["id"] if ppal else None
-        if ppal_id is not None:
-            stock_prov_col = (", (SELECT COALESCE(SUM(l3.cantidad), 0) FROM lotes l3"
-                              " WHERE l3.producto_id = p.id AND l3.cantidad > 0"
-                              " AND l3.sucursal_id = COALESCE(p.sucursal_id, " + str(ppal_id) + ")) AS stock_prov")
     q = """
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
@@ -169,7 +158,7 @@ def productos():
                COALESCE(s.cantidad, 0) AS stock,
                (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
                 WHERE l2.producto_id = p.id AND l2.cantidad > 0
-                  AND l2.fecha_vencimiento IS NOT NULL{lote_cond}) AS vencimiento{stock_prov_col}
+                  AND l2.fecha_vencimiento IS NOT NULL{lote_cond}) AS vencimiento
         FROM productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN almacenes a ON a.id = p.almacen_id
@@ -177,7 +166,7 @@ def productos():
         LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
         {join_stock}
         WHERE p.activo = ?
-    """.format(join_stock=join_stock, lote_cond=lote_cond, stock_prov_col=stock_prov_col)
+    """.format(join_stock=join_stock, lote_cond=lote_cond)
     params = []
     if stock_sid is not None:
         params.append(stock_sid)
@@ -268,6 +257,29 @@ def producto_por_codigo():
     if not row:
         return err("Producto no encontrado con ese código", 404)
     return ok(dict(row))
+
+
+@productos_bp.route("/api/productos/disponible", methods=["GET"])
+@login_requerido
+def productos_disponible():
+    """Stock que tiene el proveedor de cada producto (para armar pedidos).
+    Devuelve {producto_id: disponible}; los productos globales se asocian al
+    almacén principal."""
+    conn = get_conn()
+    ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
+    ppal_id = ppal["id"] if ppal else None
+    if ppal_id is None:
+        conn.close()
+        return ok({})
+    rows = conn.execute("""
+        SELECT l.producto_id AS id,
+               COALESCE(SUM(CASE WHEN l.sucursal_id = COALESCE(p.sucursal_id, %s)
+                                 THEN l.cantidad ELSE 0 END), 0) AS stock_prov
+        FROM lotes l JOIN productos p ON p.id = l.producto_id
+        WHERE l.cantidad > 0 AND p.activo = 1
+        GROUP BY l.producto_id""", (ppal_id,)).fetchall()
+    conn.close()
+    return ok({int(r["id"]): float(r["stock_prov"] or 0) for r in rows})
 
 
 @productos_bp.route("/api/productos/<int:prod_id>", methods=["PUT", "DELETE"])
