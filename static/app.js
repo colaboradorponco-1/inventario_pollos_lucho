@@ -2834,16 +2834,10 @@ let pestanaPedidos = 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
 
-// «Mis pedidos» (bandeja) es visible para admins y encargados cuya sucursal recibe
-// pedidos: almacén principal (30/36) o una sucursal que provee productos
-// (p. ej. América 35 / Simón López 33). Siglo XX no provee: no ve esta pestaña.
+// «Mis pedidos» (los que yo realicé) y «Pedidos que me realizaron» (bandeja)
+// son visibles para todas las sucursales.
 function puedeVerMisPedidos() {
-    if (!window.ROL) return false;
-    if (esGestionPed()) return true;
-    if (window.ROL !== 'encargado') return false;
-    if (window.SUCURSAL_PRINCIPAL) return true;
-    const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
-    return !!(m && m.provee);
+    return !!window.ROL;
 }
 
 function inicializarPestanasPedidos() {

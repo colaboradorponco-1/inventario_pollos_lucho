@@ -687,7 +687,7 @@
             </div>
             <div class="toolbar small" id="tabs-historial-pedidos" style="margin-bottom:8px">
                 <button class="tab-log active" data-tab="mis-pedidos" id="tab-hist-mis-pedidos" type="button">Mis pedidos</button>
-                <button class="tab-log" data-tab="realizados" id="tab-hist-realizados" type="button">Realizados</button>
+                <button class="tab-log" data-tab="realizados" id="tab-hist-realizados" type="button">Pedidos que me realizaron</button>
             </div>
             <div id="panel-hist-mis-pedidos">
                 <div class="panel">
@@ -725,21 +725,7 @@
                     </form>
                 </div>
                 <div class="panel">
-                    <h2>Bandeja de «Mis pedidos»</h2>
-                    <div class="toolbar small">
-                        <input type="date" id="pedido-bandeja-desde">
-                        <input type="date" id="pedido-bandeja-hasta">
-                        <select id="pedido-sucursal-filtro" style="max-width:220px"></select>
-                        <button class="btn" id="btn-filtrar-pedidos">Filtrar</button>
-                        <span class="flex-grow"></span>
-                        <span class="respaldo-txt" id="historial-resumen"></span>
-                    </div>
-                    <div id="bandeja-contenido"></div>
-                </div>
-            </div>
-            <div id="panel-hist-realizados">
-                <div class="panel">
-                    <h2>Historial de pedidos (realizados)</h2>
+                    <h2>Mis pedidos (los que realicé)</h2>
                     <div class="toolbar small">
                         <input type="date" id="pedido-realizados-desde" title="Desde">
                         <input type="date" id="pedido-realizados-hasta" title="Hasta">
@@ -753,6 +739,20 @@
                         <tbody id="pedidos-tbody"></tbody>
                     </table></div>
                     <div class="pagination" id="pedidos-paginacion"></div>
+                </div>
+            </div>
+            <div id="panel-hist-realizados">
+                <div class="panel">
+                    <h2>Pedidos que me realizaron (bandeja)</h2>
+                    <div class="toolbar small">
+                        <input type="date" id="pedido-bandeja-desde">
+                        <input type="date" id="pedido-bandeja-hasta">
+                        <select id="pedido-sucursal-filtro" style="max-width:220px"></select>
+                        <button class="btn" id="btn-filtrar-pedidos">Filtrar</button>
+                        <span class="flex-grow"></span>
+                        <span class="respaldo-txt" id="historial-resumen"></span>
+                    </div>
+                    <div id="bandeja-contenido"></div>
                 </div>
             </div>
         </section>
