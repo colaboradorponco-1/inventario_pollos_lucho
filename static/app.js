@@ -1764,6 +1764,16 @@ function activarCommitEscaneo(inputSel) {
 
 // Escáner global: capta la ráfaga de la máquina aunque el campo no tenga el foco.
 let _scanG = '', _scanGLast = 0, _scanGTim = null;
+let _scanDestino = null;
+document.addEventListener('focusin', (ev) => {
+    const t = ev.target;
+    if (!t || !t.closest) return;
+    if (!['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName)) return;
+    const cont = t.closest('#form-movimiento, #view-ventas, #view-repartos, .panel-accent, #view-productos');
+    if (!cont) return;
+    const scan = cont.querySelector ? cont.querySelector('.scan-input input, #mov-escaneo') : null;
+    if (scan) _scanDestino = scan;
+});
 function _procesarEscaneoGlobal() {
     const codigo = _scanG;
     _scanG = '';
@@ -1771,8 +1781,7 @@ function _procesarEscaneoGlobal() {
     const ult = $('#qr-ultima');
     if (ult) ult.textContent = codigo;
     const activa = document.querySelector('.view.active');
-    let inp = activa ? activa.querySelector('.scan-input input') : null;
-    if (!inp) inp = $('#qr-escaneo');
+    let inp = _scanDestino || (activa ? activa.querySelector('.scan-input input') : null) || $('#qr-escaneo');
     if (!inp) { toast('Código leído: ' + codigo, 'info'); return; }
     inp.value = codigo;
     inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
