@@ -2790,9 +2790,10 @@ async function loadPedidos() {
     try {
         await loadCatalogos();
         const respP = await request(API + '/productos?por_pagina=1000');
-        let disp = {};
-        try { disp = ((await request(API + '/productos/disponible')).data) || {}; } catch (e) { disp = {}; }
-        pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: (disp[String(p.id)] ?? disp[p.id] ?? 0) || 0 }));
+        // El "disponible" (stock del proveedor menos lo apartado en pedidos
+        // pendientes) ya viene calculado por el servidor en cada producto,
+        // igual que en la pantalla de Productos.
+        pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
         const sucursales = await request(API + '/sucursales');
         const opciones = '<option value="">Todas las sucursales</option>' +
             sucursales.map((s) =>
