@@ -2793,18 +2793,19 @@ function renderTarjetasPedido() {
             ${provs[k].prod.map((p) => {
                 const qty = pedidoSel[p.id] || 0;
                 const max = maxPedido(p);
+                const agotado = max <= 0;
                 const excede = qty > max;
                 return `
-                <div class="prod-card ${qty > 0 ? 'seleccionado' : ''} ${excede ? 'sin-stock' : ''}" data-id="${p.id}">
+                <div class="prod-card ${qty > 0 ? 'seleccionado' : ''} ${agotado ? 'agotado-card' : ''} ${excede ? 'sin-stock' : ''}" data-id="${p.id}">
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
-                        <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${(p.stock_prov || 0) > 0 ? 'disp-ok' : 'disp-no'}">disponible: ${fmtNum(p.stock_prov || 0)} ${esc(p.unidad || 'unidad')}</span></div>
-                        <div class="aviso-stock" style="display:${excede ? '' : 'none'}">Máximo disponible: ${fmtNum(max)} ${esc(p.unidad || 'unidad')} (no se puede pedir más)</div>
+                        <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${max > 0 ? 'disp-ok' : 'disp-no'}">${max > 0 ? 'disponible: ' + fmtNum(max) + ' ' + esc(p.unidad || 'unidad') : '❌ Sin stock disponible'}</span></div>
+                        <div class="aviso-stock" style="display:${excede ? '' : 'none'}">Excede cantidad existente (máximo: ${fmtNum(max)})</div>
                     </div>
                     <div class="stepper">
-                        <button type="button" class="ste ste-menos" data-id="${p.id}">−</button>
-                        <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0" step="any" data-id="${p.id}">
-                        <button type="button" class="ste ste-mas" data-id="${p.id}">+</button>
+                        <button type="button" class="ste ste-menos" data-id="${p.id}" ${agotado ? 'disabled' : ''}>−</button>
+                        <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0" max="${max}" step="any" data-id="${p.id}" ${agotado ? 'disabled' : ''}>
+                        <button type="button" class="ste ste-mas" data-id="${p.id}" ${agotado ? 'disabled' : ''}>+</button>
                     </div>
                 </div>`;
             }).join('')}
@@ -2865,7 +2866,10 @@ function marcarExceso(id, max) {
 
 function marcarCantidad(id, cantidad) {
     const p = (pedidoProdsAll || []).find((x) => x.id === id);
-    const max = p ? maxPedido(p) : Infinity;
+    const max = p ? maxPedido(p) : 0;
+    if (cantidad > max) {
+        toast(`Excedió la cantidad existente: solo hay ${fmtNum(max)} disponible`, 'err');
+    }
     const v = Math.max(0, Math.min(cantidad, max));
     pedidoSel[id] = v > 0 ? v : 0;
     const input = document.getElementById('pq-' + id);
@@ -2884,27 +2888,34 @@ if (_listadoPed) {
         const actual = pedidoSel[id] || 0;
         const delta = btn.classList.contains('ste-menos') ? -1 : 1;
         const p = (pedidoProdsAll || []).find((x) => x.id === id);
-        const max = p ? maxPedido(p) : Infinity;
+        const max = p ? maxPedido(p) : 0;
         if (delta > 0 && actual + delta > max) {
+            toast(`No hay esa cantidad: el stock máximo disponible es ${fmtNum(max)}`, 'err');
             if (actual < max) marcarCantidad(id, max);
-            toast(`Solo hay ${fmtNum(max)} disponible de ese producto`, 'err');
             return;
         }
         marcarCantidad(id, actual + delta);
     });
     _listadoPed.addEventListener('input', (e) => {
         if (!e.target.classList.contains('prod-q')) return;
-        marcarCantidad(+e.target.dataset.id, parseFloat(e.target.value) || 0);
+        const id = +e.target.dataset.id;
+        const val = parseFloat(e.target.value) || 0;
+        const p = (pedidoProdsAll || []).find((x) => x.id === id);
+        const max = p ? maxPedido(p) : 0;
+        if (val > max) {
+            toast(`Excedió la cantidad existente (máximo ${fmtNum(max)})`, 'err');
+        }
+        marcarCantidad(id, val);
     });
     _listadoPed.addEventListener('change', (e) => {
         if (!e.target.classList.contains('prod-q')) return;
         const id = +e.target.dataset.id;
         const p = (pedidoProdsAll || []).find((x) => x.id === id);
-        const max = p ? maxPedido(p) : Infinity;
+        const max = p ? maxPedido(p) : 0;
         const v = pedidoSel[id] || 0;
         if (v > max) {
             marcarCantidad(id, max);
-            toast(`Solo hay ${fmtNum(max)} disponible de ese producto`, 'err');
+            toast(`No hay esa cantidad: excede el disponible (${fmtNum(max)})`, 'err');
         } else {
             marcarExceso(id, max);
         }
@@ -2998,14 +3009,24 @@ function inicializarPestanasPedidos() {
     const tabReal = $('#tab-hist-realizados');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
-    const puedeBandeja = puedeVerBandeja();
-    if (!puedeBandeja && pestanaPedidos === 'realizados') pestanaPedidos = 'mis-pedidos';
-    if (tabMis) tabMis.style.display = '';
-    if (tabReal) tabReal.style.display = puedeBandeja ? '' : 'none';
+    const esAdminOrAlmacen = (typeof esAdmin === 'function' && esAdmin()) || (typeof esAlmacenPpal === 'function' && esAlmacenPpal());
+
+    if (esAdminOrAlmacen) {
+        if (tabMis) tabMis.style.display = 'none';
+        if (panelMis) panelMis.style.display = 'none';
+        if (tabReal) tabReal.style.display = '';
+        if (panelReal) panelReal.style.display = '';
+        pestanaPedidos = 'realizados';
+    } else {
+        const puedeBandeja = puedeVerBandeja();
+        if (!puedeBandeja && pestanaPedidos === 'realizados') pestanaPedidos = 'mis-pedidos';
+        if (tabMis) tabMis.style.display = '';
+        if (tabReal) tabReal.style.display = puedeBandeja ? '' : 'none';
+        if (panelMis) panelMis.style.display = pestanaPedidos === 'mis-pedidos' ? '' : 'none';
+        if (panelReal) panelReal.style.display = (puedeBandeja && pestanaPedidos === 'realizados') ? '' : 'none';
+    }
     $$('#tabs-historial-pedidos .segment-tab').forEach((b) =>
         b.classList.toggle('active', b.dataset.tab === pestanaPedidos));
-    if (panelMis) panelMis.style.display = pestanaPedidos === 'mis-pedidos' ? '' : 'none';
-    if (panelReal) panelReal.style.display = (puedeBandeja && pestanaPedidos === 'realizados') ? '' : 'none';
 }
 
 function activarPestanaPedidos(nombre) {
