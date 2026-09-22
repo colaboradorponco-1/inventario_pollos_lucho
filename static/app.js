@@ -1706,10 +1706,12 @@ async function loadReportes() {
         const venc = await request(API + '/reportes/vencimientos');
         const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
         $('#rep-vencimientos').innerHTML = venc.map((v) => {
-            const dif = Math.round((new Date(v.vencimiento + 'T00:00:00') - hoy) / 86400000);
-            const cls = dif < 0 ? 'text-red' : (dif <= 14 ? 'text-orange' : '');
-            const urg = dif < 0 ? ' (VENCIDO)' : (dif <= 14 ? ' (pronto)' : '');
-            return `<tr><td><strong>${esc(v.nombre)}</strong></td><td>${esc(v.sucursal || '—')}</td><td>${fmtDate(v.vencimiento)}</td><td>${v.stock} ${v.unidad}</td><td class="${cls}"><strong>${dif}${urg}</strong></td></tr>`;
+            const mm = v.vencimiento ? String(v.vencimiento).match(/(\d{4})-(\d{1,2})-(\d{1,2})/) : null;
+            const fVenc = mm ? new Date(+mm[1], +mm[2] - 1, +mm[3]) : null;
+            const dif = fVenc ? Math.round((fVenc - hoy) / 86400000) : null;
+            const cls = dif === null ? '' : (dif < 0 ? 'text-red' : (dif <= 14 ? 'text-orange' : ''));
+            const urg = dif === null ? '' : (dif < 0 ? ' (VENCIDO)' : (dif <= 14 ? ' (pronto)' : ''));
+            return `<tr><td><strong>${esc(v.nombre)}</strong></td><td>${esc(v.sucursal || '—')}</td><td>${fmtDate(v.vencimiento)}</td><td>${v.stock} ${v.unidad}</td><td class="${cls}"><strong>${(dif === null ? '—' : dif)}${urg}</strong></td></tr>`;
         }).join('') || '<tr><td colspan="5" class="empty">Sin lotes con vencimiento</td></tr>';
 
         const consumo = await request(API + '/reportes/consumo?' + qs.toString());
