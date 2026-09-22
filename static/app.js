@@ -2834,10 +2834,17 @@ let pestanaPedidos = 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
 
-// «Mis pedidos» (los que yo realicé) y «Pedidos que me realizaron» (bandeja)
-// son visibles para todas las sucursales.
-function puedeVerMisPedidos() {
-    return !!window.ROL;
+// «Mis pedidos» (wizard + historial de los que yo realicé) es visible para
+// toda sucursal. La bandeja «Pedidos que me realizaron» solo la ven las que
+// PROVEEN a otras: principales (proveen a todos) y América / Simón López.
+// Siglo XX no provee: no ve la bandeja (nadie le encarga).
+function puedeVerBandeja() {
+    if (!window.ROL) return false;
+    if (esGestionPed()) return true;
+    if (window.ROL !== 'encargado') return false;
+    if (window.SUCURSAL_PRINCIPAL) return true;
+    const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
+    return !!(m && m.provee);
 }
 
 function inicializarPestanasPedidos() {
@@ -2845,26 +2852,26 @@ function inicializarPestanasPedidos() {
     const tabReal = $('#tab-hist-realizados');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
-    const puede = puedeVerMisPedidos();
-    if (!puede && pestanaPedidos === 'mis-pedidos') pestanaPedidos = 'realizados';
-    if (tabMis) tabMis.style.display = puede ? '' : 'none';
-    if (tabReal) tabReal.style.display = '';
+    const puedeBandeja = puedeVerBandeja();
+    if (!puedeBandeja && pestanaPedidos === 'realizados') pestanaPedidos = 'mis-pedidos';
+    if (tabMis) tabMis.style.display = '';
+    if (tabReal) tabReal.style.display = puedeBandeja ? '' : 'none';
     $$('#tabs-historial-pedidos .tab-log').forEach((b) =>
         b.classList.toggle('active', b.dataset.tab === pestanaPedidos));
-    if (panelMis) panelMis.style.display = (puede && pestanaPedidos === 'mis-pedidos') ? '' : 'none';
-    if (panelReal) panelReal.style.display = pestanaPedidos === 'realizados' ? '' : 'none';
+    if (panelMis) panelMis.style.display = pestanaPedidos === 'mis-pedidos' ? '' : 'none';
+    if (panelReal) panelReal.style.display = (puedeBandeja && pestanaPedidos === 'realizados') ? '' : 'none';
 }
 
 function activarPestanaPedidos(nombre) {
-    if (nombre === 'mis-pedidos' && !puedeVerMisPedidos()) return;
+    if (nombre === 'realizados' && !puedeVerBandeja()) return;
     pestanaPedidos = nombre;
     inicializarPestanasPedidos();
     cargarPestanaActiva();
 }
 
 function cargarPestanaActiva() {
-    if (pestanaPedidos === 'mis-pedidos') cargarBandeja();
-    else listarPedidos();
+    if (pestanaPedidos === 'mis-pedidos') listarPedidos();
+    else cargarBandeja();
 }
 
 on('#tab-hist-mis-pedidos', 'click', () => activarPestanaPedidos('mis-pedidos'));
@@ -2909,11 +2916,9 @@ $('#form-pedido').addEventListener('submit', async (e) => {
 });
 
 async function cargarBandeja() {
-    const panel = $('#panel-hist-mis-pedidos');
+    const panel = $('#panel-hist-realizados');
     if (!panel) return;
-    const puede = puedeVerMisPedidos();
-    panel.style.display = puede ? '' : 'none';
-    if (!puede) return;
+    if (!puedeVerBandeja()) return;
     const eyeSvg = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
     try {
         const desde = ($('#pedido-bandeja-desde') || {}).value || '';
