@@ -2792,7 +2792,7 @@ async function loadPedidos() {
         const respP = await request(API + '/productos?por_pagina=1000');
         let disp = {};
         try { disp = ((await request(API + '/productos/disponible')).data) || {}; } catch (e) { disp = {}; }
-        pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: disp[p.id] || 0 }));
+        pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: (disp[String(p.id)] ?? disp[p.id] ?? 0) || 0 }));
         const sucursales = await request(API + '/sucursales');
         const opciones = '<option value="">Todas las sucursales</option>' +
             sucursales.map((s) =>
