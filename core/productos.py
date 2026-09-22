@@ -110,13 +110,19 @@ def productos():
         aviso = ""
         nv = norm_nombre(data["nombre"])
         if nv:
+            unidad_actual = (data.get("unidad") or "unidad").strip().lower()
             duplicado = conn.execute(
-                "SELECT nombre, codigo, marca FROM productos WHERE activo = 1 AND id != ? ORDER BY nombre LIMIT 5",
+                "SELECT nombre, codigo, marca, unidad FROM productos WHERE activo = 1 AND id != ? ORDER BY nombre LIMIT 5",
                 (new_id,)).fetchall()
             for f in duplicado:
                 if norm_nombre(f["nombre"]) == nv:
                     detalle = f["marca"] and (" - " + f["marca"]) or ""
-                    aviso = f"Ya existe '{f['nombre']}'{detalle} (cód. {f['codigo']}). Verifica que no sea el mismo producto."
+                    u_existente = (f["unidad"] or "unidad").strip().lower()
+                    if u_existente != unidad_actual:
+                        aviso = (f"Ya existe '{f['nombre']}'{detalle} (cód. {f['codigo']}) con unidad '{f['unidad']}'. "
+                                 "Usa la MISMA unidad en todas las sucursales para no confundir el stock.")
+                    else:
+                        aviso = f"Ya existe '{f['nombre']}'{detalle} (cód. {f['codigo']}). Verifica que no sea el mismo producto."
                     break
         conn.close()
         registrar_auditoria("Producto creado", f"{data['nombre'].strip()} ({codigo})")
