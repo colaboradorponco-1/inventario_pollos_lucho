@@ -158,7 +158,7 @@ def productos():
                COALESCE(s.cantidad, 0) AS stock,
                (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
                 WHERE l2.producto_id = p.id AND l2.cantidad > 0
-                  AND l2.fecha_vencimiento IS NOT NULL{lote_cond}) AS vencimiento
+                  AND l2.fecha_vencimiento IS NOT NULL{lote_cond}) AS vencimiento{stock_prov_col}
         FROM productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN almacenes a ON a.id = p.almacen_id
@@ -166,10 +166,21 @@ def productos():
         LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
         {join_stock}
         WHERE p.activo = ?
-    """.format(join_stock=join_stock, lote_cond=lote_cond)
+    """.format(join_stock=join_stock, lote_cond=lote_cond, stock_prov_col=stock_prov_col)
     params = []
     if stock_sid is not None:
         params.append(stock_sid)
+    # Disponibilidad en el proveedor (para armar pedidos):
+    # "para_pedido=1" agrega stock_prov = stock que tiene la sucursal que provee
+    # el producto (los globales pertenecen al almacén principal).
+    stock_prov_col = ""
+    if request.args.get("para_pedido", "").strip() in ("1", "true", "yes"):
+        ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
+        ppal_id = ppal["id"] if ppal else None
+        if ppal_id is not None:
+            stock_prov_col = (", (SELECT COALESCE(SUM(l3.cantidad), 0) FROM lotes l3"
+                              " WHERE l3.producto_id = p.id AND l3.cantidad > 0"
+                              " AND l3.sucursal_id = COALESCE(p.sucursal_id, " + str(ppal_id) + ")) AS stock_prov")
     if estado == "inactivos":
         params.append(0)
     else:

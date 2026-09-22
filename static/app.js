@@ -2702,7 +2702,7 @@ function renderTarjetasPedido() {
                 <div class="prod-card ${qty > 0 ? 'seleccionado' : ''}" data-id="${p.id}">
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
-                        <div class="prod-card-meta">${esc(p.unidad || 'unidad')}</div>
+                        <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${(p.stock_prov || 0) > 0 ? 'disp-ok' : 'disp-no'}">disponible: ${fmtNum(p.stock_prov || 0)} ${esc(p.unidad || 'unidad')}</span></div>
                     </div>
                     <div class="stepper">
                         <button type="button" class="ste ste-menos" data-id="${p.id}">−</button>
@@ -2784,7 +2784,7 @@ on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
 async function loadPedidos() {
     try {
         await loadCatalogos();
-        const respP = await request(API + '/productos?por_pagina=1000');
+        const respP = await request(API + '/productos?por_pagina=1000&para_pedido=1');
         pedidoProdsAll = respP.data || respP;
         const sucursales = await request(API + '/sucursales');
         const opciones = '<option value="">Todas las sucursales</option>' +
