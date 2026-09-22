@@ -1200,6 +1200,8 @@ $('#qr-escaneo').addEventListener('keydown', async (e) => {
     const codigo = $('#qr-escaneo').value.trim();
     $('#qr-escaneo').value = '';
     if (!codigo) return;
+    const ult = $('#qr-ultima');
+    if (ult) ult.textContent = codigo;
     try {
         const p = await request(API + '/productos/codigo?codigo=' + encodeURIComponent(codigo));
         if (p.sucursal_id && !esCentral() && p.sucursal_id !== window.SUCURSAL_ID) {
@@ -1759,6 +1761,43 @@ function activarCommitEscaneo(inputSel) {
 }
 
 ['#qr-escaneo', '#prod-escaneo', '#mov-escaneo', '#venta-escaneo', '#reparto-escaneo'].forEach(activarCommitEscaneo);
+
+// Escáner global: capta la ráfaga de la máquina aunque el campo no tenga el foco.
+let _scanG = '', _scanGLast = 0, _scanGTim = null;
+function _procesarEscaneoGlobal() {
+    const codigo = _scanG;
+    _scanG = '';
+    if (codigo.length < 3) return;
+    const ult = $('#qr-ultima');
+    if (ult) ult.textContent = codigo;
+    const activa = document.querySelector('.view.active');
+    let inp = activa ? activa.querySelector('.scan-input input') : null;
+    if (!inp) inp = $('#qr-escaneo');
+    if (!inp) { toast('Código leído: ' + codigo, 'info'); return; }
+    inp.value = codigo;
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+}
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (e.key === 'Enter') {
+        if (_scanG) { e.preventDefault(); _procesarEscaneoGlobal(); }
+        return;
+    }
+    if (e.key.length !== 1) return;
+    const ahora = performance.now();
+    const dt = ahora - _scanGLast;
+    _scanGLast = ahora;
+    if (dt > 70) _scanG = '';
+    if (_scanG.length >= 20) _scanG = _scanG.slice(1) + e.key;
+    else _scanG += e.key;
+    if (_scanG.length >= 3) {
+        e.preventDefault();
+        clearTimeout(_scanGTim);
+        _scanGTim = setTimeout(_procesarEscaneoGlobal, 150);
+    }
+});
 
 function abrirNuevoProductoConCodigo(codigo) {
     openProductoModal();
