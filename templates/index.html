@@ -416,8 +416,9 @@
 
         <!-- GASTOS -->
         <section id="view-gastos" class="view">
-            <div style="background: #fdf8f0; border-left: 4px solid var(--primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: var(--text);">
-                🧾 <strong>Gastos y Egresos:</strong> Registra y controla los gastos operativos, compras menores o pagos de cada sucursal.
+            <div class="view-header">
+                <h2>Control de Gastos y Egresos</h2>
+                <p>Registra y controla los gastos operativos, compras menores, servicios y pagos de cada sucursal.</p>
             </div>
             <div class="grid-2">
                 <div class="panel">
@@ -576,8 +577,9 @@
 
         <!-- VENTAS -->
         <section id="view-ventas" class="view">
-            <div style="background: #fdf8f0; border-left: 4px solid var(--primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: var(--text);">
-                💰 <strong>Ventas:</strong> Registra las ventas diarias a clientes y consulta los tickets generados por sucursal.
+            <div class="view-header">
+                <h2>Registro de Ventas Diarias</h2>
+                <p>Registra las ventas a clientes mediante escaneo rápido o selección, y consulta los tickets generados por sucursal.</p>
             </div>
             <div class="grid-2">
                 <div class="panel">
@@ -635,13 +637,15 @@
 
         <!-- REPARTOS -->
         <section id="view-repartos" class="view">
-            <div style="background: #fdf8f0; border-left: 4px solid var(--primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: var(--text);">
-                🚚 <strong>Repartos y Despachos:</strong> Envía y despacha mercadería aprobada de un almacén proveedor hacia la sucursal de destino.
-            </div>
-            <div class="toolbar">
-                <h2>Reparto a sucursales</h2>
-                <span class="respaldo-txt" id="repartos-info"></span>
-                <button class="btn btn-primary" id="btn-gestionar-sucursales" style="display:none">Gestionar sucursales</button>
+            <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+                <div>
+                    <h2>Repartos y Despachos a Sucursales</h2>
+                    <p>Envía y despacha mercadería aprobada desde el almacén proveedor hacia la sucursal de destino solicitante.</p>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <span class="respaldo-txt" id="repartos-info"></span>
+                    <button class="btn btn-primary" id="btn-gestionar-sucursales" style="display:none">Gestionar sucursales</button>
+                </div>
             </div>
             <div class="grid-2">
                 <div class="panel">
@@ -700,13 +704,11 @@
 
         <!-- PEDIDOS -->
         <section id="view-pedidos" class="view">
-            <div style="background: #fdf8f0; border-left: 4px solid var(--primary); padding: 10px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 13px; color: var(--text);">
-                📋 <strong>Módulo de Pedidos:</strong>
-                <br>• <strong>Mis pedidos:</strong> Asistente de 3 pasos (Sucursal ➔ Productos ➔ Enviar) para solicitar mercadería a tus proveedores.
-                <br>• <strong>Pedidos que me realizaron:</strong> Bandeja privada donde cada sucursal proveedora revisa y despacha exclusivamente los pedidos que le solicitaron.
-            </div>
-            <div class="toolbar">
-                <h2>Pedidos / Tickets de sucursales</h2>
+            <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+                <div>
+                    <h2>Módulo de Pedidos y Tickets</h2>
+                    <p>Solicita mercadería mediante el asistente de 3 pasos o revisa en tu bandeja privada los pedidos que te realizaron.</p>
+                </div>
                 <span class="respaldo-txt" id="pedidos-info"></span>
             </div>
             <div class="toolbar small" id="tabs-historial-pedidos" style="margin-bottom:8px">
