@@ -5,7 +5,8 @@ from flask import Blueprint, request, session
 from database import get_conn
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    stock_actual, ok_paginado, paginar_params, sucursal_actual,
-                   sucursal_operativa, clausula_sucursal, es_gestion, flotante)
+                   sucursal_operativa, clausula_sucursal, es_gestion,
+                   es_encargado_almacen, flotante)
 
 ventas_bp = Blueprint("ventas", __name__)
 
@@ -74,12 +75,13 @@ def ventas():
     sid_filtro = request.args.get("sucursal_id", "")
     where = " WHERE 1=1"
     params = []
-    # Admin/superadmin ven todas las sucursales (filtrables por sucursal_id).
-    # Encargado SIEMPRE solo su sucursal.
-    if es_gestion() and sid_filtro:
+    # Admin/superadmin y encargados de almacén principal ven todas las sucursales
+    # (filtrables por sucursal_id). Los demás encargados solo su sucursal.
+    gestion_total = es_gestion() or es_encargado_almacen(conn)
+    if gestion_total and sid_filtro:
         where += " AND v.sucursal_id = ?"
         params.append(int(sid_filtro))
-    elif not es_gestion():
+    elif not gestion_total:
         cls, cls_params = clausula_sucursal("v.sucursal_id")
         if cls:
             where += cls

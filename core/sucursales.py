@@ -4,7 +4,7 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
-from .util import ok, err, login_requerido, rol_requerido, registrar_auditoria, registrar_movimiento, stock_actual, ok_paginado, paginar_params, sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion
+from .util import ok, err, login_requerido, rol_requerido, registrar_auditoria, registrar_movimiento, stock_actual, ok_paginado, paginar_params, sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion, es_encargado_almacen
 
 sucursales_bp = Blueprint("sucursales", __name__)
 
@@ -201,11 +201,13 @@ def repartos():
         WHERE 1=1
     """
     params = []
-    # Admin/superadmin ven los repartos de TODAS las sucursales (filtrables por sucursal_id).
-    if es_gestion() and sid_filtro:
+    # Admin/superadmin y encargados de almacén principal ven los repartos de TODAS
+    # las sucursales (filtrables por sucursal_id).
+    gestion_total = es_gestion() or es_encargado_almacen(conn)
+    if gestion_total and sid_filtro:
         q += " AND r.sucursal_id = ?"
         params.append(int(sid_filtro))
-    elif not es_gestion():
+    elif not gestion_total:
         cls, cls_params = clausula_sucursal("r.sucursal_id")
         if cls:
             q += " AND (" + cls[5:] + " OR r.origen_sucursal_id = ?)"

@@ -6,7 +6,7 @@ from database import get_conn
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    stock_actual, responder_excel, ok_paginado, paginar_params,
                    sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion,
-                   flotante)
+                   es_encargado_almacen, flotante)
 
 movimientos_bp = Blueprint("movimientos", __name__)
 
@@ -100,9 +100,9 @@ def movimientos():
         WHERE 1=1
     """
     params = []
-    # Admin/superadmin ven TODAS las sucursales (filtrables por sucursal_id).
-    # Encargado SIEMPRE solo su almacén.
-    if es_gestion():
+    # Admin/superadmin y encargados de almacén principal ven TODAS las sucursales
+    # (filtrables por sucursal_id). Los demás encargados solo su almacén.
+    if es_gestion() or es_encargado_almacen(conn):
         if sid_filtro:
             q += " AND m.sucursal_id = ?"
             params.append(int(sid_filtro))
@@ -215,11 +215,13 @@ def gastos():
            LEFT JOIN proveedores p ON p.id = g.proveedor_id
            LEFT JOIN sucursales s ON s.id = g.sucursal_id WHERE 1=1"""
     params = []
-    # Admin/superadmin ven todas las sucursales (filtrables por sucursal_id).
-    if es_gestion() and sid_filtro:
+    # Admin/superadmin y encargados de almacén principal ven todas las sucursales
+    # (filtrables por sucursal_id).
+    gestion_total = es_gestion() or es_encargado_almacen(conn)
+    if gestion_total and sid_filtro:
         q += " AND g.sucursal_id = ?"
         params.append(int(sid_filtro))
-    elif not es_gestion():
+    elif not gestion_total:
         cls, cls_params = clausula_sucursal("g.sucursal_id")
         if cls:
             q += cls
@@ -292,7 +294,7 @@ def exportar_movimientos():
         WHERE 1=1
     """
     params = []
-    if es_gestion():
+    if es_gestion() or es_encargado_almacen(conn):
         if sid_filtro:
             q += " AND m.sucursal_id = ?"
             params.append(int(sid_filtro))
@@ -340,10 +342,11 @@ def exportar_gastos():
            LEFT JOIN proveedores p ON p.id = g.proveedor_id
            LEFT JOIN sucursales s ON s.id = g.sucursal_id WHERE 1=1"""
     params = []
-    if es_gestion() and sid_filtro:
+    gestion_total = es_gestion() or es_encargado_almacen(conn)
+    if gestion_total and sid_filtro:
         q += " AND g.sucursal_id = ?"
         params.append(int(sid_filtro))
-    elif not es_gestion():
+    elif not gestion_total:
         cls, cls_params = clausula_sucursal("g.sucursal_id")
         if cls:
             q += cls

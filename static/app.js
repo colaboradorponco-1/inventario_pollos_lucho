@@ -568,6 +568,32 @@ function esAlmacenPpal() { return window.ROL === 'encargado' && !!window.SUCURSA
 // Admin/superadmin y encargados de almacén principal actúan como "mano derecha" del admin
 function esCentral() { return esAdmin() || esAlmacenPpal(); }
 
+// ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
+function puedeVerTodasSucursales() { return esAdmin() || esAlmacenPpal(); }
+
+// Botones "Todas + cada sucursal" para filtrar por sucursal/almacén sin escrolear.
+// Se muestran solo cuando está activa la vista "Almacén de Sucursales".
+async function poblarBotonesSucursal(contId, selectId, listarFn) {
+    const cont = $(contId);
+    const select = $(selectId);
+    if (!cont) return;
+    if (!puedeVerTodasSucursales()) { cont.style.display = 'none'; return; }
+    const mostrar = !!select && select.style.display !== 'none';
+    cont.style.display = mostrar ? 'flex' : 'none';
+    if (!mostrar) return;
+    let sucs = (catalogos && catalogos.sucursales) || [];
+    if (!sucs.length) { try { sucs = await request(API + '/sucursales'); } catch (e) { sucs = []; } }
+    const activo = select ? String(select.value || '') : '';
+    cont.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
+        .concat(sucs || [])
+        .map((s) => `<button type="button" class="btn btn-sm ${activo === String(s.id) ? 'btn-primary' : ''}" data-suc="${String(s.id)}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</button>`)
+        .join('');
+    cont.querySelectorAll('[data-suc]').forEach((b) => b.addEventListener('click', () => {
+        if (select) select.value = b.dataset.suc;
+        if (listarFn) listarFn();
+    }));
+}
+
 let _prodSuc = '';
 async function pintarProdScope() {
     const row = $('#prod-scope-tabs');
@@ -996,8 +1022,8 @@ async function loadMovimientos() {
     try {
         const resp = await request(API + '/productos?por_pagina=1000');
         movProdsAll = resp.data || resp;
-        // Inicializar tabs histórico (solo admin/superadmin ven el selector de sucursales)
-        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
+        // Inicializar tabs histórico (admin/superadmin/almacén principal ven el selector de sucursales)
+        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' || window.SUCURSAL_PRINCIPAL);
         const tabs = $('#hist-sucursal-tabs');
         const select = $('#hist-sucursal-select');
         if (tabs) {
@@ -1041,6 +1067,8 @@ async function loadMovimientos() {
         }
         popMovProductos(sidMov);
         await listarMovimientos();
+        poblarBotonesSucursal('hist-sucursal-btns', 'hist-sucursal-select',
+            () => { pagState['#movimientos-paginacion'] = 1; listarMovimientos(); });
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -1071,6 +1099,8 @@ async function listarMovimientos() {
     const enSucursales = tabSucursales && tabSucursales.classList.contains('active');
     if (enSucursales && select && select.value) {
         qs.set('sucursal_id', select.value);
+    } else if (esAlmacenPpal()) {
+        qs.set('sucursal_id', window.SUCURSAL_ID);
     }
     qs.set('pagina', pagState['#movimientos-paginacion'] || 1);
     const resp = await request(API + '/movimientos?' + qs.toString());
@@ -1099,6 +1129,8 @@ $('#btn-hist-mio').addEventListener('click', () => {
     $('#btn-hist-sucursales').classList.remove('active');
     $('#hist-sucursal-select').style.display = 'none';
     pagState['#movimientos-paginacion'] = 1;
+    poblarBotonesSucursal('hist-sucursal-btns', 'hist-sucursal-select',
+        () => { pagState['#movimientos-paginacion'] = 1; listarMovimientos(); });
     listarMovimientos();
 });
 $('#btn-hist-sucursales').addEventListener('click', () => {
@@ -1106,9 +1138,13 @@ $('#btn-hist-sucursales').addEventListener('click', () => {
     $('#btn-hist-mio').classList.remove('active');
     $('#hist-sucursal-select').style.display = 'inline-flex';
     pagState['#movimientos-paginacion'] = 1;
+    poblarBotonesSucursal('hist-sucursal-btns', 'hist-sucursal-select',
+        () => { pagState['#movimientos-paginacion'] = 1; listarMovimientos(); });
 });
 $('#hist-sucursal-select').addEventListener('change', () => {
     pagState['#movimientos-paginacion'] = 1;
+    poblarBotonesSucursal('hist-sucursal-btns', 'hist-sucursal-select',
+        () => { pagState['#movimientos-paginacion'] = 1; listarMovimientos(); });
     listarMovimientos();
 });
 
@@ -1381,7 +1417,7 @@ async function delProveedor(id) {
 // ---------------- Gastos ----------------
 async function loadGastos() {
     try {
-        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
+        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' || window.SUCURSAL_PRINCIPAL);
         const tabs = $('#gasto-tabs'), select = $('#gasto-sucursal-select');
         if (tabs) {
             const btnSuc = $('#btn-gasto-sucursales');
@@ -1392,6 +1428,8 @@ async function loadGastos() {
                 tabs.style.display = 'none';
             }
         }
+        poblarBotonesSucursal('gasto-sucursal-btns', 'gasto-sucursal-select',
+            () => { pagState['#gastos-paginacion'] = 1; loadGastos(); });
         const qs = new URLSearchParams();
         const filtro = ($('#gasto-filtro') || {}).value?.trim() || '';
         if (filtro) qs.set('filtro', filtro);
@@ -1434,6 +1472,8 @@ $('#btn-gasto-mio').addEventListener('click', () => {
     $('#gasto-sucursal-select').style.display = 'none';
     $('#gasto-sucursal-select').value = '';
     pagState['#gastos-paginacion'] = 1;
+    poblarBotonesSucursal('gasto-sucursal-btns', 'gasto-sucursal-select',
+        () => { pagState['#gastos-paginacion'] = 1; loadGastos(); });
     loadGastos();
 });
 $('#btn-gasto-sucursales').addEventListener('click', () => {
@@ -1441,10 +1481,14 @@ $('#btn-gasto-sucursales').addEventListener('click', () => {
     $('#btn-gasto-mio').classList.remove('active');
     $('#gasto-sucursal-select').style.display = 'inline-flex';
     pagState['#gastos-paginacion'] = 1;
+    poblarBotonesSucursal('gasto-sucursal-btns', 'gasto-sucursal-select',
+        () => { pagState['#gastos-paginacion'] = 1; loadGastos(); });
     loadGastos();
 });
 $('#gasto-sucursal-select').addEventListener('change', () => {
     pagState['#gastos-paginacion'] = 1;
+    poblarBotonesSucursal('gasto-sucursal-btns', 'gasto-sucursal-select',
+        () => { pagState['#gastos-paginacion'] = 1; loadGastos(); });
     loadGastos();
 });
 
@@ -1959,7 +2003,7 @@ $('#form-venta').addEventListener('submit', async (e) => {
 });
 
 async function listarVentas() {
-    const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
+    const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' || window.SUCURSAL_PRINCIPAL);
     const tabs = $('#venta-tabs'), select = $('#venta-sucursal-select');
     if (tabs) {
         const btnSuc = $('#btn-venta-sucursales');
@@ -1970,6 +2014,8 @@ async function listarVentas() {
             tabs.style.display = 'none';
         }
     }
+    poblarBotonesSucursal('venta-sucursal-btns', 'venta-sucursal-select',
+        () => { pagState['#ventas-paginacion'] = 1; listarVentas(); });
     const qs = new URLSearchParams();
     const filtro = ($('#venta-filtro') || {}).value?.trim() || '';
     if (filtro) qs.set('filtro', filtro);
@@ -2005,6 +2051,8 @@ $('#btn-venta-mio').addEventListener('click', () => {
     $('#venta-sucursal-select').style.display = 'none';
     $('#venta-sucursal-select').value = '';
     pagState['#ventas-paginacion'] = 1;
+    poblarBotonesSucursal('venta-sucursal-btns', 'venta-sucursal-select',
+        () => { pagState['#ventas-paginacion'] = 1; listarVentas(); });
     listarVentas();
 });
 $('#btn-venta-sucursales').addEventListener('click', () => {
@@ -2012,10 +2060,14 @@ $('#btn-venta-sucursales').addEventListener('click', () => {
     $('#btn-venta-mio').classList.remove('active');
     $('#venta-sucursal-select').style.display = 'inline-flex';
     pagState['#ventas-paginacion'] = 1;
+    poblarBotonesSucursal('venta-sucursal-btns', 'venta-sucursal-select',
+        () => { pagState['#ventas-paginacion'] = 1; listarVentas(); });
     listarVentas();
 });
 $('#venta-sucursal-select').addEventListener('change', () => {
     pagState['#ventas-paginacion'] = 1;
+    poblarBotonesSucursal('venta-sucursal-btns', 'venta-sucursal-select',
+        () => { pagState['#ventas-paginacion'] = 1; listarVentas(); });
     listarVentas();
 });
 
@@ -2084,7 +2136,7 @@ async function loadRepartos() {
         $('#reparto-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
             prods.map((p) => `<option value="${p.id}" data-costo="${p.costo_promedio || ''}" data-stock="${p.stock}">${nomProd(p)}${due(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('');
         const sucursales = await request(API + '/sucursales');
-        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin');
+        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' || window.SUCURSAL_PRINCIPAL);
         const esPrincipal = !!window.SUCURSAL_PRINCIPAL;
         const destino = sucursales.filter((s) => s.id !== window.SUCURSAL_ID && (esGestion || esPrincipal || !s.principal));
         $('#reparto-sucursal').innerHTML = destino.map((s) =>
@@ -2104,6 +2156,8 @@ async function loadRepartos() {
                 tabs.style.display = 'none';
             }
         }
+        poblarBotonesSucursal('reparto-sucursal-btns', 'reparto-sucursal-select',
+            () => { pagState['#repartos-paginacion'] = 1; listarRepartos(); });
         await listarRepartos();
     } catch (e) {
         toast(e.message, 'err');
@@ -2115,15 +2169,24 @@ $('#btn-reparto-mio').addEventListener('click', () => {
     $('#btn-reparto-sucursales').classList.remove('active');
     $('#reparto-sucursal-select').style.display = 'none';
     $('#reparto-sucursal-select').value = '';
+    pagState['#repartos-paginacion'] = 1;
+    poblarBotonesSucursal('reparto-sucursal-btns', 'reparto-sucursal-select',
+        () => { pagState['#repartos-paginacion'] = 1; listarRepartos(); });
     listarRepartos();
 });
 $('#btn-reparto-sucursales').addEventListener('click', () => {
     $('#btn-reparto-sucursales').classList.add('active');
     $('#btn-reparto-mio').classList.remove('active');
     $('#reparto-sucursal-select').style.display = 'inline-flex';
+    pagState['#repartos-paginacion'] = 1;
+    poblarBotonesSucursal('reparto-sucursal-btns', 'reparto-sucursal-select',
+        () => { pagState['#repartos-paginacion'] = 1; listarRepartos(); });
     listarRepartos();
 });
 $('#reparto-sucursal-select').addEventListener('change', () => {
+    pagState['#repartos-paginacion'] = 1;
+    poblarBotonesSucursal('reparto-sucursal-btns', 'reparto-sucursal-select',
+        () => { pagState['#repartos-paginacion'] = 1; listarRepartos(); });
     listarRepartos();
 });
 
