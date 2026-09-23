@@ -18,16 +18,25 @@ def almacenes():
             conn.close()
             return err("Solo el superadministrador puede crear almacenes", 403)
         data = request.get_json()
+        sid = data.get("sucursal_id")
         try:
-            conn.execute("INSERT INTO almacenes (nombre, ubicacion) VALUES (?, ?)",
-                         (data["nombre"].strip(), data.get("ubicacion", "").strip()))
+            if sid:
+                conn.execute(
+                    "INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
+                    (data["nombre"].strip(), data.get("ubicacion", "").strip(), int(sid)))
+            else:
+                conn.execute("INSERT INTO almacenes (nombre, ubicacion) VALUES (?, ?)",
+                             (data["nombre"].strip(), data.get("ubicacion", "").strip()))
             conn.commit()
             return ok(message="Almacén creado")
         except pymysql.err.IntegrityError:
             return err("Ya existe un almacén con ese nombre")
         finally:
             conn.close()
-    rows = conn.execute("SELECT * FROM almacenes ORDER BY nombre").fetchall()
+    rows = conn.execute("""
+        SELECT a.*, s.nombre AS sucursal_nombre
+        FROM almacenes a LEFT JOIN sucursales s ON s.id = a.sucursal_id
+        ORDER BY a.sucursal_id, a.nombre""").fetchall()
     conn.close()
     return ok([dict(r) for r in rows])
 
@@ -48,8 +57,13 @@ def almacen(alm_id):
         finally:
             conn.close()
     data = request.get_json()
-    conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ? WHERE id = ?",
-                 (data["nombre"].strip(), data.get("ubicacion", "").strip(), alm_id))
+    sid = data.get("sucursal_id")
+    if sid:
+        conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ?, sucursal_id = ? WHERE id = ?",
+                     (data["nombre"].strip(), data.get("ubicacion", "").strip(), int(sid), alm_id))
+    else:
+        conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ?, sucursal_id = NULL WHERE id = ?",
+                     (data["nombre"].strip(), data.get("ubicacion", "").strip(), alm_id))
     conn.commit()
     conn.close()
     return ok(message="Almacén actualizado")

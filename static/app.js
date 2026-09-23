@@ -433,6 +433,8 @@ async function loadCatalogos() {
     const esGestion = window.ROL === 'admin' || window.ROL === 'superadmin';
     ['#mov-export-sucursal', '#gasto-export-sucursal', '#venta-export-sucursal', '#reparto-export-sucursal']
         .forEach((id) => { const el = $(id); if (el) el.style.display = esGestion ? 'inline-flex' : 'none'; });
+    const selUserSuc = $('#user-sucursal');
+    if (selUserSuc) selUserSuc.innerHTML = '<option value="">— Asignar después —</option>' + opcionesSucursales(catalogos.sucursales, '');
 }
 
 // ---------------- Dashboard ----------------
@@ -1661,22 +1663,29 @@ $('#form-editar-gasto').addEventListener('submit', async (e) => {
 // ---------------- Almacenes ----------------
 async function loadAlmacenes() {
     try {
-        const almacenes = await request(API + '/almacenes');
+        const [almacenes, sucursales] = await Promise.all([
+            request(API + '/almacenes'),
+            request(API + '/sucursales'),
+        ]);
+        const selA = $('#alm-sucursal');
+        if (selA) selA.innerHTML = '<option value="">— Sin asignar (general) —</option>' + opcionesSucursales(sucursales, '');
         $('#almacenes-tbody').innerHTML = almacenes.map((a) => `
             <tr>
                 <td>${esc(a.nombre)}</td>
                 <td>${esc(a.ubicacion) || '—'}</td>
+                <td>${a.sucursal_nombre ? `<span class="badge badge-ciudad">${esc(a.sucursal_nombre)}</span>` : '—'}</td>
                 <td>
                     <button class="btn btn-icon" data-edit-alm="${a.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
                     <button class="btn btn-icon btn-danger" data-del-alm="${a.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
                 </td>
-            </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin almacenes</td></tr>';
+            </tr>`).join('') || '<tr><td colspan="4" class="empty">Sin almacenes</td></tr>';
         $$('[data-edit-alm]').forEach((b) => b.addEventListener('click', () => {
             const a = almacenes.find((x) => x.id === Number(b.dataset.editAlm));
             if (a) {
                 $('#alm-id').value = a.id;
                 $('#alm-nombre').value = a.nombre;
                 $('#alm-ubicacion').value = a.ubicacion || '';
+                $('#alm-sucursal').value = a.sucursal_id || '';
                 $('#modal-almacen-title').textContent = 'Editar almacén';
                 openModal('modal-almacen');
             }
@@ -1694,13 +1703,15 @@ async function loadAlmacenes() {
 $('#btn-nuevo-almacen').addEventListener('click', () => {
     $('#alm-id').value = '';
     $('#form-almacen').reset();
+    $('#alm-sucursal').value = '';
     $('#modal-almacen-title').textContent = 'Nuevo almacén';
     openModal('modal-almacen');
 });
 $('#form-almacen').addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = $('#alm-id').value;
-    const body = { nombre: $('#alm-nombre').value, ubicacion: $('#alm-ubicacion').value };
+    const _sucA = $('#alm-sucursal').value;
+    const body = { nombre: $('#alm-nombre').value, ubicacion: $('#alm-ubicacion').value, sucursal_id: _sucA ? +_sucA : null };
     try {
         if (id) {
             await request(API + '/almacenes/' + id, { method: 'PUT', body: JSON.stringify(body) });
@@ -2508,12 +2519,13 @@ async function loadUsuarios() {
                 <td><strong>${u.usuario}</strong></td>
                 <td>${u.nombre || '—'}</td>
                 <td><span class="badge ${u.rol === 'superadmin' ? 'badge-info' : u.rol === 'admin' ? 'badge-bajo' : 'badge-entrada'}">${u.rol === 'superadmin' ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : 'Encargado'}</span></td>
+                <td>${u.sucursal_nombre ? `<span class="badge badge-ciudad">${esc(u.sucursal_nombre)}</span>` : '—'}</td>
                 <td><span class="badge ${u.activo ? 'badge-entrada' : 'badge-salida'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
                 <td>
                     <button class="btn btn-icon" data-edit-user="${u.id}">Editar</button>
                     <button class="btn btn-icon btn-danger" data-del-user="${u.id}">Eliminar</button>
                 </td>
-            </tr>`).join('') || '<tr><td colspan="5" class="empty">Sin usuarios</td></tr>';
+            </tr>`).join('') || '<tr><td colspan="6" class="empty">Sin usuarios</td></tr>';
 
         $$('[data-edit-user]').forEach((b) => b.addEventListener('click', () => {
             const u = users.find((x) => x.id === Number(b.dataset.editUser));
@@ -2532,6 +2544,8 @@ async function loadUsuarios() {
                 opcSuper.style.display = 'none';
             }
             rolSel.value = u.rol;
+            const userSucSel = $('#user-sucursal');
+            if (userSucSel) userSucSel.value = u.sucursal_id || '';
             $('#user-activo').value = u.activo ? '1' : '0';
             $('#user-password').value = '';
             $('#user-password').placeholder = 'Dejar en blanco para no cambiar';
@@ -2570,6 +2584,8 @@ $('#btn-nuevo-usuario').addEventListener('click', () => {
     }
     $('#user-id').value = '';
     $('#user-usuario').disabled = false;
+    const userSucSel = $('#user-sucursal');
+    if (userSucSel) userSucSel.value = '';
     $('#user-password').placeholder = 'Mínimo 4 caracteres';
     $('#modal-usuario-title').textContent = 'Nuevo usuario';
     openModal('modal-usuario');
@@ -2578,11 +2594,13 @@ $('#btn-nuevo-usuario').addEventListener('click', () => {
 $('#form-usuario').addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = $('#user-id').value;
+    const _sucV = $('#user-sucursal').value;
     const body = {
         usuario: $('#user-usuario').value,
         nombre: $('#user-nombre').value,
         rol: $('#user-rol').value,
         activo: +$('#user-activo').value,
+        sucursal_id: _sucV ? +_sucV : null,
         password: $('#user-password').value,
     };
     try {

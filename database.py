@@ -639,10 +639,62 @@ def migrar_esquema():
                             ("admin2", _hash("admin22"), "Administrador Principal 2", "admin", p2["id"]))
         db.commit()
 
-        # 5) Asignar sucursal por defecto a encargados sin sucursal
+        # 5) Asignar a cada encargado/admin la sucursal que realmente le toca.
+        # Antes todos quedaban en el Almacén Principal 1 por defecto (por eso
+        # un encargado de La Paz veía los datos del principal). Si su usuario o
+        # nombre menciona una sucursal filial, se le asigna esa sucursal.
+        cur.execute("SELECT id, nombre, principal FROM sucursales")
+        _sucs = cur.fetchall()
+        cur.execute("SELECT id, usuario, nombre, sucursal_id FROM usuarios WHERE rol IN ('encargado','admin')")
+        _users = cur.fetchall()
+        _princs = {f["id"] for f in _sucs if f["principal"]}
+        _STOP = {"la", "de", "el", "los", "las", "del", "un", "una", "6"}
+        for u in _users:
+            if u["sucursal_id"] is not None and u["sucursal_id"] not in _princs:
+                continue  # ya pertenece a una filial concreta
+            u_toks = set(_nombre_norm((u["usuario"] or "") + " " + (u["nombre"] or "")).split())
+            mejor_id, mejor_score = None, 0
+            for s in _sucs:
+                if s["principal"]:
+                    continue
+                s_toks = {t for t in _nombre_norm(s["nombre"]).split()
+                          if t not in _STOP and len(t) > 2}
+                score = len(s_toks & u_toks)
+                if score > mejor_score:
+                    mejor_id, mejor_score = s["id"], score
+            if mejor_id:
+                cur.execute("UPDATE usuarios SET sucursal_id = %s WHERE id = %s",
+                            (mejor_id, u["id"]))
+        # El resto de encargados/admin sin sucursal queda en el Almacén Principal 1.
         if p1:
-            cur.execute("UPDATE usuarios SET sucursal_id = %s WHERE sucursal_id IS NULL AND rol = 'encargado'", (p1["id"],))
-            db.commit()
+            cur.execute("UPDATE usuarios SET sucursal_id = %s WHERE sucursal_id IS NULL AND rol IN ('encargado','admin')",
+                        (p1["id"],))
+        db.commit()
+
+        # 6) Cada sucursal tendrá sus propios almacenes base (modelo jerárquico:
+        # los almacenes pertenecen a una sucursal). Las filiales nuevas (La Paz)
+        # reciben así "sus almacenes", no los del almacén principal.
+        cur.execute("""SELECT INDEX_NAME FROM information_schema.STATISTICS
+                       WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'almacenes'
+                       AND COLUMN_NAME = 'nombre'""", (MYSQL_DB,))
+        for _idx in cur.fetchall():
+            try:
+                cur.execute("ALTER TABLE almacenes DROP INDEX `%s`" % _idx["INDEX_NAME"])
+            except Exception:
+                pass
+        db.commit()
+        cur.execute("SELECT id FROM sucursales ORDER BY id")
+        _ids_suc = [f["id"] for f in cur.fetchall()]
+        cur.execute("SELECT DISTINCT sucursal_id FROM almacenes WHERE sucursal_id IS NOT NULL")
+        _con_alm = {r["sucursal_id"] for r in cur.fetchall()}
+        _BASE_ALMACENES = ["Almacén Principal", "Cocina", "Limpieza"]
+        for sid in _ids_suc:
+            if sid in _con_alm:
+                continue
+            for nm in _BASE_ALMACENES:
+                cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (%s, %s, %s)",
+                            (nm, "", sid))
+        db.commit()
     finally:
         db.close()
 

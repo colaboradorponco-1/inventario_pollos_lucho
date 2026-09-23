@@ -493,7 +493,7 @@
             </div>
             <div class="panel">
                 <div class="table-scroll"><table class="data-table">
-                    <thead><tr><th>Nombre</th><th>Ubicación</th><th></th></tr></thead>
+                    <thead><tr><th>Nombre</th><th>Ubicación</th><th>Sucursal</th><th></th></tr></thead>
                     <tbody id="almacenes-tbody"></tbody>
                 </table></div>
             </div>
@@ -857,7 +857,7 @@
             </div>
             <div class="panel">
                 <div class="table-scroll"><table class="data-table">
-                    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Estado</th><th></th></tr></thead>
+                    <thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Sucursal</th><th>Estado</th><th></th></tr></thead>
                     <tbody id="usuarios-tbody"></tbody>
                 </table></div>
             </div>
@@ -1059,6 +1059,9 @@
                         <option value="0">Inactivo</option>
                     </select></label>
                 </div>
+                <label>Sucursal <select id="user-sucursal">
+                    <option value="">— Asignar después —</option>
+                </select></label>
                 <label>Contraseña <input type="password" id="user-password" placeholder="Mínimo 4 caracteres"></label>
                 <button type="submit" class="btn btn-primary">Guardar</button>
             </form>
@@ -1126,6 +1129,9 @@
                 <label>Ubicación
                     <input type="text" id="alm-ubicacion">
                 </label>
+                <label>Sucursal <select id="alm-sucursal">
+                    <option value="">— Sin asignar (general) —</option>
+                </select></label>
                 <button type="submit" class="btn btn-primary">Guardar</button>
             </form>
         </div>
@@ -1234,7 +1240,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=77"></script>
+    <script src="/static/app.js?v=78"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
