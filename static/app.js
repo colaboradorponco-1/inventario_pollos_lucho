@@ -2991,7 +2991,7 @@ let pestanaPedidos = puedeVerBandeja() ? 'realizados' : 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
 
-// Sucursales que ABAS TECEN a otras (América y Simón López): reciben pedidos
+// Sucursales que ABASTECEN a otras (América y Simón López): reciben pedidos
 // en su bandeja (pedidos que les hacen a ellas) pero TAMBIÉN hacen sus propios
 // pedidos, así que conservan las dos pestañas aunque en la base queden marcadas
 // como principal.
