@@ -1193,29 +1193,12 @@
                 Mostrar el costo unitario y subtotal en el ticket de pedido
             </label>
             <p class="cfg-nota">La impresora se elige en la ventana de impresión del navegador (Ctrl + P) y se guarda por equipo.</p>
-
-            <div id="cfg-grupo-sistema">
-            <h3 class="cfg-grupo">Sistema</h3>
-            <div class="grid-2">
-                <label>Refrescar automáticamente cada
-                    <select id="cfg-autorefresco">
-                        <option value="off">No (solo manual)</option>
-                        <option value="30000">30 segundos</option>
-                        <option value="60000">60 segundos</option>
-                    </select>
-                </label>
-                <label>Actualización de la app
-                    <button type="button" class="btn" id="cfg-buscar-act" style="width:100%">Buscar actualización</button>
-                </label>
-            </div>
-            <p class="empty" id="cfg-estado" style="margin-top:12px">La app se actualiza sola cuando hay una versión nueva (mientras no estés escribiendo).</p>
-            </div>
         </div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=80"></script>
+    <script src="/static/app.js?v=81"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

@@ -291,28 +291,9 @@ async function vigilarActualizaciones() {
     } catch (_) { }
 }
 
-async function buscarActualizacion() {
-    const est = $('#cfg-estado');
-    if (est) est.textContent = 'Buscando actualizaciones...';
-    try {
-        const reg = await navigator.serviceWorker.getRegistration();
-        if (!reg) {
-            await navigator.serviceWorker.register('/sw.js');
-            if (est) est.textContent = 'Sin novedades: la app está al día.';
-            return;
-        }
-        await reg.update();
-        if (est) est.textContent = 'Sin novedades: ya tienes la última versión.';
-    } catch (e) {
-        if (est) est.textContent = 'No se pudo buscar (revisa la conexión).';
-    }
-}
-
 function abrirConfiguracion() {
     const v = $('#cfg-version');
     if (v) v.textContent = APP_VERSION;
-    const s = $('#cfg-autorefresco');
-    if (s) s.value = intervaloAutoRefresco();
     const t = cfgTickets();
     const el = (id) => document.getElementById(id);
     const ancho = el('cfg-ticket-ancho');
@@ -323,23 +304,8 @@ function abrirConfiguracion() {
     if (pie) pie.value = t.pie || '';
     const cost = el('cfg-ticket-costo');
     if (cost) cost.checked = !!t.costo;
-    const est = $('#cfg-estado');
-    if (est) est.textContent = 'La app se actualiza sola cuando hay una versión nueva (mientras no estés escribiendo).';
-    const gSys = document.getElementById('cfg-grupo-sistema');
-    if (gSys) gSys.style.display = (typeof esAdmin === 'function' && esAdmin()) ? '' : 'none';
     openModal('modal-configuracion');
 }
-
-const _selAutoref = document.getElementById('cfg-autorefresco');
-if (_selAutoref) {
-    _selAutoref.addEventListener('change', () => {
-        localStorage.setItem(KEY_AUTOREFRESCO, _selAutoref.value);
-        configurarAutoRefresco();
-        toast('Refresco automático: ' + ({ off: 'No', '30000': 'cada 30 s', '60000': 'cada 60 s' })[_selAutoref.value] || 'no definido', 'ok');
-    });
-}
-const _btnBuscar = document.getElementById('cfg-buscar-act');
-if (_btnBuscar) _btnBuscar.addEventListener('click', buscarActualizacion);
 
 // ---------------- Configuración de impresión ----------------
 const KEY_CONFIG = 'pollos_config';
