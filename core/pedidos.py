@@ -440,40 +440,25 @@ def pedido_despachar(pedido_id):
 @pedidos_bp.route("/api/pedidos/bandeja", methods=["GET"])
 @login_requerido
 def pedidos_bandeja():
-    """Pedidos pendientes agrupados por sucursal para la bandeja de llegada del almacén.
+    """Pedidos pendientes agrupados por sucursal para la bandeja de llegada.
 
-    Gestion (admin/superadmin) y encargados de almacén principal ven todos los
-    pendientes agrupados por sucursal. Un encargado de una sucursal proveedora
-    (p. ej. América o Simón López) ve solo los pendientes que le llegan a su
-    sucursal (líneas con destino_id = su sucursal), agrupados igual."""
+    Todo usuario con sucursal asignada ve únicamente los pedidos en los que su
+    sucursal es el destino (destino_id = su sucursal), ya sea un almacén
+    principal, América/Simón López o cualquier otra sucursal que abastezca.
+    Solo un admin/superadmin sin sucursal asignada consolida todos los pendientes."""
     conn = get_conn()
     sid = sucursal_actual()
-    # En la bandeja, el admin (y superadmin) NO ven todos los pedidos globales
-    # por defecto, sino que cada sucursal/almacén proveedora ve únicamente los
-    # pedidos que le están pidiendo a ella (filtrado por su destino_id en el detalle).
-    # Solo el encargado del almacén principal o proveedores específicos de sus productos.
-    gestion = False  # forzamos que administrador de sucursal/central no mezcle bandejas globales
-    almacen = False  # admin central puro tampoco ve todo en bandeja, o usa su SID si lo tiene configurado
-    # Mantenemos que si es admin pero tiene sucursal_id de operador asignada, filtre por su destino.
-    # O mejor aún: si es admin y quiere ver la bandeja, filtra por la sucursal actual del admin (si tiene una configurada),
-    # o si es el almacén principal, ve todo.
-    is_almacen_ppal = es_encargado_almacen(conn) or (es_gestion() and not sid)  # si admin no tiene sucursal propia operativa, ve todo; si la tiene, filtra.
-    # Espera, el usuario especificó claramente:
-    # "ya esta el admin no puede ver los pedidos que se realizaron las otras sucursales cada uno solo ve sus pedidos
-    # osea ve los pedidos que les estan pidiendo otras sucursales en el tema de los pedidos"
-    # Esto significa que CADA proveedor/almacén (incluyendo el admin si opera como tal, o por sucursal)
-    # SOLO ve los ítems/pedidos donde su sucursal sea el destino (`destino_id = sid`).
-    # Es decir, la bandeja de "pedidos que me realizaron" debe filtrar siempre por la sucursal actual (`sid`),
-    # excepto que sea el almacén principal general que consolida todo si no tiene restricción.
-    # Pero el usuario dice: "el admin no puede ver los pedidos que se realizaron las otras sucursales, cada uno solo ve sus pedidos"
-    # O sea, ningún usuario ve pedidos ajenos a su destino. Cada sucursal proveedora ve solo lo que le piden a ella.
-    proveedor_efectivo = True
+    where = "WHERE 1=1"
+    params = []
+    # Bandeja de «pedidos que me realizaron»: cada usuario ve únicamente los
+    # pedidos en los que SU sucursal es el destino (las líneas que le piden a él),
+    # ya sea un almacén principal, América/Simón López o cualquier sucursal que
+    # abastezca. Solo un admin/superadmin sin sucursal asignada consolida todo.
     if sid:
         where += (" AND EXISTS (SELECT 1 FROM pedido_detalle dd "
                   "WHERE dd.pedido_id = p.id AND dd.destino_id = ?)")
         params.append(sid)
-    elif not es_encargado_almacen(conn) and not (es_gestion() and not sid):
-        # Si no tiene sucursal y no es superadmin global, no ve nada
+    elif not es_gestion():
         conn.close()
         return ok([])
     # Reseteo diario: por defecto solo los pedidos del día actual. El filtro

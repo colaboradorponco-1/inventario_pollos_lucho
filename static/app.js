@@ -2962,7 +2962,7 @@ async function loadPedidos() {
         if (esEncargadoPed()) {
             const mie = sucursales.find((x) => x.id === window.SUCURSAL_ID);
             selSuc.innerHTML = mie ? `<option value="${mie.id}">${mie.principal ? '★ ' : ''}${esc(mie.nombre)}</option>` : '';
-            if (window.SUCURSAL_PRINCIPAL) {
+            if (window.SUCURSAL_PRINCIPAL && !sucursalProvee()) {
                 const form = $('#form-pedido');
                 if (form && form.closest('.panel')) form.closest('.panel').style.display = 'none';
             }
@@ -2991,19 +2991,28 @@ let pestanaPedidos = puedeVerBandeja() ? 'realizados' : 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
 
+// Sucursales que ABAS TECEN a otras (América y Simón López): reciben pedidos
+// en su bandeja (pedidos que les hacen a ellas) pero TAMBIÉN hacen sus propios
+// pedidos, así que conservan las dos pestañas aunque en la base queden marcadas
+// como principal.
+function sucursalProvee() {
+    const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
+    if (!m) return false;
+    if (m.provee) return true;
+    const nombreNorm = (m.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return nombreNorm.includes('america') || nombreNorm.includes('simon lopez');
+}
+
 // «Mis pedidos» (wizard + historial de los que yo realicé) es visible para
-// toda sucursal. La bandeja «Pedidos que me realizaron» solo la ven las que
-// PROVEEN a otras: principales (proveen a todos) y América / Simón López.
+// toda sucursal que hace pedidos. La bandeja «Pedidos que me realizaron» solo
+// la ven las que PROVEEN a otras: almacenes principales, América y Simón López.
 // Siglo XX no provee: no ve la bandeja (nadie le encarga).
 function puedeVerBandeja() {
     if (!window.ROL) return false;
     if (esGestionPed()) return true;
     if (window.ROL !== 'encargado') return false;
     if (window.SUCURSAL_PRINCIPAL) return true;
-    const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
-    if (!m) return false;
-    const nombreNorm = (m.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    return !!(m.provee || nombreNorm.includes('america') || nombreNorm.includes('simon lopez'));
+    return sucursalProvee();
 }
 
 function inicializarPestanasPedidos() {
@@ -3011,9 +3020,13 @@ function inicializarPestanasPedidos() {
     const tabReal = $('#tab-hist-realizados');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
-    const esAdminOrAlmacen = (typeof esAdmin === 'function' && esAdmin()) || (typeof esAlmacenPpal === 'function' && esAlmacenPpal());
+    // Solo un almacén principal «puro» (que reparte pero no pide) y el admin se
+    // quedan únicamente con su bandeja. América y Simón López proveen a otras
+    // sucursales PERO también hacen sus propios pedidos: conservan las dos.
+    const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
+        || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
 
-    if (esAdminOrAlmacen) {
+    if (soloBandeja) {
         if (tabMis) tabMis.style.display = 'none';
         if (panelMis) panelMis.style.display = 'none';
         if (tabReal) tabReal.style.display = '';
