@@ -1,15 +1,20 @@
-from flask import Blueprint, request
+from flask import Blueprint, g, request
 
 from database import get_conn
 from .util import (ok, err, login_requerido, rol_requerido, responder_excel, sucursal_actual,
-                   sucursal_operativa, es_gestion, es_encargado_almacen, clausula_sucursal)
+                   sucursal_operativa, es_gestion, es_encargado_almacen, clausula_sucursal,
+                   ids_ciudad, cond_ciudad)
 from .productos import scope_productos
 
 reportes_bp = Blueprint("reportes", __name__)
 
 
 def _cls(col):
-    """(condición, params) para filtrar por la sucursal del usuario (o vacío para admin/superadmin)."""
+    """(condición, params) para filtrar por la sucursal del usuario. Para usuarios
+    de gestión, la vista de Reportes puede restringir por ciudad (?ciudad=...)."""
+    cids = getattr(g, "ciudad_ids", None)
+    if cids:
+        return cond_ciudad(col, cids)
     if es_gestion():
         return "", []
     sid = sucursal_actual()
@@ -24,6 +29,7 @@ def exportar_consumo():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """
         SELECT p.nombre, p.unidad, m.tipo,
                SUM(m.cantidad) AS cantidad, SUM(m.cantidad * m.precio_unitario) AS total
@@ -54,6 +60,7 @@ def exportar_consumo():
 @login_requerido
 def exportar_productos():
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     filtro = request.args.get("filtro", "").strip()
     categoria = request.args.get("categoria", "").strip()
     proveedor = request.args.get("proveedor", "").strip()
@@ -61,7 +68,13 @@ def exportar_productos():
     sucursal = request.args.get("sucursal", "").strip()
     sid = sucursal_actual()
     ver_todo = es_gestion() or es_encargado_almacen(conn)
-    if ver_todo or sid is None:
+    cids = g.ciudad_ids
+    if cids:
+        join_stock = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes "
+                      "WHERE sucursal_id IN (" + ",".join(["%s"] * len(cids)) + ") GROUP BY producto_id) s ON s.producto_id = p.id")
+        lote_cond = " AND l2.sucursal_id IN (" + ",".join(["%s"] * len(cids)) + ")"
+        stock_params = list(cids)
+    elif ver_todo or sid is None:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
         stock_params = []
@@ -142,13 +155,14 @@ def exportar_ventas():
     filtro = request.args.get("filtro", "").strip()
     sid_filtro = request.args.get("sucursal_id", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """SELECT v.id, v.fecha, v.total, v.usuario, v.nota, s.nombre AS sucursal
            FROM ventas v LEFT JOIN sucursales s ON s.id = v.sucursal_id WHERE 1=1"""
     params = []
     if es_gestion() and sid_filtro:
         q += " AND v.sucursal_id = %s"
         params.append(int(sid_filtro))
-    elif not es_gestion():
+    elif not es_gestion() or getattr(g, "ciudad_ids", None):
         cls, cls_params = _cls("v.sucursal_id")
         q += cls
         params += cls_params
@@ -178,6 +192,7 @@ def exportar_repartos():
     hasta = request.args.get("hasta", "")
     sid_filtro = request.args.get("sucursal_id", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """
         SELECT r.id, r.fecha, s.nombre AS sucursal, o.nombre AS origen, r.total, r.usuario, r.nota,
                (SELECT COUNT(*) FROM reparto_detalle d WHERE d.reparto_id = r.id) AS num_items
@@ -191,6 +206,10 @@ def exportar_repartos():
     if es_gestion() and sid_filtro:
         q += " AND r.sucursal_id = %s"
         params.append(int(sid_filtro))
+    elif getattr(g, "ciudad_ids", None):
+        cls, cls_params = _cls("r.sucursal_id")
+        q += cls
+        params += cls_params
     elif not es_gestion():
         cls, cls_params = clausula_sucursal("r.sucursal_id")
         if cls:
@@ -218,6 +237,7 @@ def reporte_consumo():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """
         SELECT p.nombre, p.unidad, m.tipo,
                SUM(m.cantidad) AS cantidad, SUM(m.cantidad * m.precio_unitario) AS total
@@ -246,6 +266,7 @@ def reporte_repartos():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """
         SELECT s.id, s.nombre, s.principal,
                COUNT(r.id) AS num_repartos,
@@ -276,6 +297,7 @@ def reporte_ventas_sucursal():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """
         SELECT s.nombre AS sucursal,
                COUNT(DISTINCT v.id) AS num_ventas,
@@ -308,8 +330,15 @@ def reporte_resumen():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
-    lote_cond = "" if es_gestion() else (" AND l.sucursal_id = %s" if sid is not None else "")
+    cids = g.ciudad_ids
+    if cids:
+        lote_cond = " AND l.sucursal_id IN (" + ",".join(["%s"] * len(cids)) + ")"
+        params_val = list(cids)
+    else:
+        lote_cond = "" if es_gestion() or sid is None else " AND l.sucursal_id = %s"
+        params_val = [] if es_gestion() or sid is None else [sid]
     params = []
     q = "SELECT COUNT(*) AS n, COALESCE(SUM(total), 0) AS total FROM ventas WHERE 1=1"
     cls, cls_params = _cls("sucursal_id")
@@ -352,7 +381,6 @@ def reporte_resumen():
         params.append(hasta)
     rep = conn.execute(q, params).fetchone()
 
-    params_val = [] if es_gestion() or sid is None else [sid]
     val = conn.execute("""
         SELECT s.nombre AS sucursal, ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor,
                COUNT(DISTINCT l.producto_id) AS unid
@@ -377,6 +405,7 @@ def reporte_ganancias():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """
         SELECT d.producto_nombre AS nombre,
                SUM(d.cantidad) AS cantidad,
@@ -408,6 +437,7 @@ def exportar_ganancias():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     q = """
         SELECT d.producto_nombre AS nombre,
                SUM(d.cantidad) AS cantidad,
@@ -440,10 +470,15 @@ def exportar_ganancias():
 @login_requerido
 def reporte_valorizacion():
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
-    params = []
+    cids = g.ciudad_ids
     lote_cond = ""
-    if not es_gestion() and sid is not None:
+    params = []
+    if cids:
+        lote_cond = " AND l.sucursal_id IN (" + ",".join(["%s"] * len(cids)) + ")"
+        params = list(cids)
+    elif not es_gestion() and sid is not None:
         lote_cond = " AND l.sucursal_id = %s"
         params = [sid]
     rows = conn.execute("""
@@ -465,8 +500,13 @@ def reporte_valorizacion():
 @login_requerido
 def reporte_vencimientos():
     conn = get_conn()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
-    if es_gestion() or sid is None:
+    cids = g.ciudad_ids
+    if cids:
+        params = list(cids)
+        lote_cond = " AND l.sucursal_id IN (" + ",".join(["%s"] * len(cids)) + ")"
+    elif es_gestion() or sid is None:
         params = []
         lote_cond = ""
     else:

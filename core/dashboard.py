@@ -1,20 +1,25 @@
 from datetime import date
 
-from flask import Blueprint, session
+from flask import Blueprint, g, request, session
 
 from database import get_conn
-from .util import ok, login_requerido, sucursal_actual, sucursal_operativa, es_gestion, es_encargado_almacen
+from .util import (ok, login_requerido, sucursal_actual, sucursal_operativa, es_gestion,
+                   es_encargado_almacen, ids_ciudad, cond_ciudad)
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
 
 def _cls(col):
-    """Devuelve (condición SQL, params) para filtrar por la sucursal del usuario
-    (o filtro vacío para superadmin que ve todo)."""
+    """Devuelve (condición SQL, params) para filtrar por la sucursal del usuario.
+    Quien ve todo (sin sucursal asignada) puede restringir por ciudad si el
+    usuario seleccionó una en la vista (?ciudad=cochabamba|la-paz)."""
     sid = sucursal_actual()
-    if sid is None:
-        return "", []
-    return f" AND {col} = %s", [sid]
+    if sid is not None:
+        return f" AND {col} = %s", [sid]
+    cids = getattr(g, "ciudad_ids", None)
+    if cids:
+        return cond_ciudad(col, cids)
+    return "", []
 
 
 @dashboard_bp.route("/api/dashboard")
@@ -23,6 +28,8 @@ def dashboard():
     conn = get_conn()
     hoy = date.today().isoformat()
     sid = sucursal_actual()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    cids = g.ciudad_ids
     # Los encargados de almacén principal coordinan el inventario: ven las alertas
     # de stock de TODAS las sucursales, igual que el admin (su "mano derecha").
     alerta_global = sid is None or es_encargado_almacen(conn)
@@ -39,7 +46,13 @@ def dashboard():
         return conn.execute(fn[0], fn[1]).fetchone()["t"]
 
     if sid is None:
-        total_productos = conn.execute("SELECT COUNT(*) c FROM productos WHERE activo = 1").fetchone()["c"]
+        if cids:
+            ph = ",".join(["%s"] * len(cids))
+            total_productos = conn.execute(
+                "SELECT COUNT(*) c FROM productos WHERE activo = 1 AND sucursal_id IN (" + ph + ")",
+                list(cids)).fetchone()["c"]
+        else:
+            total_productos = conn.execute("SELECT COUNT(*) c FROM productos WHERE activo = 1").fetchone()["c"]
     else:
         total_productos = conn.execute("""
             SELECT COUNT(DISTINCT l.producto_id) c
@@ -47,16 +60,15 @@ def dashboard():
             WHERE p.activo = 1 AND l.sucursal_id = %s
         """, (sid,)).fetchone()["c"]
 
+    stock_cond, stock_params = cond_ciudad("l.sucursal_id", cids)
     if sid is None:
         stock_total = conn.execute("""
             SELECT COUNT(*) c FROM lotes l JOIN productos p ON p.id = l.producto_id
-            WHERE l.cantidad > 0 AND p.activo = 1
-        """).fetchone()["c"]
+            WHERE l.cantidad > 0 AND p.activo = 1""" + stock_cond, stock_params).fetchone()["c"]
         valor = conn.execute("""
             SELECT COALESCE(SUM(l.cantidad * p.costo_promedio), 0) AS valor
             FROM lotes l JOIN productos p ON p.id = l.producto_id
-            WHERE l.cantidad > 0 AND p.activo = 1
-        """).fetchone()["valor"]
+            WHERE l.cantidad > 0 AND p.activo = 1""" + stock_cond, stock_params).fetchone()["valor"]
     else:
         stock_total = conn.execute("""
             SELECT COUNT(*) c FROM lotes l JOIN productos p ON p.id = l.producto_id
@@ -69,7 +81,13 @@ def dashboard():
         """, (sid,)).fetchone()["valor"]
 
     # Joins para las alertas de stock (globales si el usuario las ve de todas las sucursales)
-    if alerta_global:
+    if cids:
+        ph = ",".join(["%s"] * len(cids))
+        stock_join = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes "
+                      "WHERE sucursal_id IN (" + ph + ") GROUP BY producto_id) s ON s.producto_id = p.id")
+        stock_where = ""
+        stock_params = list(cids)
+    elif alerta_global:
         stock_join = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         stock_where = ""
         stock_params = []
@@ -103,7 +121,11 @@ def dashboard():
         ORDER BY stock ASC
     """.format(join=stock_join, where=stock_where), stock_params).fetchall()
 
-    if alerta_global:
+    if cids:
+        ph = ",".join(["%s"] * len(cids))
+        por_extra = " AND l.sucursal_id IN (" + ph + ")"
+        por_params = [hoy, hoy, hoy] + list(cids)
+    elif alerta_global:
         por_extra = ""
         por_params = [hoy, hoy, hoy]
     else:
@@ -145,11 +167,21 @@ def dashboard():
     q, p = scoped("m.sucursal_id", " AND m.tipo = 'salida' AND substr(m.fecha, 1, 7) = substr(%s, 1, 7)", [hoy])
     salidas_mes = esc(("SELECT COALESCE(SUM(m.cantidad), 0) AS t FROM movimientos m" + q, p))
 
+    if cids:
+        ph = ",".join(["%s"] * len(cids))
+        por_hoy_sql = " AND l.sucursal_id IN (" + ph + ")"
+        por_hoy_params = (hoy,) + tuple(cids)
+    elif not alerta_global:
+        por_hoy_sql = " AND l.sucursal_id = %s"
+        por_hoy_params = (hoy, sid)
+    else:
+        por_hoy_sql = " AND 1=1"
+        por_hoy_params = (hoy,)
     por_vencer_hoy = conn.execute("""
         SELECT COUNT(*) c FROM lotes l JOIN productos p ON p.id = l.producto_id
         WHERE p.activo = 1 AND l.cantidad > 0 AND l.fecha_vencimiento IS NOT NULL
           AND l.fecha_vencimiento <= DATE(%s)
-    """ + (" AND " + ("l.sucursal_id = %s" if not alerta_global else "1=1")), (hoy,) + (tuple([sid]) if not alerta_global else ())).fetchone()["c"]
+    """ + por_hoy_sql, por_hoy_params).fetchone()["c"]
 
     def count_scoped(fn):
         c, cp = fn
@@ -212,14 +244,23 @@ def dashboard():
         LIMIT 8
     """, params_mov).fetchall()
 
+    if cids:
+        ph = ",".join(["%s"] * len(cids))
+        ses_extra = " AND usuario IN (SELECT usuario FROM usuarios WHERE sucursal_id IN (" + ph + "))"
+        ses_params = tuple(cids)
+    elif sid is not None:
+        ses_extra = " AND usuario IN (SELECT usuario FROM usuarios WHERE sucursal_id = %s)"
+        ses_params = (sid,)
+    else:
+        ses_extra = ""
+        ses_params = ()
     sesiones_recientes = conn.execute("""
         SELECT fecha, usuario, accion, detalle
         FROM auditoria
-        WHERE accion IN ('Inicio de sesion', 'Cierre de sesion')"""
-        + (" AND usuario IN (SELECT usuario FROM usuarios WHERE sucursal_id = %s)" if sid is not None else "") + """
+        WHERE accion IN ('Inicio de sesion', 'Cierre de sesion')""" + ses_extra + """
         ORDER BY fecha DESC, id DESC
         LIMIT 10
-    """, (tuple([sid]) if sid is not None else ())).fetchall()
+    """, ses_params).fetchall()
 
     total_alertas = len(stock_bajo) + len(por_vencer)
 
@@ -263,6 +304,8 @@ def dashboard_graficos():
     conn = get_conn()
     hoy = date.today()
     sid = sucursal_actual()
+    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    cids = g.ciudad_ids
     cond, cls_params = _cls("v.sucursal_id")
     cond_m, cls_params_m = _cls("m.sucursal_id")
 
@@ -310,12 +353,17 @@ def dashboard_graficos():
     """, cls_params).fetchall()
 
     if sid is None:
+        cond_r, params_r = _cls("r.sucursal_id")
+        if cids:
+            ph = ",".join(["%s"] * len(cids))
+            cond_r = cond_r + " AND s.id IN (" + ph + ")"
+            params_r = params_r + list(cids)
         top_repartos = conn.execute("""
             SELECT s.nombre, COALESCE(SUM(r.total), 0) AS total
             FROM sucursales s LEFT JOIN repartos r ON r.sucursal_id = s.id
-            WHERE 1=1""" + _cls("r.sucursal_id")[0] + """
+            WHERE 1=1""" + cond_r + """
             GROUP BY s.id ORDER BY total DESC LIMIT 5
-        """, _cls("r.sucursal_id")[1]).fetchall()
+        """, params_r).fetchall()
     else:
         top_repartos = conn.execute("""
             SELECT s.nombre, COALESCE(SUM(r.total), 0) AS total

@@ -142,6 +142,12 @@
                 <span class="dash-date" id="dash-date"></span>
             </div>
 
+            <div class="hist-sucursal-tabs ciudad-tabs" id="ciudad-tabs-dash" style="margin:10px 0 4px">
+                <button class="btn hist-tab active" data-ciudad="" type="button">Resumen general</button>
+                <button class="btn hist-tab" data-ciudad="cochabamba" type="button">Cochabamba</button>
+                <button class="btn hist-tab" data-ciudad="la-paz" type="button">La Paz</button>
+            </div>
+
             <div class="kpi-grid">
                 <div class="kpi kpi-yellow"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></div><div class="kpi-info"><span class="kpi-label">Productos</span><span class="kpi-value" id="stat-productos">0</span></div></div>
                 <div class="kpi kpi-dark"><div class="kpi-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></div><div class="kpi-info"><span class="kpi-label">Con stock</span><span class="kpi-value" id="stat-stock">0</span></div></div>
@@ -512,6 +518,11 @@
         <section id="view-reportes" class="view">
             <div class="toolbar">
                 <h2>Reportes</h2>
+                <div class="hist-sucursal-tabs ciudad-tabs" id="ciudad-tabs-rep">
+                    <button class="btn hist-tab active" data-ciudad="" type="button">Resumen general</button>
+                    <button class="btn hist-tab" data-ciudad="cochabamba" type="button">Cochabamba</button>
+                    <button class="btn hist-tab" data-ciudad="la-paz" type="button">La Paz</button>
+                </div>
                 <input type="date" id="rep-desde">
                 <input type="date" id="rep-hasta">
                 <button class="btn" id="btn-generar-reporte">Generar</button>
@@ -1210,7 +1221,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=81"></script>
+    <script src="/static/app.js?v=82"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

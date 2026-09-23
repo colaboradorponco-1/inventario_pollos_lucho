@@ -281,3 +281,34 @@ def ip_local():
         return ip
     except Exception:
         return "127.0.0.1"
+
+
+def ciudad_normalizada(nombre):
+    """Normaliza el nombre de una sucursal/cliente a identificador de ciudad."""
+    try:
+        n = unicodedata.normalize("NFD", (nombre or "")).lower()
+        n = "".join(c for c in n if unicodedata.category(c) != "Mn")
+        return "la-paz" if "la paz" in n else "cochabamba"
+    except Exception:
+        return "cochabamba"
+
+
+def ids_ciudad(conn, ciudad):
+    """IDs de las sucursales de una ciudad ('cochabamba' | 'la-paz'); None si no aplica."""
+    ciudad = (ciudad or "").strip().lower()
+    if ciudad not in ("cochabamba", "la-paz"):
+        return None
+    out = []
+    for r in conn.execute(
+            "SELECT id, nombre FROM sucursales ORDER BY principal DESC, nombre").fetchall():
+        if ciudad_normalizada(r["nombre"]) == ciudad:
+            out.append(r["id"])
+    return out or None
+
+
+def cond_ciudad(col, cids):
+    """(condición SQL, params) para restringir una consulta a un conjunto de sucursales de una ciudad."""
+    if not cids:
+        return "", []
+    ph = ",".join(["%s"] * len(cids))
+    return f" AND {col} IN ({ph})", list(cids)

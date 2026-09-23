@@ -179,6 +179,7 @@ function loadView(name) {
 // ---------------- Refrescar ----------------
 let _refrescoActivo = false;
 const AUTOREFRESCO_EXCLUIDAS = ['reportes', 'auditoria', 'respaldo'];
+let CIUDAD_ACTUAL = '';
 
 function nombreVistaActiva() {
     const v = document.querySelector('.view.active');
@@ -359,6 +360,16 @@ document.addEventListener('click', (e) => {
     }
 });
 
+document.addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-ciudad]');
+    if (!tab || tab.classList.contains('active')) return;
+    document.querySelectorAll('[data-ciudad]').forEach((x) => x.classList.toggle('active', x === tab));
+    window.CIUDAD_ACTUAL = tab.dataset.ciudad || '';
+    const vista = nombreVistaActiva();
+    if (vista === 'dashboard') loadDashboard();
+    else if (vista === 'reportes') loadReportes();
+});
+
 // ---------------- Catálogos ----------------
 async function loadCatalogos() {
     catalogos = await request(API + '/catalogos');
@@ -412,7 +423,8 @@ async function loadCatalogos() {
 // ---------------- Dashboard ----------------
 async function loadDashboard() {
     try {
-        const d = await request(API + '/dashboard');
+        const par = window.CIUDAD_ACTUAL ? '?ciudad=' + encodeURIComponent(window.CIUDAD_ACTUAL) : '';
+        const d = await request(API + '/dashboard' + par);
         $('#stat-productos').textContent = d.total_productos;
         $('#stat-stock').textContent = d.stock_total;
         $('#stat-valor').textContent = 'Bs ' + fmtNum(d.valor_inventario);
@@ -503,7 +515,7 @@ async function loadDashboard() {
         }
 
         try {
-            const g = await request(API + '/dashboard/graficos');
+            const g = await request(API + '/dashboard/graficos' + par);
             graficoVentasGastos(g.meses);
             graficoUtilidad(g.meses);
             graficoHBar('#graf-top-productos', g.top_productos, 'cantidad', 'unid', '#FCC302');
@@ -1763,6 +1775,7 @@ async function loadReportes() {
         const qs = new URLSearchParams();
         if (desde) qs.set('desde', desde);
         if (hasta) qs.set('hasta', hasta);
+        if (window.CIUDAD_ACTUAL) qs.set('ciudad', window.CIUDAD_ACTUAL);
 
         const res = await request(API + '/reportes/resumen?' + qs.toString());
         $('#rep-resumen').innerHTML =
@@ -1853,7 +1866,7 @@ async function loadReportes() {
 
 $('#btn-generar-reporte').addEventListener('click', loadReportes);
 $$('#view-reportes [data-xls]').forEach((b) => b.addEventListener('click', () => {
-    window.location.href = b.dataset.xls + '?desde=' + ($('#rep-desde') || {}).value + '&hasta=' + ($('#rep-hasta') || {}).value;
+    window.location.href = b.dataset.xls + '?desde=' + ($('#rep-desde') || {}).value + '&hasta=' + ($('#rep-hasta') || {}).value + '&ciudad=' + (window.CIUDAD_ACTUAL || '');
 }));
 $('#btn-imprimir-reporte').addEventListener('click', () => window.print());
 $('#btn-etiquetas').addEventListener('click', () => window.open('/etiquetas', '_blank'));
@@ -3546,6 +3559,11 @@ async function init() {
         if (s.rol !== 'superadmin') {
             const g = $('#btn-gestionar-sucursales');
             if (g) g.style.display = 'none';
+        }
+        // Solo el superadmin separa los datos por ciudad (Cochabamba / La Paz)
+        if (s.rol !== 'superadmin') {
+            window.CIUDAD_ACTUAL = '';
+            document.querySelectorAll('.ciudad-tabs').forEach((el) => { el.style.display = 'none'; });
         }
         const tSes = $('#sidebar-sesion');
         if (tSes) {
