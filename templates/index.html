@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pollos Lucho">
-    <link rel="stylesheet" href="/static/style.css?v=21">
+    <link rel="stylesheet" href="/static/style.css?v=22">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
@@ -237,6 +237,7 @@
         <!-- PRODUCTOS -->
         <section id="view-productos" class="view">
             <div class="toolbar">
+                <span class="tb-tag">Búsqueda</span>
                 <label class="scan-input" style="flex:0 0 260px;margin:0">
                     <span class="scan-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg></span>
                     <input type="text" id="prod-escaneo" placeholder="Escanear código de barras..." autocomplete="off">
@@ -255,7 +256,7 @@
                 <div class="toolbar-spacer"></div>
                 <button class="btn" id="btn-exportar-productos">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    Excel
+                    Exportar
                 </button>
                 <button class="btn" id="btn-importar-prod">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -367,6 +368,7 @@
                     </div>
                     <div id="hist-sucursal-btns" class="toolbar small" style="display:none;margin-bottom:8px"></div>
                     <div class="toolbar small">
+                        <span class="tb-tag">Búsqueda y filtros</span>
                         <input type="text" id="mov-filtro" placeholder="Buscar producto...">
                         <input type="date" id="mov-desde">
                         <input type="date" id="mov-hasta">
@@ -376,6 +378,7 @@
                             <option value="salida">Salidas</option>
                         </select>
                         <button class="btn" id="btn-filtrar-mov">Filtrar</button>
+                        <span class="tb-tag">Exportar</span>
                         <select id="mov-export-tipo" style="max-width:150px"><option value="">Todos los tipos</option><option value="entrada">Entradas</option><option value="salida">Salidas</option><option value="ajuste">Ajustes</option></select>
                         <select id="mov-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-mov">Exportar</button>
@@ -393,6 +396,7 @@
         <section id="view-proveedores" class="view">
             <div class="toolbar">
                 <h2>Proveedores</h2>
+                <span class="tb-tag">Búsqueda</span>
                 <input type="text" id="proveedor-filtro" placeholder="Buscar nombre, teléfono, email...">
                 <button class="btn btn-primary" id="btn-nuevo-proveedor">+ Nuevo proveedor</button>
             </div>
@@ -450,10 +454,12 @@
                 <div class="panel">
                     <h2>Lista de gastos</h2>
                     <div class="toolbar small">
+                        <span class="tb-tag">Búsqueda y filtros</span>
                         <input type="text" id="gasto-filtro" placeholder="Buscar categoría, descripción, proveedor...">
                         <input type="date" id="gasto-desde">
                         <input type="date" id="gasto-hasta">
                         <button class="btn" id="btn-filtrar-gastos">Filtrar</button>
+                        <span class="tb-tag">Exportar</span>
                         <select id="gasto-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-gastos">Exportar</button>
                     </div>
@@ -612,10 +618,12 @@
                 <div class="panel">
                     <h2>Historial de ventas</h2>
                     <div class="toolbar small">
+                        <span class="tb-tag">Búsqueda y filtros</span>
                         <input type="text" id="venta-filtro" placeholder="Buscar #venta, usuario, nota...">
                         <input type="date" id="venta-desde">
                         <input type="date" id="venta-hasta">
                         <button class="btn" id="btn-filtrar-ventas">Filtrar</button>
+                        <span class="tb-tag">Exportar</span>
                         <select id="venta-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-ventas">Exportar</button>
                     </div>
@@ -687,10 +695,12 @@
                     </div>
                     <div id="reparto-sucursal-btns" class="toolbar small" style="display:none;margin-bottom:8px"></div>
                     <div class="toolbar small">
+                        <span class="tb-tag">Búsqueda y filtros</span>
                         <input type="text" id="reparto-filtro" placeholder="Buscar sucursal, usuario, nota...">
                         <input type="date" id="reparto-desde">
                         <input type="date" id="reparto-hasta">
                         <button class="btn" id="btn-filtrar-repartos">Filtrar</button>
+                        <span class="tb-tag">Exportar</span>
                         <select id="reparto-export-sucursal" style="max-width:180px"></select>
                         <button class="btn" id="btn-exportar-repartos">Exportar</button>
                     </div>
@@ -757,6 +767,7 @@
                 <div class="panel">
                     <h2>Mis pedidos (los que realicé)</h2>
                     <div class="toolbar small">
+                        <span class="tb-tag">Búsqueda y filtros</span>
                         <input type="date" id="pedido-realizados-desde" title="Desde">
                         <input type="date" id="pedido-realizados-hasta" title="Hasta">
                         <input type="text" id="pedido-filtro" placeholder="Buscar ticket, sucursal, nota...">
@@ -775,6 +786,7 @@
                 <div class="panel">
                     <h2>Pedidos que me realizaron (bandeja)</h2>
                     <div class="toolbar small">
+                        <span class="tb-tag">Búsqueda y filtros</span>
                         <input type="date" id="pedido-bandeja-desde">
                         <input type="date" id="pedido-bandeja-hasta">
                         <select id="pedido-sucursal-filtro" style="max-width:220px"></select>
