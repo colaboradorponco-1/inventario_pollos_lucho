@@ -233,7 +233,7 @@ def _ticket_data(conn, pedido_id):
         WHERE p.id = ?
     """, (pedido_id,)).fetchone()
     detalle = conn.execute("""
-        SELECT d.*, c.nombre AS categoria_nombre
+        SELECT d.*, pr.costo_promedio AS costo_unitario, c.nombre AS categoria_nombre
         FROM pedido_detalle d
         LEFT JOIN productos pr ON pr.id = d.producto_id
         LEFT JOIN categorias c ON c.id = pr.categoria_id
@@ -264,6 +264,8 @@ def _ticket_data(conn, pedido_id):
             "producto": d["producto_nombre"],
             "unidad": d["unidad"] or "unidad",
             "cantidad": d["cantidad"],
+            "costo": d["costo_unitario"] or 0,
+            "subtotal": round((d["costo_unitario"] or 0) * d["cantidad"], 2),
         })
     ped = dict(pedido)
     ped["fecha"] = _normalizar_fecha(ped.get("fecha"))

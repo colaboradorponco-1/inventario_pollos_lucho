@@ -359,6 +359,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; margin-left: 240px; }
     font-size: 14px;
     cursor: pointer;
     transition: all .2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
 }
 .segment-tab:hover { color: var(--text); }
 .segment-tab.active {
@@ -1079,5 +1082,32 @@ body.rol-encargado .panel-finance {
     font-size: 13px;
     font-weight: 600;
     color: var(--dark, #0C0908);
+}
+
+/* Configuración */
+.cfg-grupo {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+    margin: 18px 0 10px;
+}
+.cfg-grupo:first-of-type { border-top: none; padding-top: 4px; margin-top: 10px; }
+.cfg-nota { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.cfg-btn { display: inline-flex; align-items: center; gap: 6px; }
+.modal-content label.check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    margin: 10px 0;
+}
+.modal-content label.check input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary, #FCC302);
+    cursor: pointer;
 }
 

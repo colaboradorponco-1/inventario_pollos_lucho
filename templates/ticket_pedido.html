@@ -36,10 +36,21 @@
         .resumen { border-top: 2px solid #FCC302; margin-top: 16px; padding-top: 12px; font-size: 13px; color: #555; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
         .firma { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 34px; text-align: center; font-size: 12px; color: #555; }
         .firma div { border-top: 1px solid #bbb; padding-top: 6px; }
+        .ticket-pie { margin-top: 16px; text-align: center; font-size: 11px; color: #555; border-top: 1px dashed #ccc; padding-top: 8px; }
+        th.costo, td.costo { text-align: right; white-space: nowrap; }
+        .ticket.tk-80 { max-width: 80mm; font-size: 11px; }
+        .ticket.tk-80 .meta { grid-template-columns: 1fr 1fr; }
+        .ticket.tk-80 table { font-size: 10px; }
+        .ticket.tk-58 { max-width: 58mm; font-size: 9px; padding: 10px 8px; }
+        .ticket.tk-58 table { font-size: 8px; }
+        .ticket.tk-58 th, .ticket.tk-58 td { padding: 3px 4px; }
+        .ticket.tk-58 .categoria-titulo { font-size: 9px; }
+        .ticket.tk-58 .ticket-head .brand { font-size: 15px; }
         @media print {
             body { background: #fff; padding: 0; }
             .topbar { display: none !important; }
             .ticket { box-shadow: none; max-width: none; padding: 0; }
+            .ticket.tk-80, .ticket.tk-58 { max-width: none; margin: 0; }
             @page { size: letter; margin: 12mm; }
         }
     </style>
@@ -52,7 +63,7 @@
     </div>
     <div class="ticket">
         <div class="ticket-head">
-            <div class="brand">POLLOS LUCHO <small>ORDEN DE PEDIDO A PROVEEDORES</small></div>
+            <div class="brand"><span id="ticket-nombre">POLLOS LUCHO</span> <small id="ticket-bajada">ENTREGA Y DESPACHO DE MERCADERÍA</small></div>
             <div class="nro">{{ data.pedido.nro_ticket }}</div>
         </div>
         <div class="meta">
@@ -71,7 +82,7 @@
                 {% if prov.principal %}<span class="est">(ALMACÉN PRINCIPAL)</span>{% endif %}
             </div>
             <table>
-                <thead><tr><th>Categoría</th><th style="width:46%">Producto</th><th class="unid" style="width:18%">Unidad</th><th class="cant" style="width:10%">Cant.</th></tr></thead>
+                <thead><tr><th>Categoría</th><th style="width:40%">Producto</th><th class="unid" style="width:15%">Unidad</th><th class="cant" style="width:9%">Cant.</th><th class="costo" style="display:none">Costo Bs</th><th class="costo" style="display:none">Subtotal Bs</th></tr></thead>
                 <tbody>
                     {% for cat in prov.categorias %}
                         {% for item in cat['items'] %}
@@ -80,6 +91,8 @@
                             <td>{{ item.producto }}</td>
                             <td class="unid">{{ item.unidad }}</td>
                             <td class="cant">{{ item.cantidad }}</td>
+                            <td class="costo" style="display:none">{{ "%.2f"|format(item.costo|default(0)) }}</td>
+                            <td class="costo" style="display:none">{{ "%.2f"|format(item.subtotal|default(0)) }}</td>
                         </tr>
                         {% endfor %}
                     {% endfor %}
@@ -91,12 +104,30 @@
         {% endfor %}
         <div class="resumen">
             <span><strong>{{ data.num_items }}</strong> producto(s) solicitado(s)</span>
-            <span>Total de proveedores: <strong>{{ data.proveedores|length }}</strong></span>
+            <span>Total de entregas: <strong>{{ data.proveedores|length }}</strong></span>
         </div>
         <div class="firma">
-            <div>Firma / sello del proveedor</div>
+            <div>Firma / sello de quien entrega</div>
             <div>Firma de recepción de la sucursal</div>
         </div>
+        <div class="ticket-pie" id="ticket-pie" style="display:none"></div>
     </div>
+    <script>
+        (function () {
+            var cfg = { ancho: 'auto', cabecera: '', pie: '', costo: false };
+            try { cfg = Object.assign(cfg, JSON.parse(localStorage.getItem('pollos_config') || '{}')); } catch (e) {}
+            var ticket = document.querySelector('.ticket');
+            if (ticket && cfg.ancho && cfg.ancho !== 'auto') ticket.classList.add('tk-' + cfg.ancho);
+            if (cfg.cabecera) {
+                var nom = document.getElementById('ticket-nombre');
+                if (nom) nom.textContent = cfg.cabecera;
+            }
+            if (cfg.pie) {
+                var pie = document.getElementById('ticket-pie');
+                if (pie) { pie.textContent = cfg.pie; pie.style.display = ''; }
+            }
+            document.querySelectorAll('.costo').forEach(function (el) { el.style.display = cfg.costo ? '' : 'none'; });
+        })();
+    </script>
 </body>
 </html>

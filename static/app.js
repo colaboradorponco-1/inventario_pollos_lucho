@@ -312,6 +312,16 @@ function abrirConfiguracion() {
     if (v) v.textContent = APP_VERSION;
     const s = $('#cfg-autorefresco');
     if (s) s.value = intervaloAutoRefresco();
+    const t = cfgTickets();
+    const el = (id) => document.getElementById(id);
+    const ancho = el('cfg-ticket-ancho');
+    if (ancho) ancho.value = t.ancho || 'auto';
+    const cab = el('cfg-ticket-cabecera');
+    if (cab) cab.value = t.cabecera || '';
+    const pie = el('cfg-ticket-pie');
+    if (pie) pie.value = t.pie || '';
+    const cost = el('cfg-ticket-costo');
+    if (cost) cost.checked = !!t.costo;
     const est = $('#cfg-estado');
     if (est) est.textContent = 'La app se actualiza sola cuando hay una versión nueva (mientras no estés escribiendo).';
     openModal('modal-configuracion');
@@ -327,6 +337,55 @@ if (_selAutoref) {
 }
 const _btnBuscar = document.getElementById('cfg-buscar-act');
 if (_btnBuscar) _btnBuscar.addEventListener('click', buscarActualizacion);
+
+// ---------------- Configuración de impresión ----------------
+const KEY_CONFIG = 'pollos_config';
+
+function cfgTickets() {
+    try {
+        return Object.assign({ ancho: 'auto', cabecera: '', pie: '', costo: false },
+                              JSON.parse(localStorage.getItem(KEY_CONFIG) || '{}'));
+    } catch (_) { return { ancho: 'auto', cabecera: '', pie: '', costo: false }; }
+}
+
+function guardarConfig(parcial) {
+    const cfg = Object.assign(cfgTickets(), parcial);
+    localStorage.setItem(KEY_CONFIG, JSON.stringify(cfg));
+    return cfg;
+}
+
+const _cfgPrinter = document.getElementById('cfg-ticket-ancho');
+if (_cfgPrinter) {
+    _cfgPrinter.addEventListener('change', () => {
+        guardarConfig({ ancho: _cfgPrinter.value });
+        toast('Ancho del documento: ' + ({ auto: 'Carta (A4)', '80': '80 mm', '58': '58 mm' })[_cfgPrinter.value] || _cfgPrinter.value, 'ok');
+    });
+}
+const _cfgCab = document.getElementById('cfg-ticket-cabecera');
+if (_cfgCab) {
+    _cfgCab.addEventListener('change', () => {
+        guardarConfig({ cabecera: _cfgCab.value.trim() });
+        toast('Cabecera actualizada', 'ok');
+    });
+}
+const _cfgPie = document.getElementById('cfg-ticket-pie');
+if (_cfgPie) {
+    _cfgPie.addEventListener('change', () => {
+        guardarConfig({ pie: _cfgPie.value.trim() });
+        toast('Pie del documento actualizado', 'ok');
+    });
+}
+const _cfgCost = document.getElementById('cfg-ticket-costo');
+if (_cfgCost) {
+    _cfgCost.addEventListener('change', () => {
+        guardarConfig({ costo: _cfgCost.checked });
+        toast(_cfgCost.checked ? 'Mostrará costos en el ticket de pedido' : 'Ocultará costos en el ticket de pedido', 'ok');
+    });
+}
+document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-abrir-config]');
+    if (b) abrirConfiguracion();
+});
 
 // ---------------- Catálogos ----------------
 async function loadCatalogos() {
