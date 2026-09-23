@@ -3001,7 +3001,9 @@ function puedeVerBandeja() {
     if (window.ROL !== 'encargado') return false;
     if (window.SUCURSAL_PRINCIPAL) return true;
     const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
-    return !!(m && m.provee);
+    if (!m) return false;
+    const nombreNorm = (m.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return !!(m.provee || nombreNorm.includes('america') || nombreNorm.includes('simon lopez'));
 }
 
 function inicializarPestanasPedidos() {
