@@ -11,7 +11,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pollos Lucho">
-    <link rel="stylesheet" href="/static/style.css?v=18">
+    <link rel="stylesheet" href="/static/style.css?v=19">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
@@ -1234,7 +1234,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=76"></script>
+    <script src="/static/app.js?v=77"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

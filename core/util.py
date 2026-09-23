@@ -3,6 +3,7 @@ from datetime import datetime
 from functools import wraps
 from io import BytesIO, StringIO
 import socket
+import unicodedata
 
 from flask import jsonify, redirect, request, session, send_file
 
@@ -85,8 +86,13 @@ def es_encargado_almacen(conn):
     sid = sucursal_actual()
     if not sid:
         return False
-    fila = conn.execute("SELECT principal FROM sucursales WHERE id = ?", (sid,)).fetchone()
-    return bool(fila and fila["principal"])
+    fila = conn.execute("SELECT principal, nombre FROM sucursales WHERE id = ?", (sid,)).fetchone()
+    if not fila or not fila["principal"]:
+        return False
+    # La Paz es una sucursal filial: aunque por error quede marcada como
+    # principal en la base, su encargado NO actúa como almacén principal.
+    norm = unicodedata.normalize("NFD", fila["nombre"] or "").encode("ascii", "ignore").decode().lower()
+    return "la paz" not in norm
 
 
 def sucursal_actual():

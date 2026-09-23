@@ -1,4 +1,5 @@
 import time
+import unicodedata
 
 from flask import Blueprint, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -7,6 +8,17 @@ from database import get_conn
 from .util import ok, err, login_requerido, registrar_auditoria
 
 auth_bp = Blueprint("auth", __name__)
+
+
+def _es_sucursal_paz(nombre):
+    """True si el nombre de la sucursal corresponde a La Paz (filial).
+
+    Permite que una sucursal de La Paz nunca sea tratada como almacén
+    principal, aunque por error quede marcada así en la base."""
+    if not nombre:
+        return False
+    norm = unicodedata.normalize("NFD", str(nombre)).encode("ascii", "ignore").decode().lower()
+    return "la paz" in norm
 
 # ---- Protección contra fuerza bruta (por IP): 5 intentos fallidos -> 15 min ----
 MAX_INTENTOS = 5
@@ -91,15 +103,20 @@ def sesion():
         return err("Sin sesión", 401)
     principal = False
     sid = session.get("sucursal_id")
+    nombre_suc = session.get("sucursal_nombre", "")
     if sid:
         conn = get_conn()
         fila = conn.execute("SELECT principal FROM sucursales WHERE id = ?", (sid,)).fetchone()
         conn.close()
         principal = bool(fila and fila["principal"])
+    es_la_paz = _es_sucursal_paz(nombre_suc)
+    if es_la_paz:
+        principal = False  # La Paz es filial: nunca es almacén principal
     return ok({"usuario": session.get("usuario"), "nombre": session.get("nombre"),
                "rol": session.get("rol"), "sucursal_id": sid,
                "sucursal_nombre": session.get("sucursal_nombre", ""),
                "sucursal_principal": principal,
+               "es_la_paz": es_la_paz,
                "superadmin": session.get("rol") == "superadmin"})
 
 

@@ -1111,3 +1111,35 @@ body.rol-encargado .panel-finance {
     cursor: pointer;
 }
 
+
+/* Etiqueta de ciudad (La Paz / Cochabamba) */
+.ciudad-tag {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #8a6d00;
+    background: #fdf6dd;
+    border: 1px solid #f0d98a;
+    border-radius: 999px;
+    padding: 1px 8px;
+    vertical-align: middle;
+}
+.badge-ciudad {
+    font-size: 11px;
+    font-weight: 600;
+    color: #8a6d00;
+    background: #fdf6dd;
+    border: 1px solid #f0d98a;
+    border-radius: 999px;
+    padding: 2px 8px;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+.bandeja-sucursal > h3, .categoria-header h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}

@@ -597,6 +597,18 @@ def migrar_esquema():
                             (nombre, "", principal))
         db.commit()
 
+        # 3b) La Paz es una sucursal filial (nunca almacén principal): corrige
+        # el dato si quedó marcada por error en el panel de sucursales.
+        cur.execute("SELECT id, nombre FROM sucursales")
+        _todas = cur.fetchall()
+        _lp = next((f for f in _todas if "la paz" in _nombre_norm(f["nombre"])), None)
+        if _lp:
+            cur.execute("UPDATE sucursales SET principal = 0 WHERE id = %s", (_lp["id"],))
+        else:
+            cur.execute("INSERT INTO sucursales (nombre, direccion, principal) VALUES (%s, %s, %s)",
+                        ("La Paz - 6 de Agosto", "", 0))
+        db.commit()
+
         # 4) Asociar el superadmin a Principal 1
         cur.execute("SELECT id FROM sucursales WHERE nombre = 'Almacén Principal 1'")
         p1 = cur.fetchone()

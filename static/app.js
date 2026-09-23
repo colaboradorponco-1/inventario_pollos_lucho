@@ -402,19 +402,21 @@ async function loadCatalogos() {
     fill('#prod-categoria-form', catalogos.categorias, '— Sin categoría —');
     fill('#prod-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#prod-filtro-proveedor', catalogos.proveedores, 'Todos los proveedores');
-    fill('#prov-sucursal', catalogos.sucursales, '— Sin sucursal —');
+    const selProvS = $('#prov-sucursal');
+    if (selProvS) selProvS.innerHTML = opcionesSucursales(catalogos.sucursales, '— Sin sucursal —');
     const sucursalesOpt = () => {
         const lista = esCentral()
             ? (catalogos.sucursales || [])
             : (catalogos.sucursales || []).filter((s) => s.id === window.SUCURSAL_ID);
-        return lista.map((i) => `<option value="${i.id}">${esc(i.nombre)}</option>`).join('');
+        return opcionesSucursales(lista, '');
     };
     const selImp = $('#importar-sucursal');
     if (selImp) selImp.innerHTML = '<option value="">Seleccione una sucursal...</option>' + sucursalesOpt();
     const selExp = $('#exportar-sucursal');
     if (selExp) selExp.innerHTML = '<option value="">Todas las sucursales</option>' + sucursalesOpt();
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
-    fill('#prod-sucursal', catalogos.sucursales, 'Seleccione una sucursal...');
+    const selProdSuc = $('#prod-sucursal');
+    if (selProdSuc) selProdSuc.innerHTML = opcionesSucursales(catalogos.sucursales, 'Seleccione una sucursal...');
     fill('#importar-categoria', catalogos.categorias, '— Sin categoría —');
     fill('#exportar-categoria', catalogos.categorias, 'Todas las categorías');
     fill('#mov-almacen', catalogos.almacenes, '— Sin almacén —');
@@ -422,15 +424,12 @@ async function loadCatalogos() {
     fill('#gasto-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#mov-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#qr-proveedor', catalogos.proveedores, 'Proveedor (opcional)');
-    fill('#prov-sucursal', catalogos.sucursales, '— Sin sucursal —');
-    fill('#prov-sucursal-select', catalogos.sucursales, 'Seleccione una sucursal...');
-    fill('#gasto-sucursal-select', catalogos.sucursales, 'Seleccione una sucursal...');
-    fill('#venta-sucursal-select', catalogos.sucursales, 'Seleccione una sucursal...');
-    fill('#reparto-sucursal-select', catalogos.sucursales, 'Seleccione una sucursal...');
-    fill('#mov-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
-    fill('#gasto-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
-    fill('#venta-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
-    fill('#reparto-export-sucursal', catalogos.sucursales, 'Todas las sucursales');
+    ['#prov-sucursal-select', '#gasto-sucursal-select', '#venta-sucursal-select', '#reparto-sucursal-select',
+     '#mov-export-sucursal', '#gasto-export-sucursal', '#venta-export-sucursal', '#reparto-export-sucursal']
+        .forEach((id) => {
+            const el = $(id);
+            if (el) el.innerHTML = opcionesSucursales(catalogos.sucursales, el.options[0]?.text || 'Todas las sucursales');
+        });
     const esGestion = window.ROL === 'admin' || window.ROL === 'superadmin';
     ['#mov-export-sucursal', '#gasto-export-sucursal', '#venta-export-sucursal', '#reparto-export-sucursal']
         .forEach((id) => { const el = $(id); if (el) el.style.display = esGestion ? 'inline-flex' : 'none'; });
@@ -623,9 +622,44 @@ function graficoHBar(selector, items, campo, pref, color) {
 
 // ---------------- Productos ----------------
 function esAdmin() { return window.ROL === 'admin' || window.ROL === 'superadmin'; }
-function esAlmacenPpal() { return window.ROL === 'encargado' && !!window.SUCURSAL_PRINCIPAL; }
+function esAlmacenPpal() { return window.ROL === 'encargado' && !!window.SUCURSAL_PRINCIPAL && !window.ES_LA_PAZ; }
 // Admin/superadmin y encargados de almacén principal actúan como "mano derecha" del admin
 function esCentral() { return esAdmin() || esAlmacenPpal(); }
+
+// ---------------- Ciudades (La Paz / Cochabamba) ----------------
+function nombreNorm(nombre) {
+    return (nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+function ciudadSucursal(nombre) {
+    return nombreNorm(nombre).includes('la paz') ? 'La Paz' : 'Cochabamba';
+}
+function ordenarSucursales(lista) {
+    // Cochabamba primero (almacenes principales al inicio) y luego La Paz;
+    // dentro de cada ciudad, alfabético.
+    return (lista || []).slice().sort((a, b) => {
+        const ca = ciudadSucursal(a.nombre), cb = ciudadSucursal(b.nombre);
+        if (ca !== cb) return ca === 'La Paz' ? 1 : -1;
+        if (!!a.principal !== !!b.principal) return a.principal ? -1 : 1;
+        return nombreNorm(a.nombre).localeCompare(nombreNorm(b.nombre), 'es');
+    });
+}
+function opcionesSucursales(lista, placeholder) {
+    // Opciones <select> agrupadas por ciudad (Cochabamba / La Paz) y en orden.
+    const lista2 = ordenarSucursales(lista || []);
+    let html = placeholder ? `<option value="">${esc(placeholder)}</option>` : '';
+    let grupo = null;
+    for (const s of lista2) {
+        const c = ciudadSucursal(s.nombre);
+        if (c !== grupo) {
+            if (grupo !== null) html += '</optgroup>';
+            grupo = c;
+            html += `<optgroup label="${c}">`;
+        }
+        html += `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`;
+    }
+    if (grupo !== null) html += '</optgroup>';
+    return html;
+}
 
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
 function puedeVerTodasSucursales() { return esAdmin() || esAlmacenPpal(); }
@@ -644,7 +678,7 @@ async function poblarBotonesSucursal(contId, selectId, listarFn) {
     if (!sucs.length) { try { sucs = await request(API + '/sucursales'); } catch (e) { sucs = []; } }
     const activo = select ? String(select.value || '') : '';
     cont.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-        .concat(sucs || [])
+        .concat(ordenarSucursales(sucs || []))
         .map((s) => `<button type="button" class="btn btn-sm ${activo === String(s.id) ? 'btn-primary' : ''}" data-suc="${String(s.id)}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</button>`)
         .join('');
     cont.querySelectorAll('[data-suc]').forEach((b) => b.addEventListener('click', () => {
@@ -659,7 +693,7 @@ async function pintarProdScope() {
     if (!row) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
     const botones = [{ v: '', lbl: 'Todas' }]
-        .concat((catalogos.sucursales || []).map((s) => ({ v: String(s.id), lbl: s.nombre })));
+        .concat(ordenarSucursales(catalogos.sucursales || []).map((s) => ({ v: String(s.id), lbl: s.nombre })));
     const ctr = {};
     for (const b of botones) {
         try {
@@ -698,7 +732,7 @@ async function loadProductos() {
         const container = $('#productos-por-categoria');
         container.innerHTML = '';
 
-        const grupos = (catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre }));
+        const grupos = ordenarSucursales(catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre }));
         const cats = [{ id: 0, nombre: 'Sin categoría' }]
             .concat((catalogos.categorias || []).map((c) => ({ id: c.id, nombre: c.nombre })));
         let visibles = _prodSuc === '' ? grupos : grupos.filter((g) => String(g.id) === _prodSuc);
@@ -763,7 +797,7 @@ async function loadProductos() {
             container.innerHTML += `
                 <div class="categoria-card">
                     <div class="categoria-header">
-                        <h3>${esc(g.nombre)}</h3>
+                        <h3>${esc(g.nombre)} <span class="ciudad-tag">${ciudadSucursal(g.nombre)}</span></h3>
                         <span class="badge badge-info">${items.length} producto(s)</span>
                     </div>
                     ${bloques.length
@@ -940,8 +974,7 @@ async function openProductoModal(id, lista) {
         sid0 = ((catalogos.sucursales || []).find((s) => s.principal) || {}).id || '';
     }
     if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
-        selSuc.innerHTML = '<option value="">Seleccione una sucursal...</option>' +
-            catalogos.sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join('');
+        selSuc.innerHTML = opcionesSucursales(catalogos.sucursales, 'Seleccione una sucursal...');
     }
     selSuc.value = sid0 || '';
     // Al editar, la sucursal se mantiene fija salvo para admin (evita registrar
@@ -2198,9 +2231,9 @@ async function loadRepartos() {
         const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' || window.SUCURSAL_PRINCIPAL);
         const esPrincipal = !!window.SUCURSAL_PRINCIPAL;
         const destino = sucursales.filter((s) => s.id !== window.SUCURSAL_ID && (esGestion || esPrincipal || !s.principal));
-        $('#reparto-sucursal').innerHTML = destino.map((s) =>
-            `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
-        $('#repartos-info').textContent = `Cochabamba · ${sucursales.length} sucursales`;
+        $('#reparto-sucursal').innerHTML = opcionesSucursales(destino, '');
+        const _ciud = sucursales.reduce((a, s) => { const c = ciudadSucursal(s.nombre); a[c] = (a[c] || 0) + 1; return a; }, {});
+        $('#repartos-info').textContent = 'Cochabamba: ' + (_ciud.Cochabamba || 0) + ' · La Paz: ' + (_ciud['La Paz'] || 0);
         if (window.ROL === 'superadmin') {
             $('#btn-gestionar-sucursales').style.display = 'inline-flex';
         }
@@ -2408,9 +2441,9 @@ $('#btn-gestionar-sucursales').addEventListener('click', () => {
 
 async function cargarSucursales() {
     const sucursales = await request(API + '/sucursales');
-    $('#sucursales-tbody').innerHTML = sucursales.map((s) => `
+    $('#sucursales-tbody').innerHTML = ordenarSucursales(sucursales).map((s) => `
         <tr>
-            <td><strong>${esc(s.nombre)}</strong></td>
+            <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s.nombre)}</span></td>
             <td>${s.direccion || '—'}</td>
             <td><span class="badge ${s.principal ? 'badge-bajo' : 'badge-entrada'}">${s.principal ? 'Principal' : 'Sucursal'}</span></td>
             <td>${s.num_repartos}</td>
@@ -3010,9 +3043,7 @@ async function loadPedidos() {
         // igual que en la pantalla de Productos.
         pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
         const sucursales = await request(API + '/sucursales');
-        const opciones = '<option value="">Todas las sucursales</option>' +
-            sucursales.map((s) =>
-                `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
+        const opciones = opcionesSucursales(sucursales, 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
         if (filtroSel) filtroSel.innerHTML = opciones;
         const filtroReal = $('#pedido-sucursal-realizados');
@@ -3032,8 +3063,7 @@ async function loadPedidos() {
             if (volver2) volver2.style.display = 'none';
             irPaso(2);
         } else {
-            selSuc.innerHTML = sucursales.map((s) =>
-                `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
+            selSuc.innerHTML = opcionesSucursales(sucursales, '');
             pedidoSucursal = +selSuc.value || null;
             irPaso(1);
         }
@@ -3181,11 +3211,11 @@ async function cargarBandeja() {
         const esReceptor = window.ROL === 'encargado' && !esGestionPed() && !esAlmacenPpal();
         const selF = (($('#pedido-sucursal-filtro') || {}).value || '');
         const sucF = esReceptor ? '' : (bandejaSucF || selF);
-        const grupos = sucF ? gruposRaw.filter((g) => String(g.sucursal_id) === sucF) : gruposRaw;
+        const grupos = sucF ? gruposRaw.filter((g) => String(g.sucursal_id) === sucF) : ordenarSucursales(gruposRaw);
         const btsB = $('#bandeja-suc-btns');
         if (btsB) {
             btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-                .concat(gruposRaw.map((g) => ({ id: String(g.sucursal_id), nombre: g.nombre })))
+                .concat(ordenarSucursales(gruposRaw.map((g) => ({ id: String(g.sucursal_id), nombre: g.nombre }))))
                 .map((b) => `
                     <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
                 .join('');
@@ -3201,7 +3231,7 @@ async function cargarBandeja() {
         const miSuc = String(window.SUCURSAL_ID || '');
         $('#bandeja-contenido').innerHTML = grupos.map((g) => `
             <div class="bandeja-sucursal">
-                <h3>${esc(g.nombre)} <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
+                <h3>${esc(g.nombre)} <span class="ciudad-tag">${ciudadSucursal(g.nombre)}</span> <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
                 ${g.pedidos.map((p) => {
                     // Permiso: el usuario solo puede cambiar estado/despachar pedidos
                     // que llegan a SU propia sucursal (destino = su sucursal).
@@ -3506,6 +3536,7 @@ async function init() {
         window.SUCURSAL = s.sucursal_nombre || '';
         window.SUCURSAL_ID = s.sucursal_id || null;
         window.SUCURSAL_PRINCIPAL = !!s.sucursal_principal;
+        window.ES_LA_PAZ = !!s.es_la_paz;
         const ocultar = (v) => {
             const btn = document.querySelector(`.menu-btn[data-view="${v}"]`);
             if (btn) btn.style.display = 'none';
