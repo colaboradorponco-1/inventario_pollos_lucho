@@ -149,6 +149,7 @@ $('#btn-sidebar-toggle')?.addEventListener('click', () => document.body.classLis
 $('#btn-sidebar-abrir')?.addEventListener('click', () => document.body.classList.remove('sidebar-collapsed'));
 
 $$('.menu-btn').forEach((btn) => {
+    if (!btn.dataset.view) return;
     btn.addEventListener('click', () => {
         $$('.menu-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
@@ -386,7 +387,10 @@ if (_cfgCost) {
 }
 document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-abrir-config]');
-    if (b) abrirConfiguracion();
+    if (b) {
+        abrirConfiguracion();
+        cerrarMenu();
+    }
 });
 
 // ---------------- Catálogos ----------------
