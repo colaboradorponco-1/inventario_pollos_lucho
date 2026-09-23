@@ -170,6 +170,8 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; margin-left: 240px; }
 }
 @media (min-width: 901px) { .config-top { right: 64px; } }
 @media print { .config-top { display: none !important; } }
+@media (max-width: 900px) { .cfg-top-txt { display: none; } }
+.cfg-top-txt { font-weight: 600; font-size: 14px; }
 
 .view { display: none; }
 .view.active { display: block; }

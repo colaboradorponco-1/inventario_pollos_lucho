@@ -324,6 +324,8 @@ function abrirConfiguracion() {
     if (cost) cost.checked = !!t.costo;
     const est = $('#cfg-estado');
     if (est) est.textContent = 'La app se actualiza sola cuando hay una versión nueva (mientras no estés escribiendo).';
+    const gSys = document.getElementById('cfg-grupo-sistema');
+    if (gSys) gSys.style.display = (typeof esAdmin === 'function' && esAdmin()) ? '' : 'none';
     openModal('modal-configuracion');
 }
 
