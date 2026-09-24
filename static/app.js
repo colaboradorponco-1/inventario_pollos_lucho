@@ -163,7 +163,8 @@ $$('.menu-btn').forEach((btn) => {
 function loadView(name) {
     if (name === 'dashboard') loadDashboard();
     if (name === 'productos') { pintarProdScope(); loadProductos(); enfocarEscanorSiEscritorio('#prod-escaneo'); }
-    if (name === 'movimientos') { loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
+    if (name === 'movimientos') { window.__MODO_COMPRA = false; loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
+    if (name === 'compras') { window.__MODO_COMPRA = true; loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
     if (name === 'proveedores') loadProveedores();
     if (name === 'gastos') loadGastos();
     if (name === 'reportes') loadReportes();
@@ -363,6 +364,20 @@ document.addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
     const tab = e.target.closest('[data-ciudad]');
     if (!tab || tab.classList.contains('active')) return;
+    const selSuc = $('#dash-sucursal-select');
+    if (selSuc && !selSuc.dataset.vinculado) {
+        selSuc.dataset.vinculado = '1';
+        selSuc.addEventListener('change', () => {
+            window.SUCURSAL_ACTUAL = selSuc.value || '';
+            if (window.SUCURSAL_ACTUAL) window.CIUDAD_ACTUAL = '';
+            document.querySelectorAll('[data-ciudad]').forEach((x) => x.classList.toggle('active', x.dataset.ciudad === (window.CIUDAD_ACTUAL || '') && !window.CIUDAD_ACTUAL));
+            const vista = nombreVistaActiva();
+            if (vista === 'dashboard') loadDashboard();
+            else if (vista === 'reportes') loadReportes();
+        });
+    }
+    if (selSuc) selSuc.value = '';
+    window.SUCURSAL_ACTUAL = '';
     document.querySelectorAll('[data-ciudad]').forEach((x) => x.classList.toggle('active', x === tab));
     window.CIUDAD_ACTUAL = tab.dataset.ciudad || '';
     const vista = nombreVistaActiva();
@@ -423,7 +438,10 @@ async function loadCatalogos() {
 // ---------------- Dashboard ----------------
 async function loadDashboard() {
     try {
-        const par = window.CIUDAD_ACTUAL ? '?ciudad=' + encodeURIComponent(window.CIUDAD_ACTUAL) : '';
+        let par = '';
+        if (window.SUCURSAL_ACTUAL) par = '?sucursal=' + encodeURIComponent(window.SUCURSAL_ACTUAL);
+        else if (window.CIUDAD_ACTUAL) par = '?ciudad=' + encodeURIComponent(window.CIUDAD_ACTUAL);
+
         const d = await request(API + '/dashboard' + par);
         $('#stat-productos').textContent = d.total_productos;
         $('#stat-stock').textContent = d.stock_total;
@@ -454,7 +472,7 @@ async function loadDashboard() {
             <tr>
                 <td>${fmtDate(m.fecha)}</td>
                 <td><strong>${m.producto_nombre}</strong></td>
-                <td><span class="badge badge-${m.tipo}">${m.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
+<td><span class="badge ${m.tipo === 'entrada' ? (m.proveedor_id ? 'badge-compra' : 'badge-entrada') : 'badge-salida'}">${m.tipo === 'entrada' ? (m.proveedor_id ? 'Compra' : 'Entrada') : (m.tipo === 'salida' ? 'Salida' : 'Ajuste')}</span></td>
                 <td>${m.cantidad} ${m.unidad}</td>
                 <td>${m.nota || ''}</td>
             </tr>`).join('')
@@ -524,6 +542,30 @@ async function loadDashboard() {
 
         graficoHBar('#graf-top-entradas', d.top_entrada, 'total', ' ', '#2e7d32');
         graficoHBar('#graf-top-salidas', d.top_salida, 'total', ' ', '#CF141D');
+
+        const contSuc = $('#dash-sucursal-cards');
+        if (contSuc) contSuc.innerHTML = '';
+        if (contSuc && window.CIUDAD_ACTUAL && !window.SUCURSAL_ACTUAL && !esSucursalFija()) {
+            const lista = (catalogos.sucursales || []).filter((s) => ciudadSucursal(s.nombre) === window.CIUDAD_ACTUAL);
+            const tarjetas = await Promise.all(lista.map(async (s) => {
+                try {
+                    const ds = await request(API + '/dashboard?sucursal=' + encodeURIComponent(s.id));
+                    return `<div class="dash-suc-card">
+                        <div class="dash-suc-head">${esc(s.nombre)}${s.principal ? ' <span class="badge badge-compra">Ppal</span>' : ''}</div>
+                        <div class="dash-suc-grid">
+                            <span>Productos</span><strong>${ds.total_productos}</strong>
+                            <span>Stock</span><strong>${ds.stock_total}</strong>
+                            <span>Valor</span><strong>Bs ${fmtNum(ds.valor_inventario)}</strong>
+                            <span>Stock bajo</span><strong>${(ds.stock_bajo || []).length}</strong>
+                            <span>Ventas hoy</span><strong>Bs ${fmtNum(ds.ventas_hoy)}</strong>
+                            <span>Gastos hoy</span><strong>Bs ${fmtNum(ds.gastos_hoy)}</strong>
+                            <span>Utilidad hoy</span><strong>Bs ${fmtNum(ds.utilidad_hoy)}</strong>
+                        </div>
+                    </div>`;
+                } catch (err) { return ''; }
+            }));
+            contSuc.innerHTML = tarjetas.join('');
+        }
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -858,7 +900,7 @@ async function verHistorialProducto(id) {
         $('#hist-prod-movs').innerHTML = data.movimientos.map(m => `
             <tr>
                 <td>${fmtDate(m.fecha)}</td>
-                <td><span class="badge badge-${m.tipo === 'entrada' ? 'success' : 'warning'}">${m.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
+                <td><span class="badge badge-${m.tipo === 'entrada' ? (m.proveedor_id ? 'compra' : 'success') : 'warning'}">${m.tipo === 'entrada' ? (m.proveedor_id ? 'Compra' : 'Entrada') : 'Salida'}</span></td>
                 <td>${m.tipo === 'entrada' ? '+' : '-'}${m.cantidad}</td>
                 <td>Bs ${fmtNum(m.precio_unitario)}</td>
                 <td>${m.nota || '—'}</td>
@@ -1096,7 +1138,45 @@ function popMovProductos(sid) {
         : '<option value="">No hay productos en esta sucursal</option>';
 }
 
+function ajustarModoCompraUI() {
+    /* En el apartado Compras: la vista reutiliza la de movimientos, pero el modo compra
+       fija tipo=entrada (la compra SIEMPRE es entrada), hace obligatorio el proveedor
+       y ajusta etiquetas/títulos para que se lea como un módulo de COMPRAS. */
+    const modoCompra = !!window.__MODO_COMPRA;
+    const h2 = $('#view-movimientos h2');
+    if (h2) h2.textContent = modoCompra ? 'Compras (entrada de mercadería)' : 'Entradas / Salidas de inventario';
+
+    const stipo = $('#mov-tipo');
+    if (stipo) {
+        stipo.value = modoCompra ? 'entrada' : (stipo.value || 'entrada');
+        stipo.disabled = modoCompra; // en Compras no se elige tipo: siempre entrada
+    }
+    const qrTipo = $('#qr-tipo');
+    if (qrTipo) {
+        qrTipo.value = modoCompra ? 'entrada' : (qrTipo.value || 'entrada');
+        qrTipo.disabled = modoCompra;
+    }
+    const stFiltro = $('#mov-filtro-tipo');
+    if (stFiltro && window.__MODO_COMPRA) stFiltro.value = 'compra';
+
+    // Proveedor: obligatorio + sugerido
+    const lblProv = $('#mov-proveedor-label');
+    if (lblProv) {
+        const esReq = window.__MODO_COMPRA;
+        lblProv.classList.toggle('req', esReq);
+        lblProv.querySelector('.req-mark')?.remove();
+        if (esReq) lblProv.insertAdjacentHTML('beforeend', ' <b class="req-mark" style="color:#dc2626">*</b>');
+        const prov = $('#mov-proveedor');
+        if (prov) prov.required = esReq;
+    }
+    const toggleH = $('#hist-tabs');
+    if (toggleH) {
+        // en modo compra el tab "Todas" no aplica; forzar el filtro compra
+    }
+}
+
 async function loadMovimientos() {
+    ajustarModoCompraUI();
     try {
         const resp = await request(API + '/productos?por_pagina=1000');
         movProdsAll = resp.data || resp;
@@ -1170,7 +1250,8 @@ async function listarMovimientos() {
     if (filtro) qs.set('filtro', filtro);
     if (desde) qs.set('desde', desde);
     if (hasta) qs.set('hasta', hasta);
-    if ($('#mov-filtro-tipo').value) qs.set('tipo', $('#mov-filtro-tipo').value);
+    if (window.__MODO_COMPRA) { qs.set('tipo', 'compra'); }
+    else if ($('#mov-filtro-tipo').value) qs.set('tipo', $('#mov-filtro-tipo').value);
     // Filtro por sucursal: "Almacén de Sucursales" activo + sucursal elegida
     const tabSucursales = $('#btn-hist-sucursales');
     const select = $('#hist-sucursal-select');
@@ -1190,7 +1271,7 @@ async function listarMovimientos() {
         <tr>
             <td>${fmtDate(m.fecha)}</td>
             <td>${esc(m.producto_nombre)}</td>
-            <td><span class="badge badge-${m.tipo}">${m.tipo === 'entrada' ? 'Entrada' : 'Salida'}</span></td>
+            <td><span class="badge ${m.tipo === 'entrada' ? (m.proveedor_id ? 'badge-compra' : 'badge-entrada') : 'badge-salida'}">${m.tipo === 'entrada' ? (m.proveedor_id ? 'Compra' : 'Entrada') : (m.tipo === 'salida' ? 'Salida' : 'Ajuste')}</span></td>
             <td>${m.cantidad} ${m.unidad}</td>
             <td>${fmtNum(m.precio_unitario)}</td>
             <td>${m.sucursal_nombre || '—'}</td>
@@ -1240,6 +1321,10 @@ $('#form-movimiento').addEventListener('submit', async (e) => {
         vencimiento: $('#mov-vencimiento').value || null,
     };
     if (!body.producto_id) return toast('Seleccione un producto', 'err');
+    if (window.__MODO_COMPRA) {
+        body.tipo = 'entrada';
+        if (!body.proveedor_id) return toast('Seleccione el proveedor (obligatorio en Compras)', 'err');
+    }
     try {
         await conSubmit(() => request(API + '/movimientos', { method: 'POST', body: JSON.stringify(body) }),
             '#form-movimiento button[type="submit"]');

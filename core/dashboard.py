@@ -29,6 +29,14 @@ def dashboard():
     hoy = date.today().isoformat()
     sid = sucursal_actual()
     g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    # Filtro opcional por UNA sucursal individual (?sucursal=<id>): reduce el scope
+    # a esa sucursal puntual (además de/independiente del filtro por ciudad).
+    filtro_sucursal = request.args.get("sucursal", "").strip()
+    if filtro_sucursal:
+        try:
+            g.ciudad_ids = [int(filtro_sucursal)]
+        except (TypeError, ValueError):
+            pass
     cids = g.ciudad_ids
     # Los encargados de almacén principal coordinan el inventario: ven las alertas
     # de stock de TODAS las sucursales, igual que el admin (su "mano derecha").
@@ -85,7 +93,7 @@ def dashboard():
         ph = ",".join(["%s"] * len(cids))
         stock_join = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes "
                       "WHERE sucursal_id IN (" + ph + ") GROUP BY producto_id) s ON s.producto_id = p.id")
-        stock_where = ""
+        stock_where = " AND s.producto_id IS NOT NULL"
         stock_params = list(cids)
     elif alerta_global:
         stock_join = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
@@ -236,6 +244,7 @@ def dashboard():
     cls_mov, params_mov = _cls("m.sucursal_id")
     mov_recientes = conn.execute("""
         SELECT m.fecha, m.tipo, m.cantidad, m.precio_unitario, m.nota, m.usuario,
+               m.proveedor_id,
                p.nombre AS producto_nombre, p.unidad
         FROM movimientos m
         JOIN productos p ON p.id = m.producto_id

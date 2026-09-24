@@ -395,7 +395,8 @@ def producto_historial(prod_id):
         return err("Producto no encontrado", 404)
     cls, cls_params = clausula_sucursal("m.sucursal_id")
     movimientos = conn.execute("""
-        SELECT m.fecha, m.tipo, m.cantidad, m.precio_unitario, m.nota, m.usuario
+        SELECT m.fecha, m.tipo, m.cantidad, m.precio_unitario, m.nota, m.usuario,
+               m.proveedor_id
         FROM movimientos m WHERE m.producto_id = ? {cls}
         ORDER BY m.fecha DESC, m.id DESC LIMIT 200
     """.format(cls=cls), [prod_id] + cls_params).fetchall()

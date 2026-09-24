@@ -118,8 +118,11 @@ def movimientos():
         q += " AND date(m.fecha) <= date(?)"
         params.append(hasta)
     if tipo:
-        q += " AND m.tipo = ?"
-        params.append(tipo)
+        if tipo == "compra":
+            q += " AND m.tipo = 'entrada' AND m.proveedor_id IS NOT NULL"
+        else:
+            q += " AND m.tipo = ?"
+            params.append(tipo)
     if filtro:
         q += " AND (p.nombre LIKE ? OR m.nota LIKE ? OR m.usuario LIKE ? OR pr.nombre LIKE ?)"
         params += [f"%{filtro}%"] * 4
@@ -319,7 +322,8 @@ def exportar_movimientos():
     rows = conn.execute(q, params).fetchall()
     conn.close()
     filas = [(r["fecha"], r["producto_nombre"], r["unidad"],
-              "Entrada" if r["tipo"] == "entrada" else "Salida",
+              "Compra" if r["tipo"] == "entrada" and r["proveedor_id"] else
+              ("Entrada" if r["tipo"] == "entrada" else "Salida"),
               r["cantidad"], round(r["precio_unitario"] or 0, 2),
               r["sucursal_nombre"] or "", r["proveedor_nombre"] or "", r["nota"] or "", r["usuario"] or "") for r in rows]
     return responder_excel("movimientos.xlsx",

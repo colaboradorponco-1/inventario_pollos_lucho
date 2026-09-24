@@ -377,6 +377,9 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; margin-left: 240px; }
 .data-table tr:hover td { background: #fdf9f5; }
 
 /* Scroll horizontal de tablas (móvil) */
+.view .table-scroll { max-height: calc(100vh - 250px); overflow-y: auto; overscroll-behavior: contain; }
+.view .table-scroll.scroll-corto { max-height: 300px; }
+.view .table-scroll.panel-scroll { max-height: 340px; }
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; scrollbar-width: thin; }
 .table-scroll::-webkit-scrollbar { height: 6px; }
 .table-scroll::-webkit-scrollbar-thumb { background: #d8c6a0; border-radius: 3px; }
@@ -417,6 +420,7 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 .badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
 .badge-entrada { background: #e8f5e9; color: var(--green); }
 .badge-salida { background: #fdecea; color: var(--red); }
+.badge-compra { background: #e8f0fe; color: #1a73e8; }
 .badge-bajo { background: #fdecea; color: #CF141D; }
 .badge-vencer { background: #fdecea; color: var(--red); }
 .badge-info { background: #e8f0fe; color: #1a73e8; }
