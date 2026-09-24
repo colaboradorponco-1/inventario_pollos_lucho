@@ -545,7 +545,7 @@ async function loadDashboard() {
 
         const contSuc = $('#dash-sucursal-cards');
         if (contSuc) contSuc.innerHTML = '';
-        if (contSuc && window.CIUDAD_ACTUAL && !window.SUCURSAL_ACTUAL && !esSucursalFija()) {
+        if (contSuc && window.CIUDAD_ACTUAL && !window.SUCURSAL_ACTUAL) {
             const lista = (catalogos.sucursales || []).filter((s) => ciudadSucursal(s.nombre) === window.CIUDAD_ACTUAL);
             const tarjetas = await Promise.all(lista.map(async (s) => {
                 try {
@@ -653,6 +653,9 @@ function esAdmin() { return window.ROL === 'admin' || window.ROL === 'superadmin
 function esAlmacenPpal() { return window.ROL === 'encargado' && !!window.SUCURSAL_PRINCIPAL && !window.ES_LA_PAZ; }
 // Admin/superadmin y encargados de almacén principal actúan como "mano derecha" del admin
 function esCentral() { return esAdmin() || esAlmacenPpal(); }
+
+// ¿El usuario está limitado a UNA sucursal fija (sin poder cambiar de sucursal)?
+function esSucursalFija() { return !!(window.SUCURSAL_ACTUAL && window.ROL !== 'admin' && window.ROL !== 'superadmin'); }
 
 // ---------------- Ciudades (La Paz / Cochabamba) ----------------
 function nombreNorm(nombre) {
