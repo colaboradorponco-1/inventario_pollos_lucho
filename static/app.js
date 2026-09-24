@@ -380,6 +380,10 @@ document.addEventListener('click', (e) => {
     window.SUCURSAL_ACTUAL = '';
     document.querySelectorAll('[data-ciudad]').forEach((x) => x.classList.toggle('active', x === tab));
     window.CIUDAD_ACTUAL = tab.dataset.ciudad || '';
+    // El selector de sucursal solo tiene sentido dentro de una ciudad:
+    // en "Datos globales" se oculta, y al elegir ciudad se muestra.
+    const selSuc = $('#dash-sucursal-select');
+    if (selSuc) selSuc.style.display = window.CIUDAD_ACTUAL ? '' : 'none';
     const vista = nombreVistaActiva();
     if (vista === 'dashboard') loadDashboard();
     else if (vista === 'reportes') loadReportes();
