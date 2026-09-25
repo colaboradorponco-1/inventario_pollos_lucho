@@ -384,13 +384,28 @@ document.addEventListener('click', (e) => {
     window.SUCURSAL_ACTUAL = '';
     document.querySelectorAll('[data-ciudad]').forEach((x) => x.classList.toggle('active', x === tab));
     window.CIUDAD_ACTUAL = tab.dataset.ciudad || '';
-    // El selector de sucursal solo tiene sentido dentro de una ciudad:
-    // en "Datos globales" se oculta, y al elegir ciudad se muestra.
-    if (selSuc) selSuc.style.display = window.CIUDAD_ACTUAL ? '' : 'none';
+    // El selector de sucursal solo le sirve al admin: al elegir ciudad se muestra
+    // con las sucursales de esa ciudad; en "Resumen general" se oculta.
+    if (selSuc) {
+        const esAdmin = window.ROL === 'admin' || window.ROL === 'superadmin';
+        selSuc.style.display = (esAdmin && window.CIUDAD_ACTUAL) ? '' : 'none';
+        if (esAdmin && window.CIUDAD_ACTUAL) poblarSelectorSucursalDashboard();
+    }
     const vista = nombreVistaActiva();
     if (vista === 'dashboard') loadDashboard();
     else if (vista === 'reportes') loadReportes();
 });
+
+async function poblarSelectorSucursalDashboard() {
+    const selSuc = $('#dash-sucursal-select');
+    if (!selSuc) return;
+    if (!catalogos || !catalogos.sucursales) await loadCatalogos();
+    const lista = ordenarSucursales((catalogos.sucursales || [])
+        .filter((s) => ciudadSucursal(s.nombre) === window.CIUDAD_ACTUAL));
+    selSuc.innerHTML = '<option value="">— Todas las sucursales de la ciudad —</option>' +
+        lista.map((s) => `<option value="${s.id}">${esc(s.nombre)}${s.principal ? ' (Ppal)' : ''}</option>`).join('');
+    selSuc.value = '';
+}
 
 // ---------------- Catálogos ----------------
 async function loadCatalogos() {
@@ -549,30 +564,6 @@ async function loadDashboard() {
 
         graficoHBar('#graf-top-entradas', d.top_entrada, 'total', ' ', '#2e7d32');
         graficoHBar('#graf-top-salidas', d.top_salida, 'total', ' ', '#CF141D');
-
-        const contSuc = $('#dash-sucursal-cards');
-        if (contSuc) contSuc.innerHTML = '';
-        if (contSuc && window.CIUDAD_ACTUAL && !window.SUCURSAL_ACTUAL) {
-            const lista = (catalogos.sucursales || []).filter((s) => ciudadSucursal(s.nombre) === window.CIUDAD_ACTUAL);
-            const tarjetas = await Promise.all(lista.map(async (s) => {
-                try {
-                    const ds = await request(API + '/dashboard?sucursal=' + encodeURIComponent(s.id));
-                    return `<div class="dash-suc-card">
-                        <div class="dash-suc-head">${esc(s.nombre)}${s.principal ? ' <span class="badge badge-compra">Ppal</span>' : ''}</div>
-                        <div class="dash-suc-grid">
-                            <span>Productos</span><strong>${ds.total_productos}</strong>
-                            <span>Stock</span><strong>${ds.stock_total}</strong>
-                            <span>Valor</span><strong>Bs ${fmtNum(ds.valor_inventario)}</strong>
-                            <span>Stock bajo</span><strong>${(ds.stock_bajo || []).length}</strong>
-                            <span>Ventas hoy</span><strong>Bs ${fmtNum(ds.ventas_hoy)}</strong>
-                            <span>Gastos hoy</span><strong>Bs ${fmtNum(ds.gastos_hoy)}</strong>
-                            <span>Utilidad hoy</span><strong>Bs ${fmtNum(ds.utilidad_hoy)}</strong>
-                        </div>
-                    </div>`;
-                } catch (err) { return ''; }
-            }));
-            contSuc.innerHTML = tarjetas.join('');
-        }
     } catch (e) {
         toast(e.message, 'err');
     }
