@@ -393,7 +393,7 @@ def reporte_resumen():
         SELECT s.nombre AS sucursal, ROUND(SUM(p.costo_promedio * l.cantidad), 2) AS valor,
                COUNT(DISTINCT l.producto_id) AS unid
         FROM lotes l JOIN productos p ON p.id = l.producto_id JOIN sucursales s ON s.id = l.sucursal_id
-        WHERE l.cantidad <> 0{lote_cond} GROUP BY s.id ORDER BY valor DESC
+        WHERE p.activo = 1 AND l.cantidad > 0{lote_cond} GROUP BY s.id ORDER BY valor DESC
     """.format(lote_cond=lote_cond), params_val).fetchall()
     conn.close()
     return ok({
@@ -481,9 +481,13 @@ def reporte_valorizacion():
     g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
     cids = g.ciudad_ids
+    suc_filtro = request.args.get("sucursal", "").strip()
     lote_cond = ""
     params = []
-    if cids:
+    if suc_filtro and es_gestion():
+        lote_cond = " AND l.sucursal_id = %s"
+        params = [int(suc_filtro)]
+    elif cids:
         lote_cond = " AND l.sucursal_id IN (" + ",".join(["%s"] * len(cids)) + ")"
         params = list(cids)
     elif not es_gestion() and sid is not None:
@@ -496,7 +500,7 @@ def reporte_valorizacion():
         FROM lotes l
         JOIN productos p ON p.id = l.producto_id
         JOIN sucursales s ON s.id = l.sucursal_id
-        WHERE l.cantidad <> 0{lote_cond}
+        WHERE p.activo = 1 AND l.cantidad > 0{lote_cond}
         GROUP BY s.id
         ORDER BY valor DESC
     """.format(lote_cond=lote_cond), params).fetchall()
@@ -569,7 +573,7 @@ def _auditar(conn):
         FROM lotes l
         JOIN productos p ON p.id = l.producto_id
         JOIN sucursales s ON s.id = l.sucursal_id
-        WHERE l.cantidad <> 0
+        WHERE p.activo = 1 AND l.cantidad > 0
         GROUP BY l.sucursal_id
         ORDER BY valor DESC
     """).fetchall()
