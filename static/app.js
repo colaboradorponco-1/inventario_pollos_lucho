@@ -154,7 +154,11 @@ $$('.menu-btn').forEach((btn) => {
         $$('.menu-btn').forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         $$('.view').forEach((v) => v.classList.remove('active'));
-        $('#view-' + btn.dataset.view).classList.add('active');
+        // "Compras" no tiene sección propia: reutiliza la de Entradas y Salidas.
+        const destino = $('#view-' + btn.dataset.view)
+            || (btn.dataset.view === 'compras' ? $('#view-movimientos') : null);
+        if (!destino) return;
+        destino.classList.add('active');
         loadView(btn.dataset.view);
         cerrarMenu();
     });
