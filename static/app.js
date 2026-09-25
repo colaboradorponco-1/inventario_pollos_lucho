@@ -400,8 +400,9 @@ async function poblarSelectorSucursalDashboard() {
     const selSuc = $('#dash-sucursal-select');
     if (!selSuc) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
+    const ciudadTab = (window.CIUDAD_ACTUAL || '').replace(/[-_]/g, ' ');
     const lista = ordenarSucursales((catalogos.sucursales || [])
-        .filter((s) => ciudadSucursal(s.nombre) === window.CIUDAD_ACTUAL));
+        .filter((s) => nombreNorm(ciudadSucursal(s.nombre)) === ciudadTab));
     selSuc.innerHTML = '<option value="">— Todas las sucursales de la ciudad —</option>' +
         lista.map((s) => `<option value="${s.id}">${esc(s.nombre)}${s.principal ? ' (Ppal)' : ''}</option>`).join('');
     selSuc.value = '';
