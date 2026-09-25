@@ -527,10 +527,13 @@
         <section id="view-reportes" class="view">
             <div class="toolbar">
                 <h2>Reportes</h2>
-                <div class="hist-sucursal-tabs ciudad-tabs" id="ciudad-tabs-rep">
+<div class="hist-sucursal-tabs ciudad-tabs" id="ciudad-tabs-rep">
                 <button class="btn hist-tab active" data-ciudad="" type="button">Datos globales</button>
                     <button class="btn hist-tab" data-ciudad="cochabamba" type="button">Cochabamba</button>
                     <button class="btn hist-tab" data-ciudad="la-paz" type="button">La Paz</button>
+                    <select id="rep-sucursal-select" class="btn" style="max-width:240px;margin-left:8px;display:none" title="Ver el reporte de una sucursal">
+                        <option value="">— Todas las sucursales de la ciudad —</option>
+                    </select>
                 </div>
                 <input type="date" id="rep-desde">
                 <input type="date" id="rep-hasta">
@@ -1230,7 +1233,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202609251910"></script>
+    <script src="/static/app.js?v=202609251925"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

@@ -171,7 +171,7 @@ function loadView(name) {
     if (name === 'compras') { window.__MODO_COMPRA = true; loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
     if (name === 'proveedores') loadProveedores();
     if (name === 'gastos') loadGastos();
-    if (name === 'reportes') loadReportes();
+    if (name === 'reportes') { sincronizarSelectoresSucursal(); loadReportes(); }
     if (name === 'ventas') { loadVentas(); enfocarEscanorSiEscritorio('#venta-escaneo'); }
     if (name === 'repartos') { loadRepartos(); enfocarEscanorSiEscritorio('#reparto-escaneo'); }
     if (name === 'pedidos') loadPedidos();
@@ -368,16 +368,17 @@ document.addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
     const tab = e.target.closest('[data-ciudad]');
     if (!tab || tab.classList.contains('active')) return;
-    const selSuc = $('#dash-sucursal-select');
+    const vista = nombreVistaActiva();
+    const selSuc = vista === 'reportes' ? $('#rep-sucursal-select') : $('#dash-sucursal-select');
     if (selSuc && !selSuc.dataset.vinculado) {
         selSuc.dataset.vinculado = '1';
         selSuc.addEventListener('change', () => {
             window.SUCURSAL_ACTUAL = selSuc.value || '';
             if (window.SUCURSAL_ACTUAL) window.CIUDAD_ACTUAL = '';
             document.querySelectorAll('[data-ciudad]').forEach((x) => x.classList.toggle('active', x.dataset.ciudad === (window.CIUDAD_ACTUAL || '') && !window.CIUDAD_ACTUAL));
-            const vista = nombreVistaActiva();
-            if (vista === 'dashboard') loadDashboard();
-            else if (vista === 'reportes') loadReportes();
+            const vist = nombreVistaActiva();
+            if (vist === 'dashboard') loadDashboard();
+            else if (vist === 'reportes') loadReportes();
         });
     }
     if (selSuc) selSuc.value = '';
@@ -385,19 +386,17 @@ document.addEventListener('click', (e) => {
     document.querySelectorAll('[data-ciudad]').forEach((x) => x.classList.toggle('active', x === tab));
     window.CIUDAD_ACTUAL = tab.dataset.ciudad || '';
     // El selector de sucursal solo le sirve al admin: al elegir ciudad se muestra
-    // con las sucursales de esa ciudad; en "Resumen general" se oculta.
+    // con las sucursales de esa ciudad; en "Datos globales" se oculta.
     if (selSuc) {
         const esAdmin = window.ROL === 'admin' || window.ROL === 'superadmin';
         selSuc.style.display = (esAdmin && window.CIUDAD_ACTUAL) ? '' : 'none';
-        if (esAdmin && window.CIUDAD_ACTUAL) poblarSelectorSucursalDashboard();
+        if (esAdmin && window.CIUDAD_ACTUAL) poblarSelectorSucursalCiudad(selSuc);
     }
-    const vista = nombreVistaActiva();
     if (vista === 'dashboard') loadDashboard();
     else if (vista === 'reportes') loadReportes();
 });
 
-async function poblarSelectorSucursalDashboard() {
-    const selSuc = $('#dash-sucursal-select');
+async function poblarSelectorSucursalCiudad(selSuc) {
     if (!selSuc) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
     const ciudadTab = (window.CIUDAD_ACTUAL || '').replace(/[-_]/g, ' ');
@@ -406,6 +405,20 @@ async function poblarSelectorSucursalDashboard() {
     selSuc.innerHTML = '<option value="">— Todas las sucursales de la ciudad —</option>' +
         lista.map((s) => `<option value="${s.id}">${esc(s.nombre)}${s.principal ? ' (Ppal)' : ''}</option>`).join('');
     selSuc.value = '';
+}
+
+function sincronizarSelectoresSucursal() {
+    const esAdmin = window.ROL === 'admin' || window.ROL === 'superadmin';
+    const vista = nombreVistaActiva();
+    const selSuc = vista === 'reportes' ? $('#rep-sucursal-select') : $('#dash-sucursal-select');
+    if (!selSuc) return;
+    if (!esAdmin || !window.CIUDAD_ACTUAL) {
+        selSuc.style.display = 'none';
+        selSuc.value = '';
+        return;
+    }
+    selSuc.style.display = '';
+    poblarSelectorSucursalCiudad(selSuc);
 }
 
 // ---------------- Catálogos ----------------
@@ -1863,6 +1876,7 @@ async function loadReportes() {
         if (desde) qs.set('desde', desde);
         if (hasta) qs.set('hasta', hasta);
         if (window.CIUDAD_ACTUAL) qs.set('ciudad', window.CIUDAD_ACTUAL);
+        if (window.SUCURSAL_ACTUAL) qs.set('sucursal', window.SUCURSAL_ACTUAL);
 
         const res = await request(API + '/reportes/resumen?' + qs.toString());
         $('#rep-resumen').innerHTML =

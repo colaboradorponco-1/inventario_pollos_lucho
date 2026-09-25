@@ -11,7 +11,11 @@ reportes_bp = Blueprint("reportes", __name__)
 
 def _cls(col):
     """(condición, params) para filtrar por la sucursal del usuario. Para usuarios
-    de gestión, la vista de Reportes puede restringir por ciudad (?ciudad=...)."""
+    de gestión, la vista de Reportes puede restringir por ciudad (?ciudad=...) o
+    por una sucursal puntual (?sucursal=...)."""
+    suc = request.args.get("sucursal", "").strip()
+    if suc and es_gestion():
+        return f" AND {col} = %s", [int(suc)]
     cids = getattr(g, "ciudad_ids", None)
     if cids:
         return cond_ciudad(col, cids)
@@ -333,7 +337,11 @@ def reporte_resumen():
     g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
     cids = g.ciudad_ids
-    if cids:
+    syncval = request.args.get("sucursal", "").strip()
+    if syncval and es_gestion():
+        lote_cond = " AND l.sucursal_id = %s"
+        params_val = [int(syncval)]
+    elif cids:
         lote_cond = " AND l.sucursal_id IN (" + ",".join(["%s"] * len(cids)) + ")"
         params_val = list(cids)
     else:
