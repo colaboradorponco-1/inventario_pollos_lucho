@@ -289,7 +289,7 @@ def exportar_movimientos():
     q = """
         SELECT m.fecha, p.nombre AS producto_nombre, p.unidad, m.tipo,
                m.cantidad, m.precio_unitario, s.nombre AS sucursal_nombre,
-               pr.nombre AS proveedor_nombre, m.nota, m.usuario
+               m.proveedor_id, pr.nombre AS proveedor_nombre, m.nota, m.usuario
         FROM movimientos m
         JOIN productos p ON p.id = m.producto_id
         LEFT JOIN sucursales s ON s.id = m.sucursal_id
