@@ -250,6 +250,7 @@ def init_db():
                     "proveedor_id INT,"
                     "sucursal_id INT,"
                     "unidad_tacho DOUBLE DEFAULT 0,"
+                    "pide_tacho TINYINT NOT NULL DEFAULT 0,"
                     "activo TINYINT DEFAULT 1,"
                     "FOREIGN KEY (categoria_id) REFERENCES categorias(id),"
                     "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
@@ -539,6 +540,11 @@ def migrar_esquema():
         # y la fracción elegida en cada línea del pedido (¼, ½, ¾, entero).
         if not _col_existe(cur, "productos", "unidad_tacho"):
             _add_columna(cur, "productos", "unidad_tacho DOUBLE DEFAULT 0")
+        # Solo los productos marcados «se pide por tachos» muestran la opción al pedir.
+        if not _col_existe(cur, "productos", "pide_tacho"):
+            _add_columna(cur, "productos", "pide_tacho TINYINT NOT NULL DEFAULT 0")
+            # Los que ya tenían «1 tacho = N» configurado siguen pudiendo pedirse por tachos.
+            cur.execute("UPDATE productos SET pide_tacho = 1 WHERE unidad_tacho > 0")
         if not _col_existe(cur, "pedido_detalle", "tacho_fraccion"):
             _add_columna(cur, "pedido_detalle", "tacho_fraccion DOUBLE DEFAULT 0")
         if not _col_existe(cur, "pedido_detalle", "tacho_texto"):

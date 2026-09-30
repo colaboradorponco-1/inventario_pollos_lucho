@@ -1003,7 +1003,8 @@
                     <label>Stock mínimo <input type="number" id="prod-minimo" step="any" min="0"></label>
                 </div>
                 <label>1 tacho equivale a (opcional) <input type="number" id="prod-unidad-tacho" step="any" min="0" placeholder="Ej: 20 = un tacho de papa = 20 kg"></label>
-                <p class="scan-hint">Opcional. Si lo llenas, al pedir se usará por defecto «1 tacho = este valor», pero en el pedido se puede escribir otro libremente (no hay que configurar el producto para pedir por tachos).</p>
+                <label class="check"><input type="checkbox" id="prod-pide-tacho"> Este producto se pide por tachos</label>
+                <p class="scan-hint">Solo los productos marcados muestran la opción «Por tacho…» al hacer pedidos (papa, plátano, etc.). El valor «1 tacho = N» se escribe en el propio pedido; si también llenas «1 tacho equivale a», ese valor saldrá por defecto.</p>
                 <div class="grid-2">
                     <label>Costo promedio (Bs) <input type="number" id="prod-costo" step="any" min="0"></label>
                     <label>Precio de venta (Bs) <input type="number" id="prod-precio-venta" step="any" min="0"></label>
