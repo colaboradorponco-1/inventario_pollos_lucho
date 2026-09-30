@@ -458,6 +458,8 @@ def inventario_cerrar(inv_id):
                 session.get("usuario", ""), inv["sucursal_id"])
         except (ValueError, Exception) as e:
             # Un ajuste a la baja no puede dejar el stock en negativo o hay otro error.
+            import traceback
+            traceback.print_exc()
             conn.rollback()
             conn.close()
             return err(f"{f['producto_nombre']}: {str(e)}", 400)
