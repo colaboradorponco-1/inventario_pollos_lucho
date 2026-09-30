@@ -431,10 +431,11 @@
             <div class="panel" id="inv-panel-conteo" style="display:none">
                 <div class="panel-head">
                     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                    <div>
+                    <div style="flex:1; min-width:0">
                         <h3 id="inv-titulo">Conteo del día</h3>
                         <p id="inv-subtitulo">Llena a mano el inventario inicial, el ingreso del día y el inventario final. El disponible y la cantidad utilizada se calculan solos.</p>
                     </div>
+                    <button class="btn btn-icon" id="btn-inv-cerrar-panel" title="Cerrar la planilla (guarda antes de cerrar)" aria-label="Cerrar panel de conteo">&#10005;</button>
                 </div>
 
                 <p class="scan-hint" style="margin:0 0 10px">Puedes hacer <strong>varias planillas el mismo día</strong>, una por cada categoría (Alimentos, Cocina, Limpieza, etc.). Cada planilla se cierra por separado.</p>

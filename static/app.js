@@ -35,15 +35,37 @@ function fechaISO(val) {
     return val.replace('T', ' ') + ':00';
 }
 
+const DIAS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
+                  'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function fmtFechaES(valor) {
+    if (!valor) return '';
+    const d = new Date(valor);
+    if (Number.isNaN(d.getTime())) return String(valor).slice(0, 10);
+    return `${DIAS_ES[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/` +
+           `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+}
+
+function fmtFechaHoraES(valor) {
+    if (!valor) return '';
+    const d = new Date(valor);
+    if (Number.isNaN(d.getTime())) return String(valor);
+    return `${fmtFechaES(valor)} ${String(d.getHours()).padStart(2, '0')}:` +
+           `${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 const esc = (s) => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
 
 const nomProd = (p) => esc(p.nombre) + (p.marca ? ` - ${esc(p.marca)}` : '');
 
 async function request(url, opts = {}) {
-    const res = await fetch(url, {
-        headers: { 'Content-Type': 'application/json' },
-        ...opts,
-    });
+    const init = { headers: { 'Content-Type': 'application/json' }, ...opts };
+    // fetch() convierte un objeto en "[object Object]" y Flask responde 400.
+    if (init.body && typeof init.body === 'object' && !(init.body instanceof FormData)) {
+        init.body = JSON.stringify(init.body);
+    }
+    const res = await fetch(url, init);
     const ct = res.headers.get('Content-Type') || '';
     if (!ct.includes('application/json')) {
         if (res.status === 401 || res.redirected) {
@@ -2751,6 +2773,18 @@ $('#btn-inv-print')?.addEventListener('click', () => {
     if (INV_ID) window.open('/inventario-diario/' + INV_ID + '/imprimir', '_blank');
     else toast('Abre una planilla del día primero', 'err');
 });
+$('#btn-inv-cerrar-panel')?.addEventListener('click', invClick(async () => {
+    const Digitado = Array.from($$('#inv-tbody .inv-conteo')).some((i) => i.value !== '');
+    if (Digitado && INV_CERRADA === false) {
+        const seguir = confirm('Hay conteos escritos sin guardar. ¿Guardar y cerrar el panel?');
+        if (!seguir) return;
+        await guardarInventario();
+    }
+    INV_ID = null;
+    INV_FILAS = [];
+    INV_CERRADA = false;
+    $('#inv-panel-conteo').style.display = 'none';
+}));
 $('#aud-desde').addEventListener('change', loadAuditoria);
 $('#aud-hasta').addEventListener('change', loadAuditoria);
 
@@ -2899,7 +2933,7 @@ async function listarInventario() {
         $('#inv-lista-empty').style.display = filas.length ? 'none' : '';
         tb.innerHTML = filas.map((f) => `
             <tr>
-                <td>${esc(f.fecha)}</td>
+                <td>${esc(fmtFechaES(f.fecha))}</td>
                 <td><strong>${esc(f.categoria_nombre || 'Todas las categorías')}</strong></td>
                 <td>${esc(f.sucursal_nombre || '')}</td>
                 <td>${esc(f.hora_corte || '')}</td>
@@ -2964,9 +2998,9 @@ async function abrirInventario(invId) {
     INV_CERRADA = d.estado === 'cerrado';
     INV_FILAS = d.lineas || [];
     $('#inv-panel-conteo').style.display = '';
-    $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${d.fecha} (${d.hora_corte || 'sin hora'})`;
+    $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
-        ? `Cerrada por ${d.cerrado_por || ''} el ${d.fecha_hora_cierre || ''}.`
+        ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
         : 'Llena a mano el inventario inicial, el ingreso del día y el inventario final. Disp. día = inicial + ingreso, y la cantidad utilizada = disponible - final. Puedes corregir todo hasta cerrar.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
@@ -3079,11 +3113,11 @@ async function guardarInventario() {
     if (!INV_ID) return false;
     const r = await request(API + '/inventario-diario/' + INV_ID, {
         method: 'PUT',
-        body: {
+        body: JSON.stringify({
             lineas: collectedInventario(),
             observaciones: $('#inv-observaciones').value,
             hora_corte: $('#inv-hora').value,
-        },
+        }),
     });
     toast(r.message || 'Conteo guardado', 'ok');
     await abrirInventario(INV_ID);
