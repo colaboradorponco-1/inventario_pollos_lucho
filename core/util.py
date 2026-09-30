@@ -153,6 +153,9 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
     - entrada: acumula en el lote con esa fecha de vencimiento (None = lote general).
     - salida:   consume por FEFO (primero el lote que vence antes); puede generar
                 varios movimientos si la salida abarca más de un lote.
+    - ajuste:   corrige el stock a una cantidad contada en el inventario físico.
+                cantidad negativa = faltó (baja stock), positiva = sobró (sube stock).
+                No recalcula el costo promedio, porque no es una compra real.
     Si no se indica sucursal y el usuario (p. ej. superadmin) no tiene una asignada,
     se usa la primera sucursal principal como destino del stock."""
     from .lotes import entrada_lote, salida_fefo, stock_lotes
@@ -160,6 +163,24 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
         sucursal_id = sucursal_operativa()
     if sucursal_id is None:
         raise ValueError("No se puede registrar el movimiento sin una sucursal definida")
+    if tipo == "ajuste":
+        cantidad = float(cantidad)
+        if abs(cantidad) < 1e-9:
+            return None
+        if cantidad > 0:
+            lote_id = entrada_lote(conn, producto_id, sucursal_id, cantidad, fecha)
+        else:
+            consumidos = salida_fefo(conn, producto_id, sucursal_id, -cantidad)
+            if not consumidos:
+                return None
+            lote_id = consumidos[0][0]
+        conn.execute("""
+            INSERT INTO movimientos (producto_id, tipo, cantidad, precio_unitario, fecha,
+                                     sucursal_id, lote_id, nota, usuario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (producto_id, "ajuste", cantidad, precio or 0, fecha, sucursal_id, lote_id,
+              nota, usuario))
+        return lote_id
     if tipo == "entrada":
         stock_previo = stock_lotes(conn, producto_id, sucursal_id)
         lote_id = entrada_lote(conn, producto_id, sucursal_id, cantidad, fecha,
@@ -202,7 +223,8 @@ def _recalcular_costo_promedio(conn, producto_id, stock_previo, cantidad, precio
                  (round(costo_nuevo, 2), producto_id))
 
 
-def responder_excel(nombre_archivo, encabezados, filas, ancho_col=None, titulo=None):
+def responder_excel(nombre_archivo, encabezados, filas, ancho_col=None, titulo=None,
+                    subtitulos=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
@@ -220,6 +242,9 @@ def responder_excel(nombre_archivo, encabezados, filas, ancho_col=None, titulo=N
     ws.page_margins = PageMargins(left=0.4, right=0.4, top=0.6, bottom=0.6, header=0.3, footer=0.3)
     ws.oddHeader.center.text = titulo or "POLLOS LUCHO"
     ws.oddHeader.center.size = 14
+    if subtitulos:
+        lineas = [s for s in subtitulos if s]
+        ws.oddHeader.right.text = "\n".join(lineas)
     ws.oddFooter.left.text = "Impreso el &D"
     ws.oddFooter.right.text = "Página &P de &N"
 
@@ -312,3 +337,35 @@ def cond_ciudad(col, cids):
         return "", []
     ph = ",".join(["%s"] * len(cids))
     return f" AND {col} IN ({ph})", list(cids)
+
+
+def puede_ver_varias_sucursales(conn):
+    """True si el usuario tiene legitimidad para consolidar más de una sucursal:
+    gestión (admin/superadmin) o encargado de almacén principal. Un encargado de
+    filial NUNCA puede ver datos de otras sucursales, aunque pase ?ciudad=..."""
+    return es_gestion() or es_encargado_almacen(conn)
+
+
+def ids_ciudad_permitidos(conn, ciudad):
+    """ids_ciudad() pero devuelve None si el usuario no tiene autorización para
+    filtrar por ciudad. Así el filtro ?ciudad=.. es inocuo para un encargado
+    filial: la consulta se limita a su propia sucursal."""
+    if not puede_ver_varias_sucursales(conn):
+        return None
+    return ids_ciudad(conn, ciudad)
+
+
+def sucursal_filtro_permitida(conn, sucursal):
+    """Valida el parámetro ?sucursal=<id> que se usa para acotar el alcance a una
+    sucursal puntual. Devuelve el id normalizado, o None si el usuario no puede
+    ver esa sucursal (en cuyo caso el llamador debe ignorar el parámetro)."""
+    if sucursal in (None, ""):
+        return None
+    try:
+        sid = int(sucursal)
+    except (TypeError, ValueError):
+        return None
+    if not puede_ver_varias_sucursales(conn):
+        return None
+    existe = conn.execute("SELECT 1 FROM sucursales WHERE id = ?", (sid,)).fetchone()
+    return sid if existe else None

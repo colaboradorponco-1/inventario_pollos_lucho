@@ -4,7 +4,8 @@ from flask import Blueprint, g, request, session
 
 from database import get_conn
 from .util import (ok, login_requerido, sucursal_actual, sucursal_operativa, es_gestion,
-                   es_encargado_almacen, ids_ciudad, cond_ciudad)
+                   es_encargado_almacen, ids_ciudad_permitidos, sucursal_filtro_permitida,
+                   cond_ciudad)
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -28,15 +29,14 @@ def dashboard():
     conn = get_conn()
     hoy = date.today().isoformat()
     sid = sucursal_actual()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     # Filtro opcional por UNA sucursal individual (?sucursal=<id>): reduce el scope
     # a esa sucursal puntual (además de/independiente del filtro por ciudad).
-    filtro_sucursal = request.args.get("sucursal", "").strip()
-    if filtro_sucursal:
-        try:
-            g.ciudad_ids = [int(filtro_sucursal)]
-        except (TypeError, ValueError):
-            pass
+    # sucursal_filtro_permitida devuelve None si el usuario no tiene autorización
+    # para ver otras sucursales, en cuyo caso el parámetro se ignora.
+    filtro_sucursal = sucursal_filtro_permitida(conn, request.args.get("sucursal", "").strip())
+    if filtro_sucursal is not None:
+        g.ciudad_ids = [filtro_sucursal]
     cids = g.ciudad_ids
     # Los encargados de almacén principal coordinan el inventario: ven las alertas
     # de stock de TODAS las sucursales, igual que el admin (su "mano derecha").
@@ -313,7 +313,7 @@ def dashboard_graficos():
     conn = get_conn()
     hoy = date.today()
     sid = sucursal_actual()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     cids = g.ciudad_ids
     cond, cls_params = _cls("v.sucursal_id")
     cond_m, cls_params_m = _cls("m.sucursal_id")

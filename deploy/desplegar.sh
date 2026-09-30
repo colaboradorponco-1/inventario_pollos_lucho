@@ -2,6 +2,8 @@
 # Despliegue automatico de Pollos Lucho en el droplet.
 # Se ejecuta via SSH (GitHub Actions o manualmente). Nunca borra:
 #   .env, .rclone.conf, .secret_key, venv, respaldos respaldo_*.sql ni logs.
+# Antes de tocar los archivos toma un respaldo de la BD (respaldar.py) y
+# aborta si no se pudo generar.
 set -euo pipefail
 
 AUTO=0
@@ -35,6 +37,12 @@ if [ "$AUTO" = "1" ] && [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$HEAD" ] && 
   echo "==> Sin novedades (HEAD $HEAD), la app ya esta al dia"
   exit 0
 fi
+
+# Respaldo previo: garantiza un punto de restauracion del estado exacto de la
+# base justo antes del cambio. Si falla, no se toca la app (set -e).
+echo "==> Respaldo previo al despliegue"
+sudo -u pollos "$VENV/bin/python" "$APP_DIR/respaldar.py" \
+  || { echo "ERROR: el respaldo previo fallo; despliegue abortado"; exit 1; }
 
 # Si falta gunicorn.conf.py (archivo generado, no esta en el repo), restaurarlo.
 if [ ! -f "$APP_DIR/gunicorn.conf.py" ] && [ -f "$STAGE/deploy/gunicorn.conf.py" ]; then

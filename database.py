@@ -249,6 +249,7 @@ def init_db():
                     "almacen_id INT,"
                     "proveedor_id INT,"
                     "sucursal_id INT,"
+                    "unidad_tacho DOUBLE DEFAULT 0,"
                     "activo TINYINT DEFAULT 1,"
                     "FOREIGN KEY (categoria_id) REFERENCES categorias(id),"
                     "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
@@ -279,6 +280,45 @@ def init_db():
                     "vencimiento DATE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id),"
                     "FOREIGN KEY (almacen_id) REFERENCES almacenes(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS inventario_diario ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "sucursal_id INT NOT NULL,"
+                    "fecha DATE NOT NULL,"
+                    "hora_corte VARCHAR(20),"
+                    "usuario VARCHAR(255),"
+                    "cerrado_por VARCHAR(255),"
+                    "estado VARCHAR(20) NOT NULL DEFAULT 'abierto',"
+                    "fecha_hora_cierre VARCHAR(50),"
+                    "observaciones TEXT,"
+                    "total_items INT DEFAULT 0,"
+                    "total_faltantes INT DEFAULT 0,"
+                    "total_sobrantes INT DEFAULT 0,"
+                    "valor_diferencia DOUBLE DEFAULT 0,"
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
+                    "UNIQUE KEY uq_inv_suc_fecha (sucursal_id, fecha))")
+        cur.execute("CREATE TABLE IF NOT EXISTS inventario_detalle ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "inventario_id INT NOT NULL,"
+                    "producto_id INT NOT NULL,"
+                    "categoria_id INT,"
+                    "categoria_nombre VARCHAR(255),"
+                    "producto_nombre VARCHAR(255),"
+                    "codigo VARCHAR(100),"
+                    "unidad VARCHAR(50),"
+                    "stock_sistema DOUBLE DEFAULT 0,"
+                    "inicial DOUBLE DEFAULT 0,"
+                    "ingreso_dia DOUBLE DEFAULT 0,"
+                    "disponible DOUBLE DEFAULT 0,"
+                    "conteo_fisico DOUBLE,"
+                    "final DOUBLE DEFAULT 0,"
+                    "utilizada DOUBLE DEFAULT 0,"
+                    "diferencia DOUBLE DEFAULT 0,"
+                    "costo_promedio DOUBLE DEFAULT 0,"
+                    "precio_venta DOUBLE DEFAULT 0,"
+                    "observaciones TEXT,"
+                    "FOREIGN KEY (inventario_id) REFERENCES inventario_diario(id) ON DELETE CASCADE,"
+                    "FOREIGN KEY (producto_id) REFERENCES productos(id),"
+                    "UNIQUE KEY uq_inv_prod (inventario_id, producto_id))")
         cur.execute("CREATE TABLE IF NOT EXISTS gastos ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "categoria VARCHAR(255) NOT NULL,"
@@ -339,6 +379,8 @@ def init_db():
                     "cantidad DOUBLE NOT NULL,"
                     "destino_id INT,"
                     "unidad VARCHAR(50) DEFAULT 'unidad',"
+                    "tacho_fraccion DOUBLE DEFAULT 0,"
+                    "tacho_texto VARCHAR(50) DEFAULT '',"
                     "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS repartos ("
@@ -493,6 +535,14 @@ def migrar_esquema():
             _add_columna(cur, "productos", "sucursal_id INT")
         if not _col_existe(cur, "repartos", "pedido_id"):
             _add_columna(cur, "repartos", "pedido_id INT")
+        # Pedidos por tachos: 1 tacho = N unidades del producto (0 = no se pide por tacho)
+        # y la fracción elegida en cada línea del pedido (¼, ½, ¾, entero).
+        if not _col_existe(cur, "productos", "unidad_tacho"):
+            _add_columna(cur, "productos", "unidad_tacho DOUBLE DEFAULT 0")
+        if not _col_existe(cur, "pedido_detalle", "tacho_fraccion"):
+            _add_columna(cur, "pedido_detalle", "tacho_fraccion DOUBLE DEFAULT 0")
+        if not _col_existe(cur, "pedido_detalle", "tacho_texto"):
+            _add_columna(cur, "pedido_detalle", "tacho_texto VARCHAR(50) DEFAULT ''")
         db.commit()
         # Backfill: proveedores existentes van al primer almacén principal
         if _col_existe(cur, "proveedores", "sucursal_id"):
