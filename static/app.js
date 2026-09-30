@@ -44,6 +44,14 @@ async function request(url, opts = {}) {
         headers: { 'Content-Type': 'application/json' },
         ...opts,
     });
+    const ct = res.headers.get('Content-Type') || '';
+    if (!ct.includes('application/json')) {
+        if (res.status === 401 || res.redirected) {
+            throw new Error('Tu sesión venció. Cierra sesión y vuelve a entrar.');
+        }
+        throw new Error(`El servidor devolvió ${res.status} (${ct.split(';')[0] || 'sin tipo'}) ` +
+            `en ${opts.method || 'GET'} ${url}`);
+    }
     const json = await res.json();
     if (!json.ok) throw new Error(json.message || 'Error del servidor');
     const data = json.data;
