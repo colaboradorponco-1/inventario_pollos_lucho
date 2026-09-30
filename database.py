@@ -284,6 +284,7 @@ def init_db():
         cur.execute("CREATE TABLE IF NOT EXISTS inventario_diario ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "sucursal_id INT NOT NULL,"
+                    "categoria_id INT NOT NULL DEFAULT 0,"
                     "fecha DATE NOT NULL,"
                     "hora_corte VARCHAR(20),"
                     "usuario VARCHAR(255),"
@@ -296,7 +297,7 @@ def init_db():
                     "total_sobrantes INT DEFAULT 0,"
                     "valor_diferencia DOUBLE DEFAULT 0,"
                     "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
-                    "UNIQUE KEY uq_inv_suc_fecha (sucursal_id, fecha))")
+                    "UNIQUE KEY uq_inv_suc_cat_fecha (sucursal_id, categoria_id, fecha))")
         cur.execute("CREATE TABLE IF NOT EXISTS inventario_detalle ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "inventario_id INT NOT NULL,"
@@ -505,6 +506,14 @@ def _add_columna(cur, tabla, ddl):
         return False
 
 
+def _indice_existe(cur, tabla, indice):
+    cur.execute(
+        "SELECT COUNT(*) c FROM information_schema.STATISTICS "
+        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND INDEX_NAME = %s",
+        (MYSQL_DB, tabla, indice))
+    return cur.fetchone()["c"] > 0
+
+
 def migrar_esquema():
     """Adapta una BD preexistente (esquema SQLite antiguo) al modelo jerárquico
     por sucursal y añade la sección de pedidos/tickets. Es idempotente."""
@@ -549,6 +558,24 @@ def migrar_esquema():
             _add_columna(cur, "pedido_detalle", "tacho_fraccion DOUBLE DEFAULT 0")
         if not _col_existe(cur, "pedido_detalle", "tacho_texto"):
             _add_columna(cur, "pedido_detalle", "tacho_texto VARCHAR(50) DEFAULT ''")
+        # Varias planillas por día: una por categoría (categoria_id 0 = todas).
+        if not _col_existe(cur, "inventario_diario", "categoria_id"):
+            _add_columna(cur, "inventario_diario", "categoria_id INT NOT NULL DEFAULT 0")
+        if _col_existe(cur, "inventario_diario", "categoria_id"):
+            # Primero se agrega el índice nuevo; solo si quedó puesto se quita el
+            # viejo, para no dejar la tabla sin restricción única en ningún momento.
+            if not _indice_existe(cur, "inventario_diario", "uq_inv_suc_cat_fecha"):
+                try:
+                    cur.execute("ALTER TABLE inventario_diario "
+                                "ADD UNIQUE KEY uq_inv_suc_cat_fecha (sucursal_id, categoria_id, fecha)")
+                except Exception:
+                    pass
+            if _indice_existe(cur, "inventario_diario", "uq_inv_suc_cat_fecha") and \
+                    _indice_existe(cur, "inventario_diario", "uq_inv_suc_fecha"):
+                try:
+                    cur.execute("ALTER TABLE inventario_diario DROP INDEX uq_inv_suc_fecha")
+                except Exception:
+                    pass
         # Cuanto equivale un tacho escrito EN el pedido (1 tacho = N kg), asi no
         # hace falta configurar el producto. 0 = no aplica.
         if not _col_existe(cur, "pedido_detalle", "tacho_unidad"):

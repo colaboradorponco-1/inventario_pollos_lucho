@@ -9,12 +9,15 @@ por día, con fecha y hora de corte. Para cada categoría y producto se registra
 - El inventario inicial se reconstruye a partir de los movimientos del día: es el
   stock que tenía la sucursal a las 00:00 de esa fecha.
 - El ingreso del día son los movimientos tipo 'entrada' de esa fecha.
+- El inventario inicial y el ingreso del día también se pueden escribir a mano cuando
+  el encargado cuenta otra cosa (merma previa, apertura manual, etc.).
 - El inventario final es el CONTEO FÍSICO que digita el encargado (no el del sistema).
 - Al cerrar la planilla, cualquier diferencia entre el conteo y el stock del sistema
   se corrige con un movimiento tipo 'ajuste', para que `lotes` nunca se desincronice.
 
-Una planilla por día y sucursal (UNIQUE sucursal_id + fecha). El encargado llena y
-cierra las de su propia sucursal; un admin/superadmin puede ver las de todas.
+Cada día se pueden hacer VARIAS planillas por sucursal: una por categoría
+(UNIQUE sucursal_id + categoria_id + fecha). El encargado llena y cierra las de su
+propia sucursal; un admin/superadmin puede ver las de todas.
 """
 from datetime import date, datetime
 
@@ -30,6 +33,10 @@ inventario_bp = Blueprint("inventario", __name__)
 
 # Un día no puede tener más de 2 años hacia atrás ni 1 día hacia delante.
 _MIN_FECHA = (date.today().replace(year=date.today().year - 2)).isoformat()
+
+
+class _DatoInvalido(Exception):
+    """Valor escrito a mano por el encargado que no se puede guardar."""
 
 
 def _validar_fecha(valor):
@@ -74,13 +81,23 @@ def _stocks_actuales(conn, sucursal_id):
         "WHERE sucursal_id = %s GROUP BY producto_id", (sucursal_id,)).fetchall()}
 
 
-def _movimientos_posteriores(conn, sucursal_id, fecha):
-    """Suma con signo de los movimientos registrados DESPUÉS de la fecha de la
-    planilla: ya están en el stock actual pero no en el conteo físico."""
+def _movimientos_posteriores(conn, sucursal_id, fecha, hora_corte=None):
+    """Suma con signo de los movimientos registrados DESPUÉS del corte de la planilla:
+    ya están en el stock actual pero no en el conteo físico.
+
+    Son los de fechas posteriores a `fecha` y, si `hora_corte` viene informado, los
+    del mismo día posteriores a esa hora. Sin esto, una planilla abierta a las 07:00 y
+    cerrada a las 10:00, con ventas de las 08:00, volvería a subir ese stock al
+    ajustar contra el conteo de las 07:00."""
+    cond = "DATE(fecha) > %s"
+    params = [sucursal_id, fecha]
+    if hora_corte:
+        cond = "(DATE(fecha) > %s OR (DATE(fecha) = %s AND TIME(fecha) > %s))"
+        params = [sucursal_id, fecha, fecha, hora_corte]
     return {r["producto_id"]: r["s"] or 0.0 for r in conn.execute(
         "SELECT producto_id, SUM(cantidad) AS s FROM movimientos "
         "WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste') "
-        "AND DATE(fecha) > %s GROUP BY producto_id", (sucursal_id, fecha)).fetchall()}
+        f"AND {cond} GROUP BY producto_id", params).fetchall()}
 
 
 # --------------------------------------------------------------------------
@@ -90,6 +107,8 @@ def _movimientos_posteriores(conn, sucursal_id, fecha):
 @login_requerido
 def inventario_crear():
     """Crea (o reabre) la planilla del día para la sucursal operativa del usuario.
+    Se puede hacer UNA PLANILLA POR CATEGORÍA (o una de todas), así el almacén
+    cuenta por partes: la categoría se elige al abrirla y solo salen sus productos.
     Cada línea se precarga con el inventario inicial y el ingreso del día, deducidos
     de los movimientos; el 'final' queda vacío hasta que el encargado haga el conteo."""
     conn = get_conn()
@@ -104,21 +123,36 @@ def inventario_crear():
         return err("Fecha fuera de rango", 400)
     hora = (request.args.get("hora") or datetime.now().strftime("%H:%M"))[:20]
 
+    try:
+        cat_id = int(request.args.get("categoria_id") or 0)
+    except (TypeError, ValueError):
+        cat_id = 0
+    if cat_id < 0:
+        cat_id = 0
+    cat_nombre = "Todas las categorías"
+    if cat_id > 0:
+        c = conn.execute("SELECT nombre FROM categorias WHERE id = %s", (cat_id,)).fetchone()
+        if not c:
+            conn.close()
+            return err("La categoría no existe", 400)
+        cat_nombre = c["nombre"] or f"Categoría {cat_id}"
+
     existente = conn.execute(
-        "SELECT * FROM inventario_diario WHERE sucursal_id = ? AND fecha = ?", (sid, fecha)).fetchone()
+        "SELECT * FROM inventario_diario WHERE sucursal_id = %s AND categoria_id = %s AND fecha = %s",
+        (sid, cat_id, fecha)).fetchone()
     if existente and existente["estado"] == "cerrado":
         conn.close()
-        return err("La planilla de esa fecha ya está cerrada", 400)
+        return err(f"La planilla de '{cat_nombre}' de esa fecha ya está cerrada", 400)
     if existente:
         conn.close()
         return ok({"id": existente["id"], "estado": existente["estado"],
                    "fecha": existente["fecha"], "sucursal_id": sid},
-                  message="La planilla ya existe")
+                  message=f"La planilla de '{cat_nombre}' ya existe")
 
     cur = conn.execute("""
-        INSERT INTO inventario_diario (sucursal_id, fecha, hora_corte, usuario, estado)
-        VALUES (?, ?, ?, ?, 'abierto')
-    """, (sid, fecha, hora, session.get("usuario", "")))
+        INSERT INTO inventario_diario (sucursal_id, categoria_id, fecha, hora_corte, usuario, estado)
+        VALUES (?, ?, ?, ?, ?, 'abierto')
+    """, (sid, cat_id, fecha, hora, session.get("usuario", "")))
     inv_id = cur.lastrowid
 
     # Inventario inicial = stock a las 00:00 = stock actual - ingresos del día
@@ -150,8 +184,9 @@ def inventario_crear():
                    GROUP BY producto_id) po ON po.producto_id = p.id
         WHERE p.activo = 1 AND (l.stock > 0 OR ent.ingreso > 0 OR sa.salida > 0
                                 OR p.sucursal_id = %s OR p.sucursal_id IS NULL)
+          AND (%s = 0 OR p.categoria_id = %s)
         ORDER BY c.nombre, p.nombre
-    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid)).fetchall()
+    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid, cat_id, cat_id)).fetchall()
 
     for f in filas:
         # 'stock' es el stock de HOY. Si la planilla es de un día anterior, primero
@@ -180,9 +215,11 @@ def inventario_crear():
 
     conn.commit()
     conn.close()
-    registrar_auditoria("Planilla de inventario creada", f"Sucursal {sid} - {fecha}")
+    registrar_auditoria("Planilla de inventario creada",
+                        f"Sucursal {sid} - {fecha} - {cat_nombre}")
     return ok({"id": inv_id, "estado": "abierto", "fecha": fecha, "sucursal_id": sid,
-               "lineas": len(filas)}, message="Planilla creada")
+               "categoria_id": cat_id, "categoria_nombre": cat_nombre,
+               "lineas": len(filas)}, message=f"Planilla creada: {cat_nombre}")
 
 
 # --------------------------------------------------------------------------
@@ -198,9 +235,13 @@ def inventario_detalle(inv_id):
         return err("Planilla no encontrada", 404)
     filas = _detalle(conn, inv_id)
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
+    cat = None
+    if (inv["categoria_id"] or 0) > 0:
+        cat = conn.execute("SELECT nombre FROM categorias WHERE id = ?",
+                           (inv["categoria_id"],)).fetchone()
     conn.close()
 
     lineas = []
@@ -243,6 +284,8 @@ def inventario_detalle(inv_id):
         "hora_corte": inv["hora_corte"] or "",
         "sucursal_id": inv["sucursal_id"],
         "sucursal_nombre": sucursal["nombre"] if sucursal else "",
+        "categoria_id": inv["categoria_id"] or 0,
+        "categoria_nombre": (cat["nombre"] if cat else "Todas las categorías"),
         "usuario": inv["usuario"] or "",
         "cerrado_por": inv["cerrado_por"] or "",
         "fecha_hora_cierre": inv["fecha_hora_cierre"] or "",
@@ -267,8 +310,10 @@ def inventario_detalle(inv_id):
 @inventario_bp.route("/api/inventario-diario/<int:inv_id>", methods=["PUT"])
 @login_requerido
 def inventario_guardar(inv_id):
-    """Guarda el conteo físico línea por línea. Recalcula disponible, utilizada y
-    diferencia sin tocar el stock: el ajuste real se aplica al cerrar."""
+    """Guarda la planilla línea por línea. El encargado llena a mano el inventario
+    inicial, el ingreso del día y el inventario final; el sistema calcula
+    disponible (= inicial + ingreso), utilizada (= disponible - final) y la
+    diferencia, sin tocar el stock: el ajuste real se aplica al cerrar."""
     conn = get_conn()
     inv, permitido = _sucursal_de_planilla(conn, inv_id)
     if not permitido:
@@ -287,43 +332,59 @@ def inventario_guardar(inv_id):
         conn.close()
         return err("Envía las líneas a actualizar", 400)
 
+    def _campo(bruto, etiqueta):
+        """Número >= 0 escrito por el encargado. None si lo dejó vacío."""
+        if bruto in (None, ""):
+            return None
+        v = flotante(bruto, None)
+        if v is None:
+            raise _DatoInvalido(f"{etiqueta} debe ser un número (déjalo vacío si no aplica)")
+        if v < 0:
+            raise _DatoInvalido(f"{etiqueta} no puede ser negativo")
+        return v
+
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
-    for item in lineas:
-        if not isinstance(item, dict):
-            continue
-        lid = item.get("id")
-        fila = validas.get(lid)
-        if not fila:
-            continue
-        conteo = None
-        conteo_raw = item.get("conteo_fisico", None)
-        if conteo_raw not in (None, ""):
-            conteo = flotante(conteo_raw, None)
-            if conteo is None or conteo < 0:
-                conn.close()
-                return err("El conteo físico debe ser un número mayor o igual a cero", 400)
-        inicial = fila["inicial"] or 0
-        ingreso = fila["ingreso_dia"] or 0
-        disponible = inicial + ingreso
-        final = conteo if conteo is not None else disponible
-        utilizada = max(disponible - final, 0)
-        if conteo is None:
-            # Sin conteo no hay diferencia: se calcula recién al cerrar.
-            diferencia = 0.0
-        else:
-            # Diferencia = lo que hay de menos (-) o de más (+) respecto al sistema.
-            # Se compara contra el stock real de `lotes` (al momento del conteo),
-            # no contra `disponible` ni contra el stock de cuando se abrió la planilla.
-            stock_ref = stocks.get(fila["producto_id"], 0.0) - posteriores.get(fila["producto_id"], 0.0)
-            diferencia = round(final - stock_ref, 3)
-        conn.execute("""
-            UPDATE inventario_detalle
-            SET conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s, observaciones = %s
-            WHERE id = %s
-        """, (conteo, final, utilizada, diferencia,
-              (item.get("observaciones") or "")[:500] or None, lid))
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
+    try:
+        for item in lineas:
+            if not isinstance(item, dict):
+                continue
+            lid = item.get("id")
+            fila = validas.get(lid)
+            if not fila:
+                continue
+            conteo = _campo(item.get("conteo_fisico"), "El inventario final")
+            # El encargado puede corregir el inicial y el ingreso a mano; si los
+            # deja vacíos se conservan los valores deducidos de los movimientos.
+            inicial = _campo(item.get("inicial"), "El inventario inicial")
+            if inicial is None:
+                inicial = fila["inicial"] or 0
+            ingreso = _campo(item.get("ingreso_dia"), "El ingreso del día")
+            if ingreso is None:
+                ingreso = fila["ingreso_dia"] or 0
+            disponible = inicial + ingreso
+            final = conteo if conteo is not None else disponible
+            utilizada = max(disponible - final, 0)
+            if conteo is None:
+                # Sin conteo no hay diferencia: se calcula recién al cerrar.
+                diferencia = 0.0
+            else:
+                # Diferencia = lo que hay de menos (-) o de más (+) respecto al sistema.
+                # Se compara contra el stock real de `lotes` (al momento del conteo),
+                # no contra `disponible` ni contra el stock de cuando se abrió la planilla.
+                stock_ref = stocks.get(fila["producto_id"], 0.0) - posteriores.get(fila["producto_id"], 0.0)
+                diferencia = round(final - stock_ref, 3)
+            conn.execute("""
+                UPDATE inventario_detalle
+                SET inicial = %s, ingreso_dia = %s, disponible = %s,
+                    conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s, observaciones = %s
+                WHERE id = %s
+            """, (inicial, ingreso, disponible, conteo, final, utilizada, diferencia,
+                  (item.get("observaciones") or "")[:500] or None, lid))
+    except _DatoInvalido as e:
+        conn.close()
+        return err(str(e), 400)
 
     conn.execute("UPDATE inventario_diario SET observaciones = %s, hora_corte = %s WHERE id = %s",
                  ((data.get("observaciones") or inv["observaciones"] or "")[:2000] or None,
@@ -370,7 +431,7 @@ def inventario_cerrar(inv_id):
     # lotes menos lo que se movió después de la fecha de la planilla), no contra
     # el stock de cuando se abrió: si hubo entradas/salidas mientras la planilla
     # estuvo abierta, usar el valor viejo dejaba el stock descuadrado.
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
     dif_por_linea = {}
     for f in filas:
         final = f["final"]
@@ -435,17 +496,24 @@ def inventario_cerrar(inv_id):
 def inventario_lista():
     conn = get_conn()
     sid = sucursal_actual()
-    if es_gestion() or es_encargado_almacen(conn):
-        q = """SELECT i.*, s.nombre AS sucursal_nombre FROM inventario_diario i
-              JOIN sucursales s ON s.id = i.sucursal_id"""
-        params = []
-    else:
-        q = """SELECT i.*, s.nombre AS sucursal_nombre FROM inventario_diario i
-              JOIN sucursales s ON s.id = i.sucursal_id WHERE i.sucursal_id = %s"""
-        params = [sid]
+    cond = []
+    params = []
+    if not (es_gestion() or es_encargado_almacen(conn)):
+        cond.append("i.sucursal_id = %s")
+        params.append(sid)
+    cat_arg = request.args.get("categoria_id")
+    if cat_arg:
+        cond.append("i.categoria_id = %s")
+        params.append(int(cat_arg))
     if request.args.get("estado"):
-        q += " AND i.estado = %s"
+        cond.append("i.estado = %s")
         params.append(request.args["estado"])
+    q = """SELECT i.*, s.nombre AS sucursal_nombre, c.nombre AS categoria_nombre
+           FROM inventario_diario i
+           JOIN sucursales s ON s.id = i.sucursal_id
+           LEFT JOIN categorias c ON c.id = i.categoria_id"""
+    if cond:
+        q += " WHERE " + " AND ".join(cond)
     q += " ORDER BY i.fecha DESC, i.id DESC LIMIT 200"
     rows = conn.execute(q, params).fetchall()
     conn.close()
@@ -468,8 +536,12 @@ def inventario_imprimir(inv_id):
     filas = _detalle(conn, inv_id)
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
+    cat = None
+    if (inv["categoria_id"] or 0) > 0:
+        cat = conn.execute("SELECT nombre FROM categorias WHERE id = ?",
+                           (inv["categoria_id"],)).fetchone()
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
     conn.close()
 
     lineas = []
@@ -497,6 +569,7 @@ def inventario_imprimir(inv_id):
 
     return render_template("planilla_inventario.html", inv=inv,
                            sucursal_nombre=sucursal["nombre"] if sucursal else "",
+                           categoria_nombre=cat["nombre"] if cat else "Todas las categorías",
                            lineas=lineas,
                            suma_inicial=round(sum(l["inicial"] for l in lineas), 3),
                            suma_ingreso=round(sum(l["ingreso_dia"] for l in lineas), 3),
@@ -521,6 +594,12 @@ def inventario_excel(inv_id):
     filas = _detalle(conn, inv_id)
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
+    nombre_cat = "Todas las categorías"
+    if (inv["categoria_id"] or 0) > 0:
+        c = conn.execute("SELECT nombre FROM categorias WHERE id = ?",
+                         (inv["categoria_id"],)).fetchone()
+        if c:
+            nombre_cat = c["nombre"]
     conn.close()
 
     enc = ["Categoría", "Producto", "Unidad", "Inventario inicial", "Ingreso del día",
@@ -538,6 +617,7 @@ def inventario_excel(inv_id):
         [22, 32, 9, 17, 15, 18, 16, 18, 11, 40],
         titulo=titulo,
         subtitulos=[sucursal["nombre"] if sucursal else "",
+                    f"Categoría: {nombre_cat}",
                     f"Fecha: {inv['fecha']}",
                     f"Hora de corte: {inv['hora_corte'] or ''}",
                     f"Estado: {'CERRADA' if inv['estado'] == 'cerrado' else 'ABIERTA'}"])

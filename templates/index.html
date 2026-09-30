@@ -424,7 +424,7 @@
                         <span class="scan-icon">Hora corte</span>
                         <input type="time" id="inv-hora" style="max-width:120px">
                     </label>
-                    <button class="btn btn-primary" id="btn-inv-crear">Abrir planilla del día</button>
+                    <button class="btn btn-primary" id="btn-inv-crear">¿Iniciar inventario del día?</button>
                 </div>
             </div>
 
@@ -433,9 +433,11 @@
                     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                     <div>
                         <h3 id="inv-titulo">Conteo del día</h3>
-                        <p id="inv-subtitulo">Digita la cantidad contada en "Inventario final". El resto se calcula solo.</p>
+                        <p id="inv-subtitulo">Llena a mano el inventario inicial, el ingreso del día y el inventario final. El disponible y la cantidad utilizada se calculan solos.</p>
                     </div>
                 </div>
+
+                <p class="scan-hint" style="margin:0 0 10px">Puedes hacer <strong>varias planillas el mismo día</strong>, una por cada categoría (Alimentos, Cocina, Limpieza, etc.). Cada planilla se cierra por separado.</p>
 
                 <div class="toolbar small" id="inv-resumen" style="margin-bottom:10px"></div>
 
@@ -445,10 +447,10 @@
                             <th rowspan="2">Categoría</th>
                             <th rowspan="2">Producto</th>
                             <th rowspan="2">Unidad</th>
-                            <th rowspan="2">Inicial</th>
-                            <th rowspan="2">Ingreso día</th>
-                            <th rowspan="2" style="background:#0F3D2E;color:#fff">Disponible</th>
-                            <th rowspan="2" style="background:#7C2D12;color:#fff">Final (conteo)</th>
+                            <th rowspan="2">Inv. inicial</th>
+                            <th rowspan="2">Ingreso del día</th>
+                            <th rowspan="2" style="background:#0F3D2E;color:#fff">Disp. día = inicial + ingreso</th>
+                            <th rowspan="2" style="background:#7C2D12;color:#fff">Inv. final (conteo)</th>
                             <th rowspan="2">Utilizada</th>
                             <th rowspan="2">Dif.</th>
                             <th rowspan="2">Observaciones</th>
@@ -473,7 +475,7 @@
             <div class="panel">
                 <h3 style="margin-bottom:12px">Historial de planillas</h3>
                 <div class="table-scroll"><table class="data-table">
-                    <thead><tr><th>Fecha</th><th>Sucursal</th><th>Hora corte</th><th>Estado</th><th>Ítems</th><th>Faltan</th><th>Sobran</th><th>Valor dif.</th><th>Cerrada por</th><th></th></tr></thead>
+                        <thead><tr><th>Fecha</th><th>Categoría</th><th>Sucursal</th><th>Hora corte</th><th>Estado</th><th>Ítems</th><th>Faltan</th><th>Sobran</th><th>Valor dif.</th><th>Cerrada por</th><th></th></tr></thead>
                     <tbody id="inv-lista-tbody"></tbody>
                 </table></div>
                 <p class="empty" id="inv-lista-empty">Todavía no hay planillas registradas.</p>
@@ -978,6 +980,25 @@
         </section>
 
     </main>
+
+    <!-- MODAL INVENTARIO DIARIO -->
+    <div id="modal-inv-nueva" class="modal">
+        <div class="modal-content" style="max-width:480px">
+            <button type="button" class="close" data-close="modal-inv-nueva" aria-label="Cerrar">&times;</button>
+            <h2>Iniciar inventario del día</h2>
+            <p class="scan-hint" style="margin:0 0 12px">¿Quieres iniciar el inventario de hoy? Elige la categoría a contar. Solo saldrán los productos de esa categoría.</p>
+            <div class="grid-2">
+                <label>Fecha <input type="date" id="inv-nueva-fecha"></label>
+                <label>Hora corte <input type="time" id="inv-nueva-hora"></label>
+            </div>
+            <label>Categoría a contar <select id="inv-nueva-categoria"></select></label>
+            <p class="scan-hint">Puedes hacer varias planillas el mismo día, una por categoría.</p>
+            <div class="toolbar" style="margin-top:14px">
+                <button type="button" class="btn" data-close="modal-inv-nueva">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="btn-inv-nueva-crear">Sí, iniciar</button>
+            </div>
+        </div>
+    </div>
 
     <!-- MODAL PRODUCTO -->
     <div id="modal-producto" class="modal">

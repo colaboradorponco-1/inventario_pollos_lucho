@@ -2729,9 +2729,13 @@ async function loadAuditoria() {
     }
 }
 $('#btn-refrescar-auditoria')?.addEventListener('click', loadAuditoria);
-$('#btn-inv-crear')?.addEventListener('click', crearInventario);
-$('#btn-inv-guardar')?.addEventListener('click', guardarInventario);
-$('#btn-inv-cerrar')?.addEventListener('click', cerrarInventario);
+// Un error de red o del servidor debe mostrarse, no quedar como promesa rechazada.
+const invClick = (fn) => async (...args) => {
+    try { await fn(...args); } catch (e) { toast(e.message || 'Error', 'err'); }
+};
+$('#btn-inv-crear')?.addEventListener('click', invClick(crearInventario));
+$('#btn-inv-guardar')?.addEventListener('click', invClick(guardarInventario));
+$('#btn-inv-cerrar')?.addEventListener('click', invClick(cerrarInventario));
 $('#btn-inv-excel')?.addEventListener('click', () => {
     if (INV_ID) window.open(API + '/inventario-diario/' + INV_ID + '/excel', '_blank');
 });
@@ -2888,6 +2892,7 @@ async function listarInventario() {
         tb.innerHTML = filas.map((f) => `
             <tr>
                 <td>${esc(f.fecha)}</td>
+                <td><strong>${esc(f.categoria_nombre || 'Todas las categorías')}</strong></td>
                 <td>${esc(f.sucursal_nombre || '')}</td>
                 <td>${esc(f.hora_corte || '')}</td>
                 <td><span class="badge ${f.estado === 'cerrado' ? 'badge-compra' : 'badge-entrada'}">${f.estado === 'cerrado' ? 'Cerrada' : 'Abierta'}</span></td>
@@ -2903,15 +2908,38 @@ async function listarInventario() {
 }
 
 async function crearInventario() {
-    const fecha = $('#inv-fecha').value;
-    const hora = $('#inv-hora').value;
+    // Modal: pregunta si se inicia el inventario del día y por qué categoría.
+    const cats = catalogos.categorias || [];
+    const sel = $('#inv-nueva-categoria');
+    if (sel) {
+        sel.innerHTML = ['<option value="0">Todas las categorías</option>'].concat(
+            cats.map((c) => `<option value="${c.id}">${esc(c.nombre)}</option>`)).join('');
+    }
+    const hoy = new Date();
+    const iso = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0') + '-' + String(hoy.getDate()).padStart(2, '0');
+    const fN = $('#inv-nueva-fecha');
+    if (fN) fN.value = $('#inv-fecha').value || iso;
+    const hN = $('#inv-nueva-hora');
+    if (hN) hN.value = $('#inv-hora').value ||
+        String(hoy.getHours()).padStart(2, '0') + ':' + String(hoy.getMinutes()).padStart(2, '0');
+    openModal('modal-inv-nueva');
+}
+
+async function confirmarCrearInventario() {
+    const fecha = $('#inv-nueva-fecha').value;
+    const hora = $('#inv-nueva-hora').value;
+    const categoria = $('#inv-nueva-categoria').value || '0';
     if (!fecha) { toast('Selecciona la fecha del inventario', 'err'); return; }
-    const qs = new URLSearchParams({ fecha, hora: hora || '' });
+    $('#inv-fecha').value = fecha;
+    $('#inv-hora').value = hora || '';
+    closeModal('modal-inv-nueva');
+    const qs = new URLSearchParams({ fecha, hora: hora || '', categoria_id: categoria });
     const r = await request(API + '/inventario-diario?' + qs.toString(), { method: 'POST' });
     toast(r.message || 'Planilla lista', 'ok');
     await listarInventario();
     await abrirInventario(r.data.id);
 }
+$('#btn-inv-nueva-crear')?.addEventListener('click', confirmarCrearInventario);
 
 async function abrirInventario(invId) {
     const resp = await request(API + '/inventario-diario/' + invId);
@@ -2920,10 +2948,10 @@ async function abrirInventario(invId) {
     INV_CERRADA = d.estado === 'cerrado';
     INV_FILAS = d.lineas || [];
     $('#inv-panel-conteo').style.display = '';
-    $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} - ${d.fecha} (${d.hora_corte || 'sin hora'})`;
+    $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${d.fecha} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${d.fecha_hora_cierre || ''}.`
-        : 'Digita la cantidad contada en "Inventario final". El resto se calcula solo.';
+        : 'Llena a mano el inventario inicial, el ingreso del día y el inventario final. Disp. día = inicial + ingreso, y la cantidad utilizada = disponible - final. Puedes corregir todo hasta cerrar.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
 
@@ -2945,17 +2973,26 @@ async function abrirInventario(invId) {
             html += `<tr style="background:#F5F5F5"><td colspan="10"><strong>${esc(catActual)}</strong></td></tr>`;
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
+        const bloq = INV_CERRADA ? 'disabled' : '';
         html += `
             <tr data-inv-fila="${f.id}">
                 <td style="color:var(--muted)">${esc(f.categoria)}</td>
                 <td><strong>${esc(f.producto)}</strong></td>
                 <td>${esc(f.unidad)}</td>
-                <td>${esc(fmtInvQ(f.inicial))}</td>
-                <td style="color:#0F3D2E">${esc(fmtInvQ(f.ingreso_dia))}</td>
-                <td style="font-weight:700">${esc(fmtInvQ(f.disponible))}</td>
+                <td>
+                    <input type="number" step="any" min="0" class="inv-inicial" data-id="${f.id}"
+                           value="${esc(fmtInvQ(f.inicial))}" placeholder="—" ${bloq}
+                           style="width:82px;text-align:right">
+                </td>
+                <td>
+                    <input type="number" step="any" min="0" class="inv-ingreso" data-id="${f.id}"
+                           value="${esc(fmtInvQ(f.ingreso_dia))}" placeholder="—" ${bloq}
+                           style="width:82px;text-align:right">
+                </td>
+                <td style="font-weight:700" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
-                           value="${conteo}" placeholder="—" ${INV_CERRADA ? 'disabled' : ''}
+                           value="${conteo}" placeholder="—" ${bloq}
                            style="width:105px;text-align:right">
                 </td>
                 <td data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
@@ -2963,17 +3000,19 @@ async function abrirInventario(invId) {
                 <td>
                     <input type="text" class="inv-obs" data-id="${f.id}"
                            value="${esc(f.observaciones || '')}" placeholder="—"
-                           ${INV_CERRADA ? 'disabled' : ''} style="width:150px">
+                           ${bloq} style="width:150px">
                 </td>
             </tr>`;
     });
     tb.innerHTML = html;
 
-    $$('.inv-conteo').forEach((inp) => inp.addEventListener('input', recalcFilaInv));
+    $$('.inv-conteo, .inv-inicial, .inv-ingreso')
+        .forEach((inp) => inp.addEventListener('input', recalcFilaInv));
 
     $('#btn-inv-guardar').style.display = INV_CERRADA ? 'none' : '';
     $('#btn-inv-cerrar').style.display = INV_CERRADA ? 'none' : '';
     $('#btn-inv-excel').style.display = '';
+    $('#btn-inv-print').style.display = '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
         ? 'Esta planilla está cerrada. El stock ya fue ajustado según el conteo.'
         : 'Al cerrar, toda diferencia entre el conteo y el stock del sistema se corrige con un movimiento de ajuste.';
@@ -2984,22 +3023,35 @@ function recalcFilaInv(e) {
     const id = Number(inp.dataset.id);
     const f = INV_FILAS.find((x) => x.id === id);
     if (!f) return;
+    // El encargado escribe a mano el inicial y el ingreso del día; el disponible
+    // es la suma de ambos y la utilizada sale del disponible menos el conteo.
+    const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
+    const ingIn = $(`#inv-tbody .inv-ingreso[data-id="${id}"]`);
+    const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
+    const ingreso = ingIn && ingIn.value !== '' ? Number(ingIn.value) : (f.ingreso_dia || 0);
+    const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
     const conteo = inp.value === '' ? null : Number(inp.value);
-    const final = conteo === null || Number.isNaN(conteo) ? f.disponible : conteo;
-    const utilizada = Math.max(f.disponible - final, 0);
-    const dif = final - f.stock_sistema;
+    const final = conteo === null || Number.isNaN(conteo) ? disponible : conteo;
+    const utilizada = Math.max(disponible - final, 0);
+    const dif = conteo === null || Number.isNaN(conteo) ? 0 : final - f.stock_sistema;
+    const dEl = $(`[data-inv-disp="${id}"]`);
+    if (dEl) dEl.textContent = fmtInvQ(disponible);
     const uEl = $(`[data-inv-util="${id}"]`);
-    const dEl = $(`[data-inv-dif="${id}"]`);
+    const difEl = $(`[data-inv-dif="${id}"]`);
     if (uEl) uEl.textContent = fmtInvQ(utilizada);
-    if (dEl) dEl.innerHTML = diffInvBadge(dif);
+    if (difEl) difEl.innerHTML = diffInvBadge(dif);
 }
 
 function collectedInventario() {
     return $$('#inv-tbody .inv-conteo').map((inp) => {
         const id = Number(inp.dataset.id);
         const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
+        const ini = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
+        const ing = $(`#inv-tbody .inv-ingreso[data-id="${id}"]`);
         return {
             id,
+            inicial: ini && ini.value !== '' ? ini.value : null,
+            ingreso_dia: ing && ing.value !== '' ? ing.value : null,
             conteo_fisico: inp.value === '' ? null : inp.value,
             observaciones: obs ? obs.value : '',
         };
@@ -3007,7 +3059,7 @@ function collectedInventario() {
 }
 
 async function guardarInventario() {
-    if (!INV_ID) return;
+    if (!INV_ID) return false;
     const r = await request(API + '/inventario-diario/' + INV_ID, {
         method: 'PUT',
         body: {
@@ -3019,6 +3071,7 @@ async function guardarInventario() {
     toast(r.message || 'Conteo guardado', 'ok');
     await abrirInventario(INV_ID);
     await listarInventario();
+    return true;
 }
 
 async function cerrarInventario() {
@@ -3030,7 +3083,12 @@ async function cerrarInventario() {
     }
     if (!confirm('Al cerrar la planilla se ajustará el stock de los productos con diferencia. ¿Continuar?')) return;
     // Primero se guarda el conteo digitado: si no, el cierre usaría valores viejos.
-    await guardarInventario();
+    try {
+        await guardarInventario();
+    } catch (e) {
+        toast('No se pudo guardar el conteo, la planilla sigue abierta: ' + e.message, 'err');
+        return;
+    }
     const r = await request(API + '/inventario-diario/' + INV_ID + '/cerrar', { method: 'POST' });
     toast(r.message || 'Planilla cerrada', 'ok');
     await abrirInventario(INV_ID);
@@ -3090,7 +3148,8 @@ $('#btn-salir-top')?.addEventListener('click', async () => {
     window.location.href = '/login';
 });
 
-$$('.close').forEach((c) => c.addEventListener('click', () => closeModal(c.dataset.close)));
+// Cualquier botón con data-close cierra su modal (no solo la X).
+$$('[data-close]').forEach((c) => c.addEventListener('click', () => closeModal(c.dataset.close)));
 window.addEventListener('click', (e) => {
     if (e.target.classList && e.target.classList.contains('modal')) closeModal(e.target.id);
 });

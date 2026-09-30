@@ -75,12 +75,13 @@
         <div class="meta">
             <div><span>Fecha</span><b>{{ inv.fecha }}</b></div>
             <div><span>Hora de corte</span><b>{{ inv.hora_corte or '—' }}</b></div>
+            <div><span>Categoría a contar</span><b>{{ categoria_nombre or 'Todas las categorías' }}</b></div>
             <div><span>Sucursal / Almacén</span><b>{{ sucursal_nombre or '—' }}</b></div>
             <div><span>Estado</span>
                 {% if inv.estado == 'cerrado' %}<b><span class="estado estado-ce">CERRADA</span></b>
                 {% else %}<b><span class="estado estado-ab">ABIERTA</span></b>{% endif %}
             </div>
-            <div><span>Abrida por</span><b>{{ inv.usuario or '—' }}</b></div>
+            <div><span>Abierta por</span><b>{{ inv.usuario or '—' }}</b></div>
             {% if inv.estado == 'cerrado' %}
             <div><span>Cerrada por</span><b>{{ inv.cerrado_por or '—' }}</b></div>
             <div><span>Cierre</span><b>{{ inv.fecha_hora_cierre or '—' }}</b></div>
