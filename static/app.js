@@ -2903,7 +2903,13 @@ async function listarInventario() {
                 <td>${esc(f.cerrado_por || f.usuario || '')}</td>
                 <td><button class="btn" data-inv-abrir="${f.id}">Abrir</button></td>
             </tr>`).join('');
-        $$('[data-inv-abrir]').forEach((b) => b.addEventListener('click', () => abrirInventario(Number(b.dataset.invAbrir))));
+        $$('[data-inv-abrir]').forEach((b) => b.addEventListener('click', async () => {
+            try {
+                await abrirInventario(Number(b.dataset.invAbrir));
+            } catch (e) {
+                toast('No se pudo abrir la planilla: ' + (e.message || 'error del servidor'), 'err');
+            }
+        }));
     } catch (e) { /* la lista no es crítica */ }
 }
 
@@ -2937,13 +2943,15 @@ async function confirmarCrearInventario() {
     const r = await request(API + '/inventario-diario?' + qs.toString(), { method: 'POST' });
     toast(r.message || 'Planilla lista', 'ok');
     await listarInventario();
-    await abrirInventario(r.data.id);
+    const nueva = r.data || r;
+    await abrirInventario(nueva.id);
 }
 $('#btn-inv-nueva-crear')?.addEventListener('click', confirmarCrearInventario);
 
 async function abrirInventario(invId) {
     const resp = await request(API + '/inventario-diario/' + invId);
-    const d = resp.data;
+    const d = resp.data || resp;
+    if (!d || !d.id) { toast('No se pudo abrir la planilla', 'err'); return; }
     INV_ID = d.id;
     INV_CERRADA = d.estado === 'cerrado';
     INV_FILAS = d.lineas || [];
@@ -3016,6 +3024,8 @@ async function abrirInventario(invId) {
     $('#inv-nota-cierre').textContent = INV_CERRADA
         ? 'Esta planilla está cerrada. El stock ya fue ajustado según el conteo.'
         : 'Al cerrar, toda diferencia entre el conteo y el stock del sistema se corrige con un movimiento de ajuste.';
+    // Que el formulario quede a la vista: si no, parece que no se abrió nada.
+    $('#inv-panel-conteo').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function recalcFilaInv(e) {
