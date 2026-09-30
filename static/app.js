@@ -1050,6 +1050,7 @@ async function openProductoModal(id, lista) {
         }
         uSel.value = p.unidad || 'unidad';
         $('#prod-minimo').value = p.stock_minimo;
+        $('#prod-unidad-tacho').value = p.unidad_tacho || 0;
         $('#prod-costo').value = p.costo_promedio;
         $('#prod-precio-venta').value = p.precio_venta;
         $('#prod-vencimiento').value = p.vencimiento || '';
@@ -1083,6 +1084,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         categoria_id: +$('#prod-categoria-form').value || null,
         almacen_id: +$('#prod-almacen').value || null,
         unidad: $('#prod-unidad').value,
+        unidad_tacho: +$('#prod-unidad-tacho').value || 0,
         stock_minimo: +$('#prod-minimo').value || 0,
         costo_promedio: +$('#prod-costo').value || 0,
         precio_venta: +$('#prod-precio-venta').value || 0,
@@ -2836,71 +2838,6 @@ function renderPagination(containerId, total, pagina, porPagina, loadFn) {
     });
 }
 
-// ---------------- Perfil y sesión ----------------
-const tSes = $('#sidebar-sesion');
-if (tSes) {
-    tSes.addEventListener('click', async () => {
-        try {
-            const s = await request(API + '/sesion');
-            const ini = esc((s.nombre || s.usuario || '?')[0].toUpperCase());
-            $('#perfil-avatar-lg').textContent = (s.nombre || s.usuario || '?')[0].toUpperCase();
-            $('#perfil-nombre').value = s.nombre || '';
-            $('#perfil-pass-actual').value = '';
-            $('#perfil-pass-nueva').value = '';
-            openModal('modal-perfil');
-        } catch (e) {
-            toast('Error al cargar perfil', 'err');
-        }
-    });
-}
-
-$('#form-perfil').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    try {
-        const body = { nombre: $('#perfil-nombre').value.trim() };
-        const passActual = $('#perfil-pass-actual').value;
-        const passNueva = $('#perfil-pass-nueva').value;
-        if (passNueva) {
-            if (!passActual) { toast('Ingresa tu contraseña actual', 'err'); return; }
-            body.actual = passActual;
-            body.nueva = passNueva;
-        }
-        await request(API + '/perfil', { method: 'PUT', body: JSON.stringify(body) });
-        toast('Perfil actualizado');
-        closeModal('modal-perfil');
-        init();
-    } catch (err) {
-        toast(err.message, 'err');
-    }
-});
-
-$('#btn-salir').addEventListener('click', async () => {
-    try {
-        await request(API + '/logout', { method: 'POST' });
-    } catch (e) { /* ignora errores al salir */ }
-    window.location.href = '/login';
-});
-
-$('#btn-salir-top')?.addEventListener('click', async () => {
-    cerrarMenu();
-    try {
-        await request(API + '/logout', { method: 'POST' });
-    } catch (e) { /* ignora errores al salir */ }
-    window.location.href = '/login';
-});
-
-$$('.close').forEach((c) => c.addEventListener('click', () => closeModal(c.dataset.close)));
-window.addEventListener('click', (e) => {
-    if (e.target.classList && e.target.classList.contains('modal')) closeModal(e.target.id);
-});
-
-// Fechas por defecto en movimientos, gastos, ventas y repartos
-$('#mov-fecha').value = nowLocal();
-$('#gasto-fecha').value = nowLocal();
-$('#venta-fecha').value = nowLocal();
-$('#reparto-fecha').value = nowLocal();
-$('#pedido-fecha').value = nowLocal();
-
 // ---------------- Inventario Físico Diario ----------------
 // Planilla por categoría y producto: Inicial + Ingreso del día = Disponible del día;
 // Disponible - Final (conteo físico) = Utilizada. Al cerrar, la diferencia entre el
@@ -3092,14 +3029,118 @@ async function cerrarInventario() {
     await listarInventario();
 }
 
+// ---------------- Perfil y sesión ----------------
+const tSes = $('#sidebar-sesion');
+if (tSes) {
+    tSes.addEventListener('click', async () => {
+        try {
+            const s = await request(API + '/sesion');
+            const ini = esc((s.nombre || s.usuario || '?')[0].toUpperCase());
+            $('#perfil-avatar-lg').textContent = (s.nombre || s.usuario || '?')[0].toUpperCase();
+            $('#perfil-nombre').value = s.nombre || '';
+            $('#perfil-pass-actual').value = '';
+            $('#perfil-pass-nueva').value = '';
+            openModal('modal-perfil');
+        } catch (e) {
+            toast('Error al cargar perfil', 'err');
+        }
+    });
+}
+
+$('#form-perfil').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+        const body = { nombre: $('#perfil-nombre').value.trim() };
+        const passActual = $('#perfil-pass-actual').value;
+        const passNueva = $('#perfil-pass-nueva').value;
+        if (passNueva) {
+            if (!passActual) { toast('Ingresa tu contraseña actual', 'err'); return; }
+            body.actual = passActual;
+            body.nueva = passNueva;
+        }
+        await request(API + '/perfil', { method: 'PUT', body: JSON.stringify(body) });
+        toast('Perfil actualizado');
+        closeModal('modal-perfil');
+        init();
+    } catch (err) {
+        toast(err.message, 'err');
+    }
+});
+
+$('#btn-salir').addEventListener('click', async () => {
+    try {
+        await request(API + '/logout', { method: 'POST' });
+    } catch (e) { /* ignora errores al salir */ }
+    window.location.href = '/login';
+});
+
+$('#btn-salir-top')?.addEventListener('click', async () => {
+    cerrarMenu();
+    try {
+        await request(API + '/logout', { method: 'POST' });
+    } catch (e) { /* ignora errores al salir */ }
+    window.location.href = '/login';
+});
+
+$$('.close').forEach((c) => c.addEventListener('click', () => closeModal(c.dataset.close)));
+window.addEventListener('click', (e) => {
+    if (e.target.classList && e.target.classList.contains('modal')) closeModal(e.target.id);
+});
+
+// Fechas por defecto en movimientos, gastos, ventas y repartos
+$('#mov-fecha').value = nowLocal();
+$('#gasto-fecha').value = nowLocal();
+$('#venta-fecha').value = nowLocal();
+$('#reparto-fecha').value = nowLocal();
+$('#pedido-fecha').value = nowLocal();
+
 // ---------------- Pedidos ----------------
 let pedidoProdsAll = [];
 let pedidoSel = {};            // producto_id -> cantidad
+let pedidoTacho = {};          // producto_id -> fracción de tacho elegida (¼, ½, ¾, 1)
 let pedidoSucursal = null;     // sucursal que hace el pedido
 let pedidoProvFiltro = '';     // filtrar el paso 2 por proveedor ('' = todos)
 let bandejaSucF = '';          // filtrar la bandeja por sucursal ('' = todas)
 const esEncargadoPed = () => window.ROL === 'encargado';
 const ESTADO_LAB = { pendiente: 'Pidiendo', despachado: 'En camino', cumplido: 'Entregado' };
+
+// Medidas por tacho que se pueden pedir (fracción del tacho).
+const FRACCIONES_TACHO = [
+    { v: 0.25, t: '¼ tacho' },
+    { v: 0.5, t: '½ tacho' },
+    { v: 0.75, t: '¾ tacho' },
+    { v: 1, t: 'Tacho entero' },
+];
+
+// Un producto admite pedido por tachos si tiene definido cuánto lleva uno.
+function tieneTacho(p) {
+    return !!(p && parseFloat(p.unidad_tacho || 0) > 0);
+}
+
+function textoTachoSel(id) {
+    const f = pedidoTacho[id];
+    if (!f) return '';
+    const e = FRACCIONES_TACHO.find((x) => x.v === f);
+    return e ? e.t : '';
+}
+
+// Selector de medida por tacho para un producto (vacío si no aplica).
+function selectorTacho(p) {
+    if (!tieneTacho(p)) return '';
+    const sel = pedidoTacho[p.id] || '';
+    const opts = [`<option value="">Por tacho…</option>`].concat(
+        FRACCIONES_TACHO.map((f) =>
+            `<option value="${f.v}" ${Number(sel) === f.v ? 'selected' : ''}>${f.t}</option>`));
+    return `<div class="tacho-pick"><select class="tacho-sel" data-id="${p.id}">${opts.join('')}</select></div>`;
+}
+
+// Quita la medida de tacho de un producto (cuando la cantidad se edita a mano).
+function limpiarTacho(id) {
+    if (!(id in pedidoTacho)) return;
+    delete pedidoTacho[id];
+    const sel = document.querySelector('#pedido-listado .tacho-sel[data-id="' + id + '"]');
+    if (sel) sel.value = '';
+}
 
 function nombreSucursalPed(id) {
     const s = (catalogos.sucursales || []).find((x) => x.id === id);
@@ -3194,12 +3235,16 @@ function renderTarjetasPedido() {
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
                         <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${max > 0 ? 'disp-ok' : 'disp-no'}">${max > 0 ? 'disponible: ' + fmtNum(max) + ' ' + esc(p.unidad || 'unidad') : '❌ Sin stock disponible'}</span></div>
+                        ${tieneTacho(p) ? `<div class="prod-card-meta">1 tacho = ${fmtNum(p.unidad_tacho)} ${esc(p.unidad || 'unidad')}</div>` : ''}
                         <div class="aviso-stock" style="display:${excede ? '' : 'none'}">Excede cantidad existente (máximo: ${fmtNum(max)})</div>
                     </div>
-                    <div class="stepper">
-                        <button type="button" class="ste ste-menos" data-id="${p.id}" ${agotado ? 'disabled' : ''}>−</button>
-                        <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0" max="${max}" step="any" data-id="${p.id}" ${agotado ? 'disabled' : ''}>
-                        <button type="button" class="ste ste-mas" data-id="${p.id}" ${agotado ? 'disabled' : ''}>+</button>
+                    <div class="tacho-col">
+                        ${selectorTacho(p)}
+                        <div class="stepper">
+                            <button type="button" class="ste ste-menos" data-id="${p.id}" ${agotado ? 'disabled' : ''}>−</button>
+                            <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0" max="${max}" step="any" data-id="${p.id}" ${agotado ? 'disabled' : ''}>
+                            <button type="button" class="ste ste-mas" data-id="${p.id}" ${agotado ? 'disabled' : ''}>+</button>
+                        </div>
                     </div>
                 </div>`;
             }).join('')}
@@ -3223,16 +3268,18 @@ function renderRevisionPedido() {
         total += it.cantidad;
         const max = maxPedido(it.p);
         const excedeR = it.cantidad > max;
+        const med = textoTachoSel(it.id);
         return `<tr>
             <td>${esc(it.p.nombre)}</td>
             <td class="td-unidad">${esc(it.p.unidad || 'unidad')}</td>
             <td class="td-cant"><strong class="${excedeR ? 'stock-rojo' : ''}">${it.cantidad}</strong>${excedeR ? ` <span class="stock-rojo">(excede: solo ${fmtNum(max)})</span>` : ''}</td>
+            <td class="td-medida">${med ? `<span class="tacho-tag">${esc(med)}</span>` : '—'}</td>
             <td class="td-prov">lo tiene ${esc(proveedorCantShow(it.p))}</td>
         </tr>`;
     }).join('');
     cont.innerHTML = `
         <p class="hint">Esto pedirá <strong>${esc(nombreSucursalPed(pedidoSucursal))}</strong>. Al enviar se genera su pedido imprimible.</p>
-        <table class="data-table compact"><thead><tr><th>Producto</th><th>Unidad</th><th>Cant.</th><th></th></tr></thead>
+        <table class="data-table compact"><thead><tr><th>Producto</th><th>Unidad</th><th>Cant.</th><th>Medida</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
         </table>
         <div class="total-row">${items.length} producto(s) · ${total} en total</div>`;
@@ -3275,6 +3322,44 @@ function marcarCantidad(id, cantidad) {
 
 const _listadoPed = $('#pedido-listado');
 if (_listadoPed) {
+    _listadoPed.addEventListener('change', (e) => {
+        // Medida por tacho elegida (¼, ½, ¾, entero): la cantidad se calcula sola.
+        const sel = e.target.closest('.tacho-sel');
+        if (sel) {
+            const id = +sel.dataset.id;
+            const frac = sel.value === '' ? 0 : parseFloat(sel.value);
+            const p = (pedidoProdsAll || []).find((x) => x.id === id);
+            if (frac <= 0) {
+                delete pedidoTacho[id];
+                return;
+            }
+            const cant = Math.round(frac * parseFloat(p.unidad_tacho) * 1000) / 1000;
+            pedidoTacho[id] = frac;
+            const max = maxPedido(p);
+            if (cant > max) {
+                toast(`No cabe esa medida: ${(FRACCIONES_TACHO.find((f) => f.v === frac) || {}).t} son ${fmtNum(cant)} ${p.unidad || 'unidad'} y solo hay ${fmtNum(max)}`, 'err');
+                limpiarTacho(id);
+            }
+            marcarCantidad(id, cant);
+            return;
+        }
+        if (!e.target.classList.contains('prod-q')) return;
+        const id = +e.target.dataset.id;
+        const p = (pedidoProdsAll || []).find((x) => x.id === id);
+        const max = p ? maxPedido(p) : 0;
+        const v = pedidoSel[id] || 0;
+        // Si la cantidad escrita ya no coincide con la medida de tacho, se quita.
+        if (tieneTacho(p) && pedidoTacho[id] &&
+            Math.abs(v - pedidoTacho[id] * parseFloat(p.unidad_tacho)) > 0.0001) {
+            limpiarTacho(id);
+        }
+        if (v > max) {
+            marcarCantidad(id, max);
+            toast(`No hay esa cantidad: excede el disponible (${fmtNum(max)})`, 'err');
+        } else {
+            marcarExceso(id, max);
+        }
+    });
     _listadoPed.addEventListener('click', (e) => {
         const btn = e.target.closest('.ste');
         if (!btn) return;
@@ -3288,6 +3373,7 @@ if (_listadoPed) {
             if (actual < max) marcarCantidad(id, max);
             return;
         }
+        limpiarTacho(id);
         marcarCantidad(id, actual + delta);
     });
     _listadoPed.addEventListener('input', (e) => {
@@ -3299,20 +3385,11 @@ if (_listadoPed) {
         if (val > max) {
             toast(`Excedió la cantidad existente (máximo ${fmtNum(max)})`, 'err');
         }
-        marcarCantidad(id, val);
-    });
-    _listadoPed.addEventListener('change', (e) => {
-        if (!e.target.classList.contains('prod-q')) return;
-        const id = +e.target.dataset.id;
-        const p = (pedidoProdsAll || []).find((x) => x.id === id);
-        const max = p ? maxPedido(p) : 0;
-        const v = pedidoSel[id] || 0;
-        if (v > max) {
-            marcarCantidad(id, max);
-            toast(`No hay esa cantidad: excede el disponible (${fmtNum(max)})`, 'err');
-        } else {
-            marcarExceso(id, max);
+        if (tieneTacho(p) && pedidoTacho[id] &&
+            Math.abs(val - pedidoTacho[id] * parseFloat(p.unidad_tacho)) > 0.0001) {
+            limpiarTacho(id);
         }
+        marcarCantidad(id, val);
     });
 }
 
@@ -3324,6 +3401,7 @@ on('#wiz-a-3-2', 'click', () => irPaso(2));
 on('#pedido-sucursal', 'change', () => {
     pedidoSucursal = +$('#pedido-sucursal').value || null;
     pedidoSel = {};
+    pedidoTacho = {};
     $('#pedido-buscar').value = '';
     renderTarjetasPedido();
 });
@@ -3464,7 +3542,8 @@ $('#form-pedido').addEventListener('submit', async (e) => {
             if (v > max) mal.push(p ? p.nombre : ('#' + id));
             const ppal = sucPrincipalPed();
             const destino = p ? (p.sucursal_id ? +p.sucursal_id : (ppal ? +ppal.id : undefined)) : undefined;
-            detalle.push({ producto_id: +id, cantidad: v, destino_id: destino });
+            detalle.push({ producto_id: +id, cantidad: v, destino_id: destino,
+                           tacho_fraccion: pedidoTacho[id] || 0 });
         }
     });
     if (mal.length) return toast('No se puede enviar, superan el disponible: ' + mal.slice(0, 3).join(', ') + (mal.length > 3 ? '…' : ''), 'err');
@@ -3481,6 +3560,7 @@ $('#form-pedido').addEventListener('submit', async (e) => {
         }), '#form-pedido button[type="submit"]');
         toast(res.message, 'ok');
         pedidoSel = {};
+        pedidoTacho = {};
         $('#pedido-nota').value = '';
         $('#pedido-buscar').value = '';
         renderTarjetasPedido();
@@ -3566,6 +3646,7 @@ async function cargarBandeja() {
                                     <td>${esc(it.producto_nombre)}</td>
                                     <td class="td-unidad">${esc(it.unidad || 'unidad')}</td>
                                     <td class="td-cant">${it.cantidad}</td>
+                                    <td class="td-medida">${it.tacho_texto ? `<span class="tacho-tag">${esc(it.tacho_texto)}</span>` : '—'}</td>
                                     <td class="td-prov">→ ${esc(it.destino_nombre || '—')}</td>
                                 </tr>`).join('') || '<tr><td class="empty">Sin líneas</td></tr>'}
                             </tbody>
@@ -3723,6 +3804,7 @@ window.verPedido = async (id, accionables = true) => {
         $('#det-pedido-items').innerHTML = data.detalle.map((d) => `
             <tr><td>${esc(d.producto_nombre)}</td><td>${d.cantidad}</td>
                 <td>${esc(d.unidad || 'unidad')}</td>
+                <td>${d.tacho_texto ? `<span class="tacho-tag">${esc(d.tacho_texto)}</span>` : '—'}</td>
                 <td>${esc(sucMap[d.destino_id] || '—')}</td></tr>`).join('');
         openModal('modal-pedido');
         window._pedidoActual = { id, estado: p.estado };

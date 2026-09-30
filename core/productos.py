@@ -19,6 +19,16 @@ def norm_nombre(texto):
     return re.sub(r"[^a-z0-9]", "", s)
 
 
+def _tacho_unidad(data):
+    """Cuánto entra en UN tacho del producto, en su unidad base (kg, unidades...).
+    0 = el producto no se pide por tacho."""
+    try:
+        v = float(data.get("unidad_tacho") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return v if v > 0 else 0
+
+
 def scope_productos(ver_todo, sid, scope):
     """(condición_sql, params) para filtrar productos por ámbito de visibilidad.
 
@@ -90,13 +100,13 @@ def productos():
                 return err("El almacén no pertenece a esa sucursal", 400)
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
-                                   precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1)
+                                   precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, activo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1)
         """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
               data.get("categoria_id"),
               data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
               data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
-              data.get("almacen_id"), proveedor_id, sid))
+              data.get("almacen_id"), proveedor_id, sid, _tacho_unidad(data)))
         conn.commit()
         new_id = cur.lastrowid
         stock_inicial = data.get("stock_inicial", 0) or 0
@@ -153,6 +163,7 @@ def productos():
     q = """
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
+               IFNULL(p.unidad_tacho, 0) AS unidad_tacho,
                c.nombre AS categoria_nombre, a.nombre AS almacen_nombre,
                su.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre,
                COALESCE(s.cantidad, 0) AS stock,
@@ -246,6 +257,7 @@ def producto_por_codigo():
     row = conn.execute("""
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
+               IFNULL(p.unidad_tacho, 0) AS unidad_tacho,
                COALESCE(s.cantidad, 0) AS stock,
                (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
                 WHERE l2.producto_id = p.id AND l2.cantidad > 0
@@ -339,13 +351,16 @@ def producto(prod_id):
             return err("El almacén no pertenece a esa sucursal", 400)
     conn.execute("""
         UPDATE productos SET codigo=?, nombre=?, marca=?, categoria_id=?, unidad=?, stock_minimo=?,
-               costo_promedio=?, precio_venta=?, almacen_id=?, proveedor_id=?, sucursal_id=?
+               costo_promedio=?, precio_venta=?, almacen_id=?, proveedor_id=?, sucursal_id=?,
+               unidad_tacho=?
         WHERE id=?
     """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
           data.get("categoria_id"),
           data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
           data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
-          data.get("almacen_id"), data.get("proveedor_id"), sid_p, prod_id))
+          data.get("almacen_id"), data.get("proveedor_id"), sid_p,
+          _tacho_unidad(data) if data.get("unidad_tacho") is not None
+          else (fila.get("unidad_tacho") or 0), prod_id))
     # Ajuste directo de stock: registra la diferencia como movimiento para mantener la sincronía
     stock_nuevo = data.get("stock")
     if stock_nuevo is not None:

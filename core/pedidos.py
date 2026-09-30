@@ -53,6 +53,33 @@ def _nro_ticket(conn):
     return f"TKT-{int(fila) + 1:05d}"
 
 
+def _texto_tacho(fraccion):
+    """'1 tacho entero', '1/2 tacho', '1/4 tacho'... a partir de la fracción."""
+    try:
+        f = round(float(fraccion), 4)
+    except (TypeError, ValueError):
+        return ""
+    if f <= 0:
+        return ""
+    partes = int(f) if f >= 1 else 0
+    resto = round(f - partes, 4)
+    textos = []
+    if partes:
+        textos.append("1 tacho entero" if partes == 1 else f"{partes} tachos enteros")
+    if resto > 0:
+        num, den = 0, 1
+        for d in range(1, 17):
+            n = round(resto * d)
+            if abs(resto * d - n) < 1e-6:
+                num, den = n, d
+                break
+        if num:
+            textos.append(f"1/{den} tacho" if num == 1 else f"{num}/{den} tacho")
+        else:
+            textos.append(f"{resto} tacho")
+    return " + ".join(textos)
+
+
 def _puede_ver_pedido(conn, pedido, detalle):
     """Visibilidad para encargados filiales: solo lo que piden o lo que proveen."""
     sid = sucursal_actual()
@@ -93,14 +120,27 @@ def pedidos():
         items = []
         for item in detalle:
             prod_id = item.get("producto_id")
-            cantidad = float(item.get("cantidad", 0) or 0)
-            if cantidad <= 0 or not prod_id:
+            if not prod_id:
                 continue
-            fila = conn.execute("SELECT id, nombre, sucursal_id, unidad FROM productos WHERE id = ? AND activo = 1",
-                                (prod_id,)).fetchone()
+            cantidad = float(item.get("cantidad", 0) or 0)
+            try:
+                fraccion = float(item.get("tacho_fraccion") or 0)
+            except (TypeError, ValueError):
+                fraccion = 0
+            fila = conn.execute(
+                "SELECT id, nombre, sucursal_id, unidad, IFNULL(unidad_tacho, 0) AS unidad_tacho "
+                "FROM productos WHERE id = ? AND activo = 1", (prod_id,)).fetchone()
             if not fila:
                 conn.close()
                 return err("Producto no encontrado")
+            # Pedido por tachos: si la línea trae fracción (¼, ½, ¾, entero) y el
+            # producto tiene definido cuánto lleva un tacho, la cantidad se
+            # calcula sola (½ de 20 kg = 10 kg) y se guarda la medida pedida.
+            por_tacho = fraccion > 0 and bool(fila["unidad_tacho"])
+            if por_tacho:
+                cantidad = round(fraccion * float(fila["unidad_tacho"]), 3)
+            if cantidad <= 0:
+                continue
             proveedor = item.get("destino_id") or destino_defecto or fila["sucursal_id"]
             if not proveedor:
                 conn.close()
@@ -108,8 +148,9 @@ def pedidos():
             if proveedor == sucursal_id:
                 conn.close()
                 return err(f"'{fila['nombre']}' es de tu propia sucursal; no puede pedirse a ti mismo")
-            items.append((prod_id, fila["nombre"], cantidad,
-                          proveedor, fila["unidad"] or "unidad"))
+            texto_tacho = _texto_tacho(fraccion) if por_tacho else ""
+            items.append((prod_id, fila["nombre"], cantidad, proveedor,
+                          fila["unidad"] or "unidad", fraccion if por_tacho else 0, texto_tacho))
         if not items:
             conn.close()
             return err("El pedido no tiene productos válidos")
@@ -126,11 +167,12 @@ def pedidos():
             conn.close()
             return err("Error al registrar el pedido")
         pedido_id = cur.lastrowid
-        for prod_id, nombre, cantidad, proveedor, unidad in items:
+        for prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho in items:
             conn.execute("""
-                INSERT INTO pedido_detalle (pedido_id, producto_id, producto_nombre, cantidad, destino_id, unidad)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad))
+                INSERT INTO pedido_detalle (pedido_id, producto_id, producto_nombre, cantidad,
+                                            destino_id, unidad, tacho_fraccion, tacho_texto)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho))
         conn.commit()
         conn.close()
         registrar_auditoria("Pedido registrado", f"{nro} de sucursal ID {sucursal_id}")
@@ -264,6 +306,7 @@ def _ticket_data(conn, pedido_id):
             "producto": d["producto_nombre"],
             "unidad": d["unidad"] or "unidad",
             "cantidad": d["cantidad"],
+            "tacho_texto": d.get("tacho_texto") or "",
             "costo": d["costo_unitario"] or 0,
             "subtotal": round((d["costo_unitario"] or 0) * d["cantidad"], 2),
         })
@@ -371,6 +414,7 @@ def pedido_despachar(pedido_id):
 
     # Agrupar líneas por proveedor (cada proveedor genera su propio reparto)
     grupos = {}
+    sid_op = sucursal_operativa()
     for d in detalle:
         origen_id = d["destino_id"] or pedido["destino_id"]
         if not origen_id:
@@ -379,6 +423,9 @@ def pedido_despachar(pedido_id):
         if origen_id == pedido["sucursal_id"]:
             conn.close()
             return err("El origen no puede ser igual al destino del pedido")
+        if sid_op is not None and origen_id != sid_op:
+            conn.close()
+            return err("Solo puedes despachar líneas cuyo origen sea tu propia sucursal", 403)
         grupos.setdefault(origen_id, []).append(d)
 
     suc = conn.execute("SELECT nombre FROM sucursales WHERE id = ?", (pedido["sucursal_id"],)).fetchone()
@@ -485,7 +532,7 @@ def pedidos_bandeja():
         marks = ",".join("?" * len(pedido_ids))
         det = conn.execute(f"""
             SELECT d.pedido_id, d.producto_nombre, d.cantidad, d.unidad,
-                   d.destino_id, s.nombre AS destino_nombre
+                   d.tacho_texto, d.destino_id, s.nombre AS destino_nombre
             FROM pedido_detalle d LEFT JOIN sucursales s ON s.id = d.destino_id
             WHERE d.pedido_id IN ({marks})
             ORDER BY d.pedido_id, d.producto_nombre

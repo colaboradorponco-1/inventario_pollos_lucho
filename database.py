@@ -249,6 +249,7 @@ def init_db():
                     "almacen_id INT,"
                     "proveedor_id INT,"
                     "sucursal_id INT,"
+                    "unidad_tacho DOUBLE DEFAULT 0,"
                     "activo TINYINT DEFAULT 1,"
                     "FOREIGN KEY (categoria_id) REFERENCES categorias(id),"
                     "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
@@ -378,6 +379,8 @@ def init_db():
                     "cantidad DOUBLE NOT NULL,"
                     "destino_id INT,"
                     "unidad VARCHAR(50) DEFAULT 'unidad',"
+                    "tacho_fraccion DOUBLE DEFAULT 0,"
+                    "tacho_texto VARCHAR(50) DEFAULT '',"
                     "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS repartos ("
@@ -532,6 +535,14 @@ def migrar_esquema():
             _add_columna(cur, "productos", "sucursal_id INT")
         if not _col_existe(cur, "repartos", "pedido_id"):
             _add_columna(cur, "repartos", "pedido_id INT")
+        # Pedidos por tachos: 1 tacho = N unidades del producto (0 = no se pide por tacho)
+        # y la fracción elegida en cada línea del pedido (¼, ½, ¾, entero).
+        if not _col_existe(cur, "productos", "unidad_tacho"):
+            _add_columna(cur, "productos", "unidad_tacho DOUBLE DEFAULT 0")
+        if not _col_existe(cur, "pedido_detalle", "tacho_fraccion"):
+            _add_columna(cur, "pedido_detalle", "tacho_fraccion DOUBLE DEFAULT 0")
+        if not _col_existe(cur, "pedido_detalle", "tacho_texto"):
+            _add_columna(cur, "pedido_detalle", "tacho_texto VARCHAR(50) DEFAULT ''")
         db.commit()
         # Backfill: proveedores existentes van al primer almacén principal
         if _col_existe(cur, "proveedores", "sucursal_id"):

@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS `productos` (
   `vencimiento` VARCHAR(50),
   `almacen_id` INT,
   `proveedor_id` INT,
+  `sucursal_id` INT,
+  `unidad_tacho` DOUBLE DEFAULT 0,
   `activo` TINYINT DEFAULT 1,
   CONSTRAINT `fk_prod_categoria` FOREIGN KEY (`categoria_id`) REFERENCES `categorias`(`id`),
   CONSTRAINT `fk_prod_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`),
@@ -218,6 +220,8 @@ CREATE TABLE IF NOT EXISTS `pedido_detalle` (
   `cantidad` DOUBLE NOT NULL,
   `destino_id` INT,
   `unidad` VARCHAR(50) DEFAULT 'unidad',
+  `tacho_fraccion` DOUBLE DEFAULT 0,
+  `tacho_texto` VARCHAR(50) DEFAULT '',
   CONSTRAINT `fk_pd_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_pd_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`),
   CONSTRAINT `fk_pd_destino` FOREIGN KEY (`destino_id`) REFERENCES `sucursales`(`id`)
