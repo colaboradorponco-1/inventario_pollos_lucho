@@ -38,6 +38,16 @@ if [ "$AUTO" = "1" ] && [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$HEAD" ] && 
   exit 0
 fi
 
+# El respaldo lo escribe el usuario del servicio ('pollos'). Si el directorio
+# quedo como root (rsync previo, restauracion manual, cron...), el respaldo falla
+# con PermissionError y set -e aborta TODO el despliegue aunque la app este bien.
+# Por eso los permisos se aseguran ANTES de respaldar, no solo despues del rsync.
+echo "==> Asegurando permisos del directorio de la app"
+mkdir -p "$APP_DIR"
+chown pollos:pollos "$APP_DIR"
+chmod u+rwx "$APP_DIR"
+ls -ld "$APP_DIR" || true
+
 # Respaldo previo: garantiza un punto de restauracion del estado exacto de la
 # base justo antes del cambio. Si falla, no se toca la app (set -e).
 echo "==> Respaldo previo al despliegue"
