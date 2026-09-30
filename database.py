@@ -161,6 +161,11 @@ class MysqlConnection:
         cur.execute(sql, params)
         return cur
 
+    def executemany(self, sql, seq_of_params):
+        cur = self.cursor()
+        cur.executemany(sql, seq_of_params)
+        return cur
+
     def executescript(self, sql):
         # Ejecuta múltiples sentencias separadas por ';'
         cur = self._conn.cursor()
