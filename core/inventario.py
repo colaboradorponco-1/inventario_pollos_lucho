@@ -82,20 +82,27 @@ def _stocks_actuales(conn, sucursal_id):
 
 
 def _movimientos_posteriores(conn, sucursal_id, fecha, hora_corte=None):
-    """Suma con signo de los movimientos registrados DESPUÉS del corte de la planilla:
-    ya están en el stock actual pero no en el conteo físico.
+    """Efecto neto en el stock de los movimientos registrados DESPUÉS del corte de la
+    planilla: ya están en el stock actual pero no en el conteo físico.
 
     Son los de fechas posteriores a `fecha` y, si `hora_corte` viene informado, los
     del mismo día posteriores a esa hora. Sin esto, una planilla abierta a las 07:00 y
     cerrada a las 10:00, con ventas de las 08:00, volvería a subir ese stock al
-    ajustar contra el conteo de las 07:00."""
+    ajustar contra el conteo de las 07:00.
+
+    OJO con el signo: en `movimientos` las ENTRADAS y las SALIDAS se guardan siempre
+    como cantidad positiva (una salida de 10 es `cantidad = 10`, no -10) y quien las
+    resta es el lote. Solo el tipo 'ajuste' viene con signo (negativo = faltó).
+    Por eso el neto NO es un SUM(cantidad) pelado: hay que restar las salidas, o el
+    stock de referencia saldría corrido en el doble de lo vendido después del corte."""
     cond = "DATE(fecha) > %s"
     params = [sucursal_id, fecha]
     if hora_corte:
         cond = "(DATE(fecha) > %s OR (DATE(fecha) = %s AND TIME(fecha) > %s))"
         params = [sucursal_id, fecha, fecha, hora_corte]
     return {r["producto_id"]: r["s"] or 0.0 for r in conn.execute(
-        "SELECT producto_id, SUM(cantidad) AS s FROM movimientos "
+        "SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad "
+        "ELSE cantidad END) AS s FROM movimientos "
         "WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste') "
         f"AND {cond} GROUP BY producto_id", params).fetchall()}
 
@@ -178,7 +185,8 @@ def inventario_crear():
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ajuste FROM movimientos
                    WHERE sucursal_id = %s AND tipo = 'ajuste' AND DATE(fecha) = %s
                    GROUP BY producto_id) aj ON aj.producto_id = p.id
-        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS post FROM movimientos
+        LEFT JOIN (SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad
+                   ELSE cantidad END) AS post FROM movimientos
                    WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste')
                      AND DATE(fecha) > %s
                    GROUP BY producto_id) po ON po.producto_id = p.id
