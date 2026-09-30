@@ -456,8 +456,8 @@ def inventario_cerrar(inv_id):
                 f"Inventario diario {inv['fecha']} (ajuste "
                 f"{'faltante' if dif < 0 else 'sobrante'})",
                 session.get("usuario", ""), inv["sucursal_id"])
-        except ValueError as e:
-            # Un ajuste a la baja no puede dejar el stock en negativo.
+        except (ValueError, Exception) as e:
+            # Un ajuste a la baja no puede dejar el stock en negativo o hay otro error.
             conn.rollback()
             conn.close()
             return err(f"{f['producto_nombre']}: {str(e)}", 400)
