@@ -21,12 +21,20 @@ def norm_nombre(texto):
 
 def _tacho_unidad(data):
     """Cuánto entra en UN tacho del producto, en su unidad base (kg, unidades...).
-    0 = el producto no se pide por tacho."""
+    0 = no definido (el valor se escribe en el pedido)."""
     try:
         v = float(data.get("unidad_tacho") or 0)
     except (TypeError, ValueError):
         return 0
     return v if v > 0 else 0
+
+
+def _pide_tacho(data):
+    """¿Este producto se pide por tachos? (marca solo papa, plátano y los que elijan)."""
+    v = data.get("pide_tacho")
+    if v is None:
+        return 1 if data.get("unidad_tacho") else 0
+    return 1 if str(v).lower() in ("1", "true", "on", "yes") else 0
 
 
 def scope_productos(ver_todo, sid, scope):
@@ -100,13 +108,13 @@ def productos():
                 return err("El almacén no pertenece a esa sucursal", 400)
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
-                                   precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 1)
+                                   precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, pide_tacho, activo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 1)
         """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
               data.get("categoria_id"),
               data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
               data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
-              data.get("almacen_id"), proveedor_id, sid, _tacho_unidad(data)))
+              data.get("almacen_id"), proveedor_id, sid, _tacho_unidad(data), _pide_tacho(data)))
         conn.commit()
         new_id = cur.lastrowid
         stock_inicial = data.get("stock_inicial", 0) or 0
@@ -164,6 +172,7 @@ def productos():
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
                IFNULL(p.unidad_tacho, 0) AS unidad_tacho,
+               IFNULL(p.pide_tacho, 0) AS pide_tacho,
                c.nombre AS categoria_nombre, a.nombre AS almacen_nombre,
                su.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre,
                COALESCE(s.cantidad, 0) AS stock,
@@ -258,6 +267,7 @@ def producto_por_codigo():
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad, p.stock_minimo,
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
                IFNULL(p.unidad_tacho, 0) AS unidad_tacho,
+               IFNULL(p.pide_tacho, 0) AS pide_tacho,
                COALESCE(s.cantidad, 0) AS stock,
                (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
                 WHERE l2.producto_id = p.id AND l2.cantidad > 0
@@ -352,7 +362,7 @@ def producto(prod_id):
     conn.execute("""
         UPDATE productos SET codigo=?, nombre=?, marca=?, categoria_id=?, unidad=?, stock_minimo=?,
                costo_promedio=?, precio_venta=?, almacen_id=?, proveedor_id=?, sucursal_id=?,
-               unidad_tacho=?
+               unidad_tacho=?, pide_tacho=?
         WHERE id=?
     """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
           data.get("categoria_id"),
@@ -360,7 +370,8 @@ def producto(prod_id):
           data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
           data.get("almacen_id"), data.get("proveedor_id"), sid_p,
           _tacho_unidad(data) if data.get("unidad_tacho") is not None
-          else (fila.get("unidad_tacho") or 0), prod_id))
+          else (fila.get("unidad_tacho") or 0),
+          1 if _pide_tacho(data) else 0, prod_id))
     # Ajuste directo de stock: registra la diferencia como movimiento para mantener la sincronía
     stock_nuevo = data.get("stock")
     if stock_nuevo is not None:

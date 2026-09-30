@@ -132,7 +132,8 @@ def pedidos():
             except (TypeError, ValueError):
                 tacho_unidad = 0
             fila = conn.execute(
-                "SELECT id, nombre, sucursal_id, unidad, IFNULL(unidad_tacho, 0) AS unidad_tacho "
+                "SELECT id, nombre, sucursal_id, unidad, IFNULL(unidad_tacho, 0) AS unidad_tacho, "
+                "IFNULL(pide_tacho, 0) AS pide_tacho "
                 "FROM productos WHERE id = ? AND activo = 1", (prod_id,)).fetchone()
             if not fila:
                 conn.close()
@@ -143,6 +144,9 @@ def pedidos():
             # producto como «default». La cantidad se calcula sola (¼ de 20 kg = 5 kg).
             por_tacho = fraccion > 0
             if por_tacho:
+                if not fila["pide_tacho"]:
+                    conn.close()
+                    return err(f"'{fila['nombre']}' no se pide por tachos")
                 if tacho_unidad <= 0:
                     tacho_unidad = float(fila["unidad_tacho"] or 0)
                 if tacho_unidad <= 0:

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `productos` (
   `proveedor_id` INT,
   `sucursal_id` INT,
   `unidad_tacho` DOUBLE DEFAULT 0,
+  `pide_tacho` TINYINT NOT NULL DEFAULT 0,
   `activo` TINYINT DEFAULT 1,
   CONSTRAINT `fk_prod_categoria` FOREIGN KEY (`categoria_id`) REFERENCES `categorias`(`id`),
   CONSTRAINT `fk_prod_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`),

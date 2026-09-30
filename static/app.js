@@ -1051,6 +1051,7 @@ async function openProductoModal(id, lista) {
         uSel.value = p.unidad || 'unidad';
         $('#prod-minimo').value = p.stock_minimo;
         $('#prod-unidad-tacho').value = p.unidad_tacho || 0;
+        $('#prod-pide-tacho').checked = !!p.pide_tacho;
         $('#prod-costo').value = p.costo_promedio;
         $('#prod-precio-venta').value = p.precio_venta;
         $('#prod-vencimiento').value = p.vencimiento || '';
@@ -1085,6 +1086,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         almacen_id: +$('#prod-almacen').value || null,
         unidad: $('#prod-unidad').value,
         unidad_tacho: +$('#prod-unidad-tacho').value || 0,
+        pide_tacho: $('#prod-pide-tacho').checked,
         stock_minimo: +$('#prod-minimo').value || 0,
         costo_promedio: +$('#prod-costo').value || 0,
         precio_venta: +$('#prod-precio-venta').value || 0,
@@ -3132,8 +3134,10 @@ function tachoEtiqueta(it) {
         (it.tacho_unidad ? ` · 1 tacho = ${fmtNum(it.tacho_unidad)} ${esc(it.unidad || 'unidad')}` : '') + '</span>';
 }
 
-// Selector de medida por tacho para un producto: fracción + «1 tacho = N».
+// Selector de medida por tacho: solo si el producto está marcado «se pide por
+// tachos» (papa, plátano, etc.). La fracción + «1 tacho = N» se escriben aquí.
 function selectorTacho(p) {
+    if (!p || !p.pide_tacho) return '';
     const t = tachoDe(p.id);
     const sel = t ? String(t.f) : '';
     const opts = [`<option value="">Por tacho…</option>`].concat(
@@ -3254,7 +3258,7 @@ function renderTarjetasPedido() {
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
                         <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${max > 0 ? 'disp-ok' : 'disp-no'}">${max > 0 ? 'disponible: ' + fmtNum(max) + ' ' + esc(p.unidad || 'unidad') : '❌ Sin stock disponible'}</span></div>
-                        ${parseFloat(p.unidad_tacho || 0) > 0 ? `<div class="prod-card-meta">1 tacho = ${fmtNum(p.unidad_tacho)} ${esc(p.unidad || 'unidad')}</div>` : ''}
+                        ${parseFloat(p.unidad_tacho || 0) > 0 ? `<div class="prod-card-meta">1 tacho = ${fmtNum(p.unidad_tacho)} ${esc(p.unidad || 'unidad')}</div>` : (p.pide_tacho ? '<div class="prod-card-meta">Se pide por tachos</div>' : '')}
                         <div class="aviso-stock" style="display:${excede ? '' : 'none'}">Excede cantidad existente (máximo: ${fmtNum(max)})</div>
                     </div>
                     <div class="tacho-col">
