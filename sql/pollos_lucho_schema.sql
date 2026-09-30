@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS `pedido_detalle` (
   `unidad` VARCHAR(50) DEFAULT 'unidad',
   `tacho_fraccion` DOUBLE DEFAULT 0,
   `tacho_texto` VARCHAR(50) DEFAULT '',
+  `tacho_unidad` DOUBLE DEFAULT 0,
   CONSTRAINT `fk_pd_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_pd_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`),
   CONSTRAINT `fk_pd_destino` FOREIGN KEY (`destino_id`) REFERENCES `sucursales`(`id`)

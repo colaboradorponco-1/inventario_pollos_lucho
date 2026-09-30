@@ -1086,6 +1086,19 @@ body.rol-encargado .panel-finance {
     max-width: 120px;
 }
 .tacho-sel:focus { border-color: var(--primary, #CF141D); border-style: solid; outline: none; }
+.tacho-val {
+    border: 1px dashed var(--border, #d8d4cc);
+    border-radius: 8px;
+    padding: 5px 6px;
+    font-family: inherit;
+    font-size: 12px;
+    background: #fffdf5;
+    color: var(--dark, #0C0908);
+    width: 74px;
+    margin-left: 6px;
+}
+.tacho-val:focus { border-color: var(--primary, #CF141D); border-style: solid; outline: none; }
+.tacho-un { font-size: 11px; color: #6b5400; margin-left: 4px; white-space: nowrap; }
 .tacho-tag {
     display: inline-block;
     background: rgba(252, 195, 2, .22);
