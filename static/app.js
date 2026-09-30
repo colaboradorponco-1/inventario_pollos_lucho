@@ -2984,31 +2984,29 @@ async function abrirInventario(invId) {
         const bloq = INV_CERRADA ? 'disabled' : '';
         html += `
             <tr data-inv-fila="${f.id}">
-                <td style="color:var(--muted)">${esc(f.categoria)}</td>
-                <td><strong>${esc(f.producto)}</strong></td>
+                <td class="inv-col-tit"><strong>${esc(f.producto)}</strong></td>
                 <td>${esc(f.unidad)}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-inicial" data-id="${f.id}"
                            value="${esc(fmtInvQ(f.inicial))}" placeholder="—" ${bloq}
-                           style="width:82px;text-align:right">
+                           style="text-align:right">
                 </td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-ingreso" data-id="${f.id}"
                            value="${esc(fmtInvQ(f.ingreso_dia))}" placeholder="—" ${bloq}
-                           style="width:82px;text-align:right">
+                           style="text-align:right">
                 </td>
-                <td style="font-weight:700" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
+                <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
-                           value="${conteo}" placeholder="—" ${bloq}
-                           style="width:105px;text-align:right">
+                           value="${conteo}" placeholder="—" ${bloq} style="text-align:right">
                 </td>
-                <td data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
+                <td class="num" data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
+                <td class="num" style="color:var(--muted)">${esc(fmtInvQ(f.stock_sistema))}</td>
                 <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia)}</td>
-                <td>
+                <td class="inv-col-obs">
                     <input type="text" class="inv-obs" data-id="${f.id}"
-                           value="${esc(f.observaciones || '')}" placeholder="—"
-                           ${bloq} style="width:150px">
+                           value="${esc(f.observaciones || '')}" placeholder="—" ${bloq}>
                 </td>
             </tr>`;
     });
@@ -3053,7 +3051,8 @@ function recalcFilaInv(e) {
 }
 
 function collectedInventario() {
-    return $$('#inv-tbody .inv-conteo').map((inp) => {
+    // $$(...) devuelve un NodeList: sin Array.from no tiene .map().
+    return Array.from($$('#inv-tbody .inv-conteo')).map((inp) => {
         const id = Number(inp.dataset.id);
         const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
         const ini = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
@@ -3086,7 +3085,8 @@ async function guardarInventario() {
 
 async function cerrarInventario() {
     if (!INV_ID) return;
-    const sinContar = $$('#inv-tbody .inv-conteo').filter((i) => i.value === '').length;
+    const sinContar = Array.from($$('#inv-tbody .inv-conteo'))
+        .filter((i) => i.value === '').length;
     if (sinContar > 0) {
         toast(`Faltan ${sinContar} productos por contar`, 'err');
         return;

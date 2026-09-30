@@ -441,18 +441,20 @@
 
                 <div class="toolbar small" id="inv-resumen" style="margin-bottom:10px"></div>
 
-                <div class="table-scroll"><table class="data-table">
+                <p class="scan-hint inv-ayuda"><strong>Cómo se llena:</strong> escribe el <strong>inventario inicial</strong> y el <strong>ingreso del día</strong> de cada producto, luego el <strong>inventario final</strong> con lo que contaste. El <strong>Disp. día</strong> = inicial + ingreso, y la <strong>cantidad utilizada</strong> = disponible − final. <strong>Dif.</strong> = final − stock del sistema: en rojo falta (hay menos de lo que el sistema dice) y en verde sobra.</p>
+
+                <div class="table-scroll"><table class="data-table inv-tabla">
                     <thead>
                         <tr>
-                            <th rowspan="2">Categoría</th>
                             <th rowspan="2">Producto</th>
                             <th rowspan="2">Unidad</th>
                             <th rowspan="2">Inv. inicial</th>
                             <th rowspan="2">Ingreso del día</th>
-                            <th rowspan="2" style="background:#0F3D2E;color:#fff">Disp. día = inicial + ingreso</th>
-                            <th rowspan="2" style="background:#7C2D12;color:#fff">Inv. final (conteo)</th>
-                            <th rowspan="2">Utilizada</th>
-                            <th rowspan="2">Dif.</th>
+                            <th rowspan="2" style="background:#0F3D2E;color:#fff">Disp. día<br><small>= inicial + ingreso</small></th>
+                            <th rowspan="2" style="background:#7C2D12;color:#fff">Inv. final<br><small>= tu conteo</small></th>
+                            <th rowspan="2">Utilizada<br><small>= disp. − final</small></th>
+                            <th rowspan="2">Sistema</th>
+                            <th rowspan="2">Dif.<br><small>= final − sistema</small></th>
                             <th rowspan="2">Observaciones</th>
                         </tr>
                     </thead>

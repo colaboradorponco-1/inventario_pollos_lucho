@@ -385,6 +385,19 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; margin-left: 240px; }
 .table-scroll::-webkit-scrollbar-thumb { background: #d8c6a0; border-radius: 3px; }
 @media (max-width: 900px) { .data-table { white-space: nowrap; } }
 
+/* Planilla de inventario diario: campos grandes y comodos para escribir a mano */
+.inv-tabla { min-width: 940px; }
+.inv-tabla th { padding: 10px 8px; vertical-align: bottom; }
+.inv-tabla th small { display: block; font-weight: 400; font-size: 10.5px; text-transform: none; letter-spacing: 0; opacity: .9; }
+.inv-tabla td { padding: 10px 8px; vertical-align: middle; }
+.inv-tabla input[type="number"], .inv-tabla input[type="text"] {
+    font-size: 16px; padding: 9px 10px; min-height: 40px; width: 100%;
+}
+.inv-tabla td.num { font-size: 17px; font-weight: 700; text-align: right; white-space: nowrap; }
+.inv-ayuda { font-size: 12.5px; line-height: 1.6; margin: 0 0 12px; }
+.inv-col-tit { font-size: 16px; }
+.inv-col-obs { min-width: 200px; }
+
 /* Botones */
 .btn {
     padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
