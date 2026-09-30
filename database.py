@@ -543,6 +543,10 @@ def migrar_esquema():
             _add_columna(cur, "pedido_detalle", "tacho_fraccion DOUBLE DEFAULT 0")
         if not _col_existe(cur, "pedido_detalle", "tacho_texto"):
             _add_columna(cur, "pedido_detalle", "tacho_texto VARCHAR(50) DEFAULT ''")
+        # Cuanto equivale un tacho escrito EN el pedido (1 tacho = N kg), asi no
+        # hace falta configurar el producto. 0 = no aplica.
+        if not _col_existe(cur, "pedido_detalle", "tacho_unidad"):
+            _add_columna(cur, "pedido_detalle", "tacho_unidad DOUBLE DEFAULT 0")
         db.commit()
         # Backfill: proveedores existentes van al primer almacén principal
         if _col_existe(cur, "proveedores", "sucursal_id"):

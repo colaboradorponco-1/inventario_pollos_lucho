@@ -127,18 +127,28 @@ def pedidos():
                 fraccion = float(item.get("tacho_fraccion") or 0)
             except (TypeError, ValueError):
                 fraccion = 0
+            try:
+                tacho_unidad = float(item.get("tacho_unidad") or 0)
+            except (TypeError, ValueError):
+                tacho_unidad = 0
             fila = conn.execute(
                 "SELECT id, nombre, sucursal_id, unidad, IFNULL(unidad_tacho, 0) AS unidad_tacho "
                 "FROM productos WHERE id = ? AND activo = 1", (prod_id,)).fetchone()
             if not fila:
                 conn.close()
                 return err("Producto no encontrado")
-            # Pedido por tachos: si la línea trae fracción (¼, ½, ¾, entero) y el
-            # producto tiene definido cuánto lleva un tacho, la cantidad se
-            # calcula sola (½ de 20 kg = 10 kg) y se guarda la medida pedida.
-            por_tacho = fraccion > 0 and bool(fila["unidad_tacho"])
+            # Pedido por tachos: la medida (¼, ½, ¾, entero) viene en la línea del
+            # pedido y quien pide escribe a cuánto equivale un tacho (1 tacho = N
+            # kg/unidades). Si no lo escribe, se toma el valor configurado del
+            # producto como «default». La cantidad se calcula sola (¼ de 20 kg = 5 kg).
+            por_tacho = fraccion > 0
             if por_tacho:
-                cantidad = round(fraccion * float(fila["unidad_tacho"]), 3)
+                if tacho_unidad <= 0:
+                    tacho_unidad = float(fila["unidad_tacho"] or 0)
+                if tacho_unidad <= 0:
+                    conn.close()
+                    return err(f"Indica cuánto equivale un tacho de '{fila['nombre']}' (1 tacho = N {fila['unidad'] or 'unidad'})")
+                cantidad = round(fraccion * tacho_unidad, 3)
             if cantidad <= 0:
                 continue
             proveedor = item.get("destino_id") or destino_defecto or fila["sucursal_id"]
@@ -150,7 +160,8 @@ def pedidos():
                 return err(f"'{fila['nombre']}' es de tu propia sucursal; no puede pedirse a ti mismo")
             texto_tacho = _texto_tacho(fraccion) if por_tacho else ""
             items.append((prod_id, fila["nombre"], cantidad, proveedor,
-                          fila["unidad"] or "unidad", fraccion if por_tacho else 0, texto_tacho))
+                          fila["unidad"] or "unidad", fraccion if por_tacho else 0,
+                          texto_tacho, tacho_unidad if por_tacho else 0))
         if not items:
             conn.close()
             return err("El pedido no tiene productos válidos")
@@ -167,12 +178,12 @@ def pedidos():
             conn.close()
             return err("Error al registrar el pedido")
         pedido_id = cur.lastrowid
-        for prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho in items:
+        for prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad in items:
             conn.execute("""
                 INSERT INTO pedido_detalle (pedido_id, producto_id, producto_nombre, cantidad,
-                                            destino_id, unidad, tacho_fraccion, tacho_texto)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho))
+                                            destino_id, unidad, tacho_fraccion, tacho_texto, tacho_unidad)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad))
         conn.commit()
         conn.close()
         registrar_auditoria("Pedido registrado", f"{nro} de sucursal ID {sucursal_id}")
@@ -307,6 +318,7 @@ def _ticket_data(conn, pedido_id):
             "unidad": d["unidad"] or "unidad",
             "cantidad": d["cantidad"],
             "tacho_texto": d.get("tacho_texto") or "",
+            "tacho_unidad": d.get("tacho_unidad") or 0,
             "costo": d["costo_unitario"] or 0,
             "subtotal": round((d["costo_unitario"] or 0) * d["cantidad"], 2),
         })
@@ -532,7 +544,7 @@ def pedidos_bandeja():
         marks = ",".join("?" * len(pedido_ids))
         det = conn.execute(f"""
             SELECT d.pedido_id, d.producto_nombre, d.cantidad, d.unidad,
-                   d.tacho_texto, d.destino_id, s.nombre AS destino_nombre
+                   d.tacho_texto, d.tacho_unidad, d.destino_id, s.nombre AS destino_nombre
             FROM pedido_detalle d LEFT JOIN sucursales s ON s.id = d.destino_id
             WHERE d.pedido_id IN ({marks})
             ORDER BY d.pedido_id, d.producto_nombre

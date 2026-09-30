@@ -3112,26 +3112,41 @@ const FRACCIONES_TACHO = [
     { v: 1, t: 'Tacho entero' },
 ];
 
-// Un producto admite pedido por tachos si tiene definido cuánto lleva uno.
-function tieneTacho(p) {
-    return !!(p && parseFloat(p.unidad_tacho || 0) > 0);
-}
+// Todo producto se puede pedir por tachos; el valor «1 tacho = N» se escribe en
+// el pedido (no hace falta configurar la ficha del producto). Si el producto
+// tiene un valor configurado, se usa como default.
+function tachoDe(id) { return pedidoTacho[id] || null; } // {f, u} | null
 
 function textoTachoSel(id) {
-    const f = pedidoTacho[id];
-    if (!f) return '';
-    const e = FRACCIONES_TACHO.find((x) => x.v === f);
-    return e ? e.t : '';
+    const t = tachoDe(id);
+    if (!t) return '';
+    const e = FRACCIONES_TACHO.find((x) => x.v === t.f);
+    const fra = e ? e.t : '';
+    return t.u > 0 ? `${fra} · 1 tacho = ${fmtNum(t.u)}` : fra;
 }
 
-// Selector de medida por tacho para un producto (vacío si no aplica).
+// Etiqueta de medida por tacho para la bandeja / detalle (tiene tacho_unidad).
+function tachoEtiqueta(it) {
+    if (!it.tacho_texto) return '';
+    return `<span class="tacho-tag">${esc(it.tacho_texto)}` +
+        (it.tacho_unidad ? ` · 1 tacho = ${fmtNum(it.tacho_unidad)} ${esc(it.unidad || 'unidad')}` : '') + '</span>';
+}
+
+// Selector de medida por tacho para un producto: fracción + «1 tacho = N».
 function selectorTacho(p) {
-    if (!tieneTacho(p)) return '';
-    const sel = pedidoTacho[p.id] || '';
+    const t = tachoDe(p.id);
+    const sel = t ? String(t.f) : '';
     const opts = [`<option value="">Por tacho…</option>`].concat(
         FRACCIONES_TACHO.map((f) =>
             `<option value="${f.v}" ${Number(sel) === f.v ? 'selected' : ''}>${f.t}</option>`));
-    return `<div class="tacho-pick"><select class="tacho-sel" data-id="${p.id}">${opts.join('')}</select></div>`;
+    return `<div class="tacho-pick">
+        <select class="tacho-sel" data-id="${p.id}">${opts.join('')}</select>
+        <input type="number" class="tacho-val" data-id="${p.id}" min="0" step="any"
+            placeholder="1 tacho = ?" title="Escribe a cuánto equivale un tacho"
+            value="${t ? String(t.u) : (parseFloat(p.unidad_tacho || 0) > 0 ? String(p.unidad_tacho) : '')}"
+            style="display:${sel ? '' : 'none'}">
+        <span class="tacho-un" data-id="${p.id}" style="display:${sel ? '' : 'none'}">${esc(p.unidad || 'unidad')}/tacho</span>
+    </div>`;
 }
 
 // Quita la medida de tacho de un producto (cuando la cantidad se edita a mano).
@@ -3140,6 +3155,10 @@ function limpiarTacho(id) {
     delete pedidoTacho[id];
     const sel = document.querySelector('#pedido-listado .tacho-sel[data-id="' + id + '"]');
     if (sel) sel.value = '';
+    const val = document.querySelector('#pedido-listado .tacho-val[data-id="' + id + '"]');
+    if (val) val.style.display = 'none';
+    const un = document.querySelector('#pedido-listado .tacho-un[data-id="' + id + '"]');
+    if (un) un.style.display = 'none';
 }
 
 function nombreSucursalPed(id) {
@@ -3235,7 +3254,7 @@ function renderTarjetasPedido() {
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
                         <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${max > 0 ? 'disp-ok' : 'disp-no'}">${max > 0 ? 'disponible: ' + fmtNum(max) + ' ' + esc(p.unidad || 'unidad') : '❌ Sin stock disponible'}</span></div>
-                        ${tieneTacho(p) ? `<div class="prod-card-meta">1 tacho = ${fmtNum(p.unidad_tacho)} ${esc(p.unidad || 'unidad')}</div>` : ''}
+                        ${parseFloat(p.unidad_tacho || 0) > 0 ? `<div class="prod-card-meta">1 tacho = ${fmtNum(p.unidad_tacho)} ${esc(p.unidad || 'unidad')}</div>` : ''}
                         <div class="aviso-stock" style="display:${excede ? '' : 'none'}">Excede cantidad existente (máximo: ${fmtNum(max)})</div>
                     </div>
                     <div class="tacho-col">
@@ -3329,18 +3348,46 @@ if (_listadoPed) {
             const id = +sel.dataset.id;
             const frac = sel.value === '' ? 0 : parseFloat(sel.value);
             const p = (pedidoProdsAll || []).find((x) => x.id === id);
+            const valIn = document.querySelector('#pedido-listado .tacho-val[data-id="' + id + '"]');
+            const un = document.querySelector('#pedido-listado .tacho-un[data-id="' + id + '"]');
             if (frac <= 0) {
-                delete pedidoTacho[id];
+                limpiarTacho(id);
+                if (valIn) valIn.style.display = 'none';
+                if (un) un.style.display = 'none';
                 return;
             }
-            const cant = Math.round(frac * parseFloat(p.unidad_tacho) * 1000) / 1000;
-            pedidoTacho[id] = frac;
+            if (valIn) valIn.style.display = '';
+            if (un) un.style.display = '';
+            let u = valIn && valIn.value !== '' ? parseFloat(valIn.value) : 0;
+            if (!(u > 0)) u = parseFloat(p.unidad_tacho || 0) || 1;
+            pedidoTacho[id] = { f: frac, u };
+            const cant = Math.round(frac * u * 1000) / 1000;
             const max = maxPedido(p);
             if (cant > max) {
-                toast(`No cabe esa medida: ${(FRACCIONES_TACHO.find((f) => f.v === frac) || {}).t} son ${fmtNum(cant)} ${p.unidad || 'unidad'} y solo hay ${fmtNum(max)}`, 'err');
+                toast(`No cabe esa medida: ${(FRACCIONES_TACHO.find((f) => f.v === frac) || {}).t} (× ${fmtNum(u)}) son ${fmtNum(cant)} ${p.unidad || 'unidad'} y solo hay ${fmtNum(max)}`, 'err');
                 limpiarTacho(id);
+            } else {
+                marcarCantidad(id, cant);
             }
-            marcarCantidad(id, cant);
+            return;
+        }
+        // «1 tacho = N» escrito en el pedido: recalcula la cantidad de la medida elegida.
+        if (e.target.classList.contains('tacho-val')) {
+            const id = +e.target.dataset.id;
+            const t = pedidoTacho[id];
+            if (!t) return;
+            const u = parseFloat(e.target.value) || 0;
+            if (u <= 0) return;
+            t.u = u;
+            const p = (pedidoProdsAll || []).find((x) => x.id === id);
+            const cant = Math.round(t.f * u * 1000) / 1000;
+            const max = p ? maxPedido(p) : 0;
+            if (cant > max) {
+                toast(`Excede el disponible: ${fmtNum(cant)} ${p ? p.unidad : ''} y solo hay ${fmtNum(max)}`, 'err');
+                limpiarTacho(id);
+            } else {
+                marcarCantidad(id, cant);
+            }
             return;
         }
         if (!e.target.classList.contains('prod-q')) return;
@@ -3349,8 +3396,8 @@ if (_listadoPed) {
         const max = p ? maxPedido(p) : 0;
         const v = pedidoSel[id] || 0;
         // Si la cantidad escrita ya no coincide con la medida de tacho, se quita.
-        if (tieneTacho(p) && pedidoTacho[id] &&
-            Math.abs(v - pedidoTacho[id] * parseFloat(p.unidad_tacho)) > 0.0001) {
+        const tchA = tachoDe(id);
+        if (tchA && Math.abs(v - Math.round(tchA.f * tchA.u * 1000) / 1000) > 0.0001) {
             limpiarTacho(id);
         }
         if (v > max) {
@@ -3385,8 +3432,8 @@ if (_listadoPed) {
         if (val > max) {
             toast(`Excedió la cantidad existente (máximo ${fmtNum(max)})`, 'err');
         }
-        if (tieneTacho(p) && pedidoTacho[id] &&
-            Math.abs(val - pedidoTacho[id] * parseFloat(p.unidad_tacho)) > 0.0001) {
+        const tchB = tachoDe(id);
+        if (tchB && Math.abs(val - Math.round(tchB.f * tchB.u * 1000) / 1000) > 0.0001) {
             limpiarTacho(id);
         }
         marcarCantidad(id, val);
@@ -3542,8 +3589,9 @@ $('#form-pedido').addEventListener('submit', async (e) => {
             if (v > max) mal.push(p ? p.nombre : ('#' + id));
             const ppal = sucPrincipalPed();
             const destino = p ? (p.sucursal_id ? +p.sucursal_id : (ppal ? +ppal.id : undefined)) : undefined;
+            const tch = tachoDe(id);
             detalle.push({ producto_id: +id, cantidad: v, destino_id: destino,
-                           tacho_fraccion: pedidoTacho[id] || 0 });
+                           tacho_fraccion: tch ? tch.f : 0, tacho_unidad: tch ? tch.u : 0 });
         }
     });
     if (mal.length) return toast('No se puede enviar, superan el disponible: ' + mal.slice(0, 3).join(', ') + (mal.length > 3 ? '…' : ''), 'err');
@@ -3646,7 +3694,7 @@ async function cargarBandeja() {
                                     <td>${esc(it.producto_nombre)}</td>
                                     <td class="td-unidad">${esc(it.unidad || 'unidad')}</td>
                                     <td class="td-cant">${it.cantidad}</td>
-                                    <td class="td-medida">${it.tacho_texto ? `<span class="tacho-tag">${esc(it.tacho_texto)}</span>` : '—'}</td>
+                                    <td class="td-medida">${tachoEtiqueta(it) || '—'}</td>
                                     <td class="td-prov">→ ${esc(it.destino_nombre || '—')}</td>
                                 </tr>`).join('') || '<tr><td class="empty">Sin líneas</td></tr>'}
                             </tbody>
@@ -3804,7 +3852,7 @@ window.verPedido = async (id, accionables = true) => {
         $('#det-pedido-items').innerHTML = data.detalle.map((d) => `
             <tr><td>${esc(d.producto_nombre)}</td><td>${d.cantidad}</td>
                 <td>${esc(d.unidad || 'unidad')}</td>
-                <td>${d.tacho_texto ? `<span class="tacho-tag">${esc(d.tacho_texto)}</span>` : '—'}</td>
+                <td>${tachoEtiqueta(d) || '—'}</td>
                 <td>${esc(sucMap[d.destino_id] || '—')}</td></tr>`).join('');
         openModal('modal-pedido');
         window._pedidoActual = { id, estado: p.estado };
