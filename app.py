@@ -15,6 +15,7 @@ from database import init_db
 from core.auth import auth_bp
 from core.catalogos import catalogos_bp
 from core.dashboard import dashboard_bp
+from core.inventario import inventario_bp
 from core.movimientos import movimientos_bp
 from core.pages import pages_bp
 from core.productos import productos_bp
@@ -74,7 +75,7 @@ def create_app():
 
     for bp in (pages_bp, auth_bp, dashboard_bp, catalogos_bp, productos_bp,
                movimientos_bp, ventas_bp, sucursales_bp, usuarios_bp, reportes_bp,
-               pedidos_bp):
+               pedidos_bp, inventario_bp):
         app.register_blueprint(bp)
 
     @app.before_request

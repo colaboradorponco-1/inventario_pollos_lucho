@@ -175,6 +175,7 @@ function loadView(name) {
     if (name === 'ventas') { loadVentas(); enfocarEscanorSiEscritorio('#venta-escaneo'); }
     if (name === 'repartos') { loadRepartos(); enfocarEscanorSiEscritorio('#reparto-escaneo'); }
     if (name === 'pedidos') loadPedidos();
+    if (name === 'inventario') loadInventario();
     if (name === 'usuarios') loadUsuarios();
     if (name === 'auditoria') loadAuditoria();
     if (name === 'almacenes') loadAlmacenes();
@@ -2723,7 +2724,13 @@ async function loadAuditoria() {
         toast(e.message, 'err');
     }
 }
-$('#btn-refrescar-auditoria').addEventListener('click', loadAuditoria);
+$('#btn-refrescar-auditoria')?.addEventListener('click', loadAuditoria);
+$('#btn-inv-crear')?.addEventListener('click', crearInventario);
+$('#btn-inv-guardar')?.addEventListener('click', guardarInventario);
+$('#btn-inv-cerrar')?.addEventListener('click', cerrarInventario);
+$('#btn-inv-excel')?.addEventListener('click', () => {
+    if (INV_ID) window.open(API + '/inventario-diario/' + INV_ID + '/excel', '_blank');
+});
 $('#aud-desde').addEventListener('change', loadAuditoria);
 $('#aud-hasta').addEventListener('change', loadAuditoria);
 
@@ -2893,6 +2900,197 @@ $('#gasto-fecha').value = nowLocal();
 $('#venta-fecha').value = nowLocal();
 $('#reparto-fecha').value = nowLocal();
 $('#pedido-fecha').value = nowLocal();
+
+// ---------------- Inventario Físico Diario ----------------
+// Planilla por categoría y producto: Inicial + Ingreso del día = Disponible del día;
+// Disponible - Final (conteo físico) = Utilizada. Al cerrar, la diferencia entre el
+// conteo y el stock del sistema se corrige con un movimiento de ajuste.
+let INV_ID = null;
+let INV_CERRADA = false;
+let INV_FILAS = [];
+
+function fmtInvQ(v) {
+    const n = Number(v || 0);
+    return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function diffInvBadge(d) {
+    const n = Number(d || 0);
+    if (Math.abs(n) < 1e-9) return '<span style="color:var(--muted)">0</span>';
+    if (n < 0) return `<strong style="color:#dc2626">${esc(fmtInvQ(n))}</strong>`;
+    return `<strong style="color:#0F3D2E">+${esc(fmtInvQ(n))}</strong>`;
+}
+
+async function loadInventario() {
+    const f = $('#inv-fecha');
+    if (f && !f.value) {
+        const d = new Date();
+        f.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    const h = $('#inv-hora');
+    if (h && !h.value) {
+        const d = new Date();
+        h.value = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+    await listarInventario();
+}
+
+async function listarInventario() {
+    try {
+        const resp = await request(API + '/inventario-diario');
+        const filas = resp.data || resp || [];
+        const tb = $('#inv-lista-tbody');
+        if (!tb) return;
+        $('#inv-lista-empty').style.display = filas.length ? 'none' : '';
+        tb.innerHTML = filas.map((f) => `
+            <tr>
+                <td>${esc(f.fecha)}</td>
+                <td>${esc(f.sucursal_nombre || '')}</td>
+                <td>${esc(f.hora_corte || '')}</td>
+                <td><span class="badge ${f.estado === 'cerrado' ? 'badge-compra' : 'badge-entrada'}">${f.estado === 'cerrado' ? 'Cerrada' : 'Abierta'}</span></td>
+                <td>${f.total_items || 0}</td>
+                <td>${f.total_faltantes || 0}</td>
+                <td>${f.total_sobrantes || 0}</td>
+                <td>Bs ${esc(fmtNum(f.valor_diferencia || 0))}</td>
+                <td>${esc(f.cerrado_por || f.usuario || '')}</td>
+                <td><button class="btn" data-inv-abrir="${f.id}">Abrir</button></td>
+            </tr>`).join('');
+        $$('[data-inv-abrir]').forEach((b) => b.addEventListener('click', () => abrirInventario(Number(b.dataset.invAbrir))));
+    } catch (e) { /* la lista no es crítica */ }
+}
+
+async function crearInventario() {
+    const fecha = $('#inv-fecha').value;
+    const hora = $('#inv-hora').value;
+    if (!fecha) { toast('Selecciona la fecha del inventario', 'error'); return; }
+    const qs = new URLSearchParams({ fecha, hora: hora || '' });
+    const r = await request(API + '/inventario-diario?' + qs.toString(), { method: 'POST' });
+    toast(r.message || 'Planilla lista', 'ok');
+    await listarInventario();
+    await abrirInventario(r.data.id);
+}
+
+async function abrirInventario(invId) {
+    const resp = await request(API + '/inventario-diario/' + invId);
+    const d = resp.data;
+    INV_ID = d.id;
+    INV_CERRADA = d.estado === 'cerrado';
+    INV_FILAS = d.lineas || [];
+    $('#inv-panel-conteo').style.display = '';
+    $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} - ${d.fecha} (${d.hora_corte || 'sin hora'})`;
+    $('#inv-subtitulo').textContent = INV_CERRADA
+        ? `Cerrada por ${d.cerrado_por || ''} el ${d.fecha_hora_cierre || ''}.`
+        : 'Digita la cantidad contada en "Inventario final". El resto se calcula solo.';
+    $('#inv-observaciones').value = d.observaciones || '';
+    $('#inv-observaciones').disabled = INV_CERRADA;
+
+    const r = d.resumen || {};
+    $('#inv-resumen').innerHTML =
+        `<span class="tb-tag">Planilla</span>` +
+        `<span class="tb-tag">Ítems: <strong>${r.total_items || 0}</strong></span>` +
+        `<span class="tb-tag">Total utilizada: <strong>${esc(fmtInvQ(r.total_utilizada || 0))}</strong></span>` +
+        `<span class="tb-tag" style="color:#dc2626">Faltantes: <strong>${r.total_faltantes || 0}</strong> (${esc(fmtInvQ(r.cantidad_faltante || 0))})</span>` +
+        `<span class="tb-tag" style="color:#0F3D2E">Sobrantes: <strong>${r.total_sobrantes || 0}</strong> (${esc(fmtInvQ(r.cantidad_sobrante || 0))})</span>` +
+        `<span class="tb-tag">Valor diferencia: <strong>Bs ${esc(fmtNum(r.valor_diferencia || 0))}</strong></span>`;
+
+    const tb = $('#inv-tbody');
+    let catActual = null;
+    let html = '';
+    INV_FILAS.forEach((f) => {
+        if (f.categoria !== catActual) {
+            catActual = f.categoria;
+            html += `<tr style="background:#F5F5F5"><td colspan="10"><strong>${esc(catActual)}</strong></td></tr>`;
+        }
+        const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
+        html += `
+            <tr data-inv-fila="${f.id}">
+                <td style="color:var(--muted)">${esc(f.categoria)}</td>
+                <td><strong>${esc(f.producto)}</strong></td>
+                <td>${esc(f.unidad)}</td>
+                <td>${esc(fmtInvQ(f.inicial))}</td>
+                <td style="color:#0F3D2E">${esc(fmtInvQ(f.ingreso_dia))}</td>
+                <td style="font-weight:700">${esc(fmtInvQ(f.disponible))}</td>
+                <td>
+                    <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
+                           value="${conteo}" placeholder="—" ${INV_CERRADA ? 'disabled' : ''}
+                           style="width:105px;text-align:right">
+                </td>
+                <td data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
+                <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia)}</td>
+                <td>
+                    <input type="text" class="inv-obs" data-id="${f.id}"
+                           value="${esc(f.observaciones || '')}" placeholder="—"
+                           ${INV_CERRADA ? 'disabled' : ''} style="width:150px">
+                </td>
+            </tr>`;
+    });
+    tb.innerHTML = html;
+
+    $$('.inv-conteo').forEach((inp) => inp.addEventListener('input', recalcFilaInv));
+
+    $('#btn-inv-guardar').style.display = INV_CERRADA ? 'none' : '';
+    $('#btn-inv-cerrar').style.display = INV_CERRADA ? 'none' : '';
+    $('#btn-inv-excel').style.display = '';
+    $('#inv-nota-cierre').textContent = INV_CERRADA
+        ? 'Esta planilla está cerrada. El stock ya fue ajustado según el conteo.'
+        : 'Al cerrar, toda diferencia entre el conteo y el stock del sistema se corrige con un movimiento de ajuste.';
+}
+
+function recalcFilaInv(e) {
+    const inp = e.target;
+    const id = Number(inp.dataset.id);
+    const f = INV_FILAS.find((x) => x.id === id);
+    if (!f) return;
+    const conteo = inp.value === '' ? null : Number(inp.value);
+    const final = conteo === null || Number.isNaN(conteo) ? f.disponible : conteo;
+    const utilizada = Math.max(f.disponible - final, 0);
+    const dif = final - f.stock_sistema;
+    const uEl = $(`[data-inv-util="${id}"]`);
+    const dEl = $(`[data-inv-dif="${id}"]`);
+    if (uEl) uEl.textContent = fmtInvQ(utilizada);
+    if (dEl) dEl.innerHTML = diffInvBadge(dif);
+}
+
+function collectedInventario() {
+    return $$('#inv-tbody .inv-conteo').map((inp) => {
+        const id = Number(inp.dataset.id);
+        const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
+        return {
+            id,
+            conteo_fisico: inp.value === '' ? null : inp.value,
+            observaciones: obs ? obs.value : '',
+        };
+    });
+}
+
+async function guardarInventario() {
+    if (!INV_ID) return;
+    const r = await request(API + '/inventario-diario/' + INV_ID, {
+        method: 'PUT',
+        body: {
+            lineas: collectedInventario(),
+            observaciones: $('#inv-observaciones').value,
+            hora_corte: $('#inv-hora').value,
+        },
+    });
+    toast(r.message || 'Conteo guardado', 'ok');
+    await abrirInventario(INV_ID);
+    await listarInventario();
+}
+
+async function cerrarInventario() {
+    if (!INV_ID) return;
+    const sinContar = $$('#inv-tbody .inv-conteo').filter((i) => i.value === '').length;
+    if (sinContar > 0) {
+        toast(`Faltan ${sinContar} productos por contar`, 'error');
+        return;
+    }
+    if (!confirm('Al cerrar la planilla se ajustará el stock de los productos con diferencia. ¿Continuar?')) return;
+    const r = await request(API + '/inventario-diario/' + INV_ID + '/cerrar', { method: 'POST' });
+    toast(r.message || 'Planilla cerrada', 'ok');
+    await abrirInventario(INV_ID);
+    await listarInventario();
+}
 
 // ---------------- Pedidos ----------------
 let pedidoProdsAll = [];

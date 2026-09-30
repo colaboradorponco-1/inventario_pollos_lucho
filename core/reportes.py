@@ -3,7 +3,7 @@ from flask import Blueprint, g, request
 from database import get_conn
 from .util import (ok, err, login_requerido, rol_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen, clausula_sucursal,
-                   ids_ciudad, cond_ciudad)
+                   ids_ciudad_permitidos, cond_ciudad)
 from .productos import scope_productos
 
 reportes_bp = Blueprint("reportes", __name__)
@@ -14,8 +14,13 @@ def _cls(col):
     de gestión, la vista de Reportes puede restringir por ciudad (?ciudad=...) o
     por una sucursal puntual (?sucursal=...)."""
     suc = request.args.get("sucursal", "").strip()
+    # g.ciudad_ids ya viene filtrado por autorización (ids_ciudad_permitidos), así que
+    # aquí solo se respeta ?sucursal= para quien es gestión.
     if suc and es_gestion():
-        return f" AND {col} = %s", [int(suc)]
+        try:
+            return f" AND {col} = %s", [int(suc)]
+        except (TypeError, ValueError):
+            return "", []
     cids = getattr(g, "ciudad_ids", None)
     if cids:
         return cond_ciudad(col, cids)
@@ -33,7 +38,7 @@ def exportar_consumo():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT p.nombre, p.unidad, m.tipo,
                SUM(m.cantidad) AS cantidad, SUM(m.cantidad * m.precio_unitario) AS total
@@ -64,7 +69,7 @@ def exportar_consumo():
 @login_requerido
 def exportar_productos():
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     filtro = request.args.get("filtro", "").strip()
     categoria = request.args.get("categoria", "").strip()
     proveedor = request.args.get("proveedor", "").strip()
@@ -159,7 +164,7 @@ def exportar_ventas():
     filtro = request.args.get("filtro", "").strip()
     sid_filtro = request.args.get("sucursal_id", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """SELECT v.id, v.fecha, v.total, v.usuario, v.nota, s.nombre AS sucursal
            FROM ventas v LEFT JOIN sucursales s ON s.id = v.sucursal_id WHERE 1=1"""
     params = []
@@ -196,7 +201,7 @@ def exportar_repartos():
     hasta = request.args.get("hasta", "")
     sid_filtro = request.args.get("sucursal_id", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT r.id, r.fecha, s.nombre AS sucursal, o.nombre AS origen, r.total, r.usuario, r.nota,
                (SELECT COUNT(*) FROM reparto_detalle d WHERE d.reparto_id = r.id) AS num_items
@@ -241,7 +246,7 @@ def reporte_consumo():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT p.nombre, p.unidad, m.tipo,
                SUM(m.cantidad) AS cantidad, SUM(m.cantidad * m.precio_unitario) AS total
@@ -270,7 +275,7 @@ def reporte_repartos():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT s.id, s.nombre, s.principal,
                COUNT(r.id) AS num_repartos,
@@ -301,7 +306,7 @@ def reporte_ventas_sucursal():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT s.nombre AS sucursal,
                COUNT(DISTINCT v.id) AS num_ventas,
@@ -334,7 +339,7 @@ def reporte_resumen():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
     cids = g.ciudad_ids
     syncval = request.args.get("sucursal", "").strip()
@@ -413,7 +418,7 @@ def reporte_ganancias():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT d.producto_nombre AS nombre,
                SUM(d.cantidad) AS cantidad,
@@ -445,7 +450,7 @@ def exportar_ganancias():
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT d.producto_nombre AS nombre,
                SUM(d.cantidad) AS cantidad,
@@ -478,7 +483,7 @@ def exportar_ganancias():
 @login_requerido
 def reporte_valorizacion():
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
     cids = g.ciudad_ids
     suc_filtro = request.args.get("sucursal", "").strip()
@@ -512,7 +517,7 @@ def reporte_valorizacion():
 @login_requerido
 def reporte_vencimientos():
     conn = get_conn()
-    g.ciudad_ids = ids_ciudad(conn, request.args.get("ciudad"))
+    g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     sid = sucursal_actual()
     cids = g.ciudad_ids
     if cids:

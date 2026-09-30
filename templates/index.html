@@ -79,6 +79,10 @@
                     <span class="badge-alerta" id="badge-pedidos" style="display:none"></span>
                     Pedidos
                 </button>
+<button class="menu-btn" data-view="inventario">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    Inventario Físico
+                </button>
                 <button class="menu-btn" data-view="ventas">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     Ventas
@@ -407,7 +411,75 @@
             </div>
         </section>
 
-        <!-- PROVEEDORES -->
+<!-- INVENTARIO FÍSICO DIARIO -->
+        <section id="view-inventario" class="view">
+            <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:16px">
+                <h2 style="margin-bottom:0">Planilla de Inventario Físico Diario de Almacén</h2>
+                <div class="toolbar small" style="margin:0">
+                    <label class="scan-input" style="margin:0">
+                        <span class="scan-icon">Fecha</span>
+                        <input type="date" id="inv-fecha" style="max-width:170px">
+                    </label>
+                    <label class="scan-input" style="margin:0">
+                        <span class="scan-icon">Hora corte</span>
+                        <input type="time" id="inv-hora" style="max-width:120px">
+                    </label>
+                    <button class="btn btn-primary" id="btn-inv-crear">Abrir planilla del día</button>
+                </div>
+            </div>
+
+            <div class="panel" id="inv-panel-conteo" style="display:none">
+                <div class="panel-head">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+                    <div>
+                        <h3 id="inv-titulo">Conteo del día</h3>
+                        <p id="inv-subtitulo">Digita la cantidad contada en "Inventario final". El resto se calcula solo.</p>
+                    </div>
+                </div>
+
+                <div class="toolbar small" id="inv-resumen" style="margin-bottom:10px"></div>
+
+                <div class="table-scroll"><table class="data-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2">Categoría</th>
+                            <th rowspan="2">Producto</th>
+                            <th rowspan="2">Unidad</th>
+                            <th rowspan="2">Inicial</th>
+                            <th rowspan="2">Ingreso día</th>
+                            <th rowspan="2" style="background:#0F3D2E;color:#fff">Disponible</th>
+                            <th rowspan="2" style="background:#7C2D12;color:#fff">Final (conteo)</th>
+                            <th rowspan="2">Utilizada</th>
+                            <th rowspan="2">Dif.</th>
+                            <th rowspan="2">Observaciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inv-tbody"></tbody>
+                </table></div>
+
+                <div class="toolbar small" style="margin-top:14px; justify-content:flex-end">
+                    <label class="scan-input" style="margin:0;flex:1">
+                        <span class="scan-icon">Nota</span>
+                        <input type="text" id="inv-observaciones" placeholder="Observaciones generales del día...">
+                    </label>
+                    <button class="btn" id="btn-inv-excel">Exportar planilla</button>
+                    <button class="btn" id="btn-inv-guardar">Guardar conteo</button>
+                    <button class="btn btn-primary" id="btn-inv-cerrar">Cerrar y ajustar stock</button>
+                </div>
+                <p class="empty" id="inv-nota-cierre">Al cerrar, toda diferencia entre el conteo y el stock del sistema se corrige con un movimiento de ajuste.</p>
+            </div>
+
+            <div class="panel">
+                <h3 style="margin-bottom:12px">Historial de planillas</h3>
+                <div class="table-scroll"><table class="data-table">
+                    <thead><tr><th>Fecha</th><th>Sucursal</th><th>Hora corte</th><th>Estado</th><th>Ítems</th><th>Faltan</th><th>Sobran</th><th>Valor dif.</th><th>Cerrada por</th><th></th></tr></thead>
+                    <tbody id="inv-lista-tbody"></tbody>
+                </table></div>
+                <p class="empty" id="inv-lista-empty">Todavía no hay planillas registradas.</p>
+            </div>
+        </section>
+
+                <!-- PROVEEDORES -->
         <section id="view-proveedores" class="view">
             <div class="toolbar">
                 <h2>Proveedores</h2>

@@ -12,6 +12,7 @@ _TABLAS_BACKUP = [
     "almacenes", "categorias", "proveedores", "sucursales", "usuarios",
     "productos", "lotes", "movimientos", "gastos", "ventas", "venta_detalle",
     "repartos", "reparto_detalle", "auditoria",
+    "inventario_diario", "inventario_detalle",
 ]
 
 usuarios_bp = Blueprint("usuarios", __name__)
@@ -88,6 +89,12 @@ def usuario(user_id):
         if target["rol"] == "superadmin" and not es_superadmin():
             conn.close()
             return err("No tienes permisos para eliminar a un superadministrador", 403)
+        sid = sucursal_actual()
+        if not es_superadmin() and sid is not None:
+            t2 = conn.execute("SELECT sucursal_id FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+            if t2 and t2["sucursal_id"] != sid:
+                conn.close()
+                return err("No tienes permisos para esta acción", 403)
         conn.execute("DELETE FROM usuarios WHERE id = ?", (user_id,))
         conn.commit()
         conn.close()
@@ -109,6 +116,11 @@ def usuario(user_id):
         if target["rol"] == "superadmin":
             conn.close()
             return err("No tienes permisos para editar a un superadministrador", 403)
+        sid = sucursal_actual()
+        t2 = conn.execute("SELECT sucursal_id FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+        if t2 and sid is not None and t2["sucursal_id"] != sid:
+            conn.close()
+            return err("No tienes permisos para esta acción", 403)
         if rol != "encargado":
             conn.close()
             return err("Solo el superadministrador puede asignar ese rol", 403)
@@ -183,6 +195,7 @@ def backup():
                         f"SELECT * FROM `{tabla}`").fetchall():
                     vals = ", ".join(_lit(fila[c]) for c in cols)
                     yield f"INSERT INTO `{tabla}` ({cols_sql}) VALUES ({vals});\n"
+
         finally:
             conn.close()
         yield "SET FOREIGN_KEY_CHECKS = 1;\n"
@@ -195,14 +208,17 @@ def backup():
 
 @usuarios_bp.route("/api/restaurar", methods=["POST"])
 @login_requerido
-@rol_requerido("admin")
+@rol_requerido("superadmin")
 def restaurar():
+    """Restaura un respaldo SQL. Solo superadmin: esto ejecuta el contenido del
+    archivo contra la base, así que un admin de filial no debe poder hacerlo."""
     archivo = request.files.get("archivo")
     if not archivo:
         return err("Debes seleccionar un archivo")
     sql = archivo.read().decode("utf-8", errors="replace")
     conn = get_conn()
     cur = conn.cursor()
+    aplicadas = 0
     try:
         cur.execute("SET FOREIGN_KEY_CHECKS = 0")
         for stmt in _divide_sentencias(sql):
@@ -210,14 +226,16 @@ def restaurar():
             if not s:
                 continue
             cur.execute(s)
+            aplicadas += 1
         conn.commit()
-    except pymysql.err.IntegrityError:
+    except Exception as e:
         conn.rollback()
-        raise
+        return err(f"No se pudo restaurar: {str(e)[:200]}", 400)
     finally:
         conn.close()
-    registrar_auditoria("Base de datos restaurada", "Se restauró la base de datos desde un respaldo")
-    return ok(message="Base de datos restaurada correctamente")
+    registrar_auditoria("Base de datos restaurada",
+                        f"Se restauró la base de datos desde un respaldo ({aplicadas} sentencias)")
+    return ok({"sentencias": aplicadas}, message="Base de datos restaurada correctamente")
 
 
 def _lit(val):
@@ -228,7 +246,11 @@ def _lit(val):
         return "1" if val else "0"
     if isinstance(val, (int, float)):
         return repr(val)
-    return "'" + str(val).replace("'", "''") + "'"
+    # MySQL interpreta '\' como escape dentro de las cadenas: hay que duplicar la
+    # barra invertida ANTES de comillas, o un valor con \' cerraría la cadena
+    # y rompería (o inyectaría) el dump generado.
+    txt = str(val).replace("\\", "\\\\").replace("'", "''")
+    return "'" + txt + "'"
 
 
 def _divide_sentencias(sql):
