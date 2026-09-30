@@ -498,6 +498,11 @@ def inventario_imprimir(inv_id):
     return render_template("planilla_inventario.html", inv=inv,
                            sucursal_nombre=sucursal["nombre"] if sucursal else "",
                            lineas=lineas,
+                           suma_inicial=round(sum(l["inicial"] for l in lineas), 3),
+                           suma_ingreso=round(sum(l["ingreso_dia"] for l in lineas), 3),
+                           suma_disponible=round(sum(l["disponible"] for l in lineas), 3),
+                           suma_final=round(sum(l["final"] for l in lineas
+                                                if l["contado"]), 3),
                            total_utilizada=round(sum(l["utilizada"] for l in lineas
                                                       if l["contado"]), 3))
 
