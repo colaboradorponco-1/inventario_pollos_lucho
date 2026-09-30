@@ -3059,9 +3059,9 @@ function collectedInventario() {
         const ing = $(`#inv-tbody .inv-ingreso[data-id="${id}"]`);
         return {
             id,
-            inicial: ini && ini.value !== '' ? ini.value : null,
-            ingreso_dia: ing && ing.value !== '' ? ing.value : null,
-            conteo_fisico: inp.value === '' ? null : inp.value,
+            inicial: ini && ini.value !== '' ? Number(ini.value) : null,
+            ingreso_dia: ing && ing.value !== '' ? Number(ing.value) : null,
+            conteo_fisico: inp.value === '' ? null : Number(inp.value),
             observaciones: obs ? obs.value : '',
         };
     });
