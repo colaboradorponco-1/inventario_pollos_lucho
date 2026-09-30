@@ -371,7 +371,8 @@ def producto(prod_id):
           data.get("almacen_id"), data.get("proveedor_id"), sid_p,
           _tacho_unidad(data) if data.get("unidad_tacho") is not None
           else (fila.get("unidad_tacho") or 0),
-          1 if _pide_tacho(data) else 0, prod_id))
+          _pide_tacho(data) if data.get("pide_tacho") is not None
+          else (fila.get("pide_tacho") or 0), prod_id))
     # Ajuste directo de stock: registra la diferencia como movimiento para mantener la sincronía
     stock_nuevo = data.get("stock")
     if stock_nuevo is not None:

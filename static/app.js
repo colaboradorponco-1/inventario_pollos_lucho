@@ -1080,8 +1080,6 @@ async function openProductoModal(id, lista) {
         }
         uSel.value = p.unidad || 'unidad';
         $('#prod-minimo').value = p.stock_minimo;
-        $('#prod-unidad-tacho').value = p.unidad_tacho || 0;
-        $('#prod-pide-tacho').checked = !!p.pide_tacho;
         $('#prod-costo').value = p.costo_promedio;
         $('#prod-precio-venta').value = p.precio_venta;
         $('#prod-vencimiento').value = p.vencimiento || '';
@@ -1115,8 +1113,6 @@ $('#form-producto').addEventListener('submit', async (e) => {
         categoria_id: +$('#prod-categoria-form').value || null,
         almacen_id: +$('#prod-almacen').value || null,
         unidad: $('#prod-unidad').value,
-        unidad_tacho: +$('#prod-unidad-tacho').value || 0,
-        pide_tacho: $('#prod-pide-tacho').checked,
         stock_minimo: +$('#prod-minimo').value || 0,
         costo_promedio: +$('#prod-costo').value || 0,
         precio_venta: +$('#prod-precio-venta').value || 0,
