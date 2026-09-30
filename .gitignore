@@ -23,6 +23,12 @@ respaldo_*.sql
 .DS_Store
 Thumbs.db
 
+# Imágenes sueltas en la carpeta del proyecto (no son del código)
+*.jpeg
+*.jpg
+*.png
+*.pdf
+
 # Logs
 *.log
 

@@ -1,4 +1,4 @@
-"""Planilla de Inventario Físico Diario de Almacén.
+"""Planilla de Inventario Diario de Almacén.
 
 Cada sucursal (incluidos los almacenes principales) cuenta su inventario una vez
 por día, con fecha y hora de corte. Para cada categoría y producto se registra:
@@ -18,9 +18,10 @@ cierra las de su propia sucursal; un admin/superadmin puede ver las de todas.
 """
 from datetime import date, datetime
 
-from flask import Blueprint, request, session
+from flask import Blueprint, redirect, render_template, request, session
 
 from database import get_conn
+from .lotes import stock_lotes
 from .util import (ok, err, login_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen,
                    registrar_auditoria, registrar_movimiento, flotante)
@@ -64,6 +65,22 @@ def _detalle(conn, inv_id):
         WHERE d.inventario_id = ?
         ORDER BY d.categoria_nombre, d.producto_nombre
     """, (inv_id,)).fetchall()
+
+
+def _stocks_actuales(conn, sucursal_id):
+    """{producto_id: stock en lotes} de la sucursal, en una sola consulta."""
+    return {r["producto_id"]: r["c"] or 0.0 for r in conn.execute(
+        "SELECT producto_id, COALESCE(SUM(cantidad), 0) AS c FROM lotes "
+        "WHERE sucursal_id = %s GROUP BY producto_id", (sucursal_id,)).fetchall()}
+
+
+def _movimientos_posteriores(conn, sucursal_id, fecha):
+    """Suma con signo de los movimientos registrados DESPUÉS de la fecha de la
+    planilla: ya están en el stock actual pero no en el conteo físico."""
+    return {r["producto_id"]: r["s"] or 0.0 for r in conn.execute(
+        "SELECT producto_id, SUM(cantidad) AS s FROM movimientos "
+        "WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste') "
+        "AND DATE(fecha) > %s GROUP BY producto_id", (sucursal_id, fecha)).fetchall()}
 
 
 # --------------------------------------------------------------------------
@@ -112,7 +129,8 @@ def inventario_crear():
                COALESCE(l.stock, 0) AS stock,
                COALESCE(ent.ingreso, 0) AS ingreso,
                COALESCE(sa.salida, 0) AS salida,
-               COALESCE(aj.ajuste, 0) AS ajuste
+               COALESCE(aj.ajuste, 0) AS ajuste,
+               COALESCE(po.post, 0) AS posterior
         FROM productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS stock FROM lotes
@@ -123,19 +141,29 @@ def inventario_crear():
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS salida FROM movimientos
                    WHERE sucursal_id = %s AND tipo = 'salida' AND DATE(fecha) = %s
                    GROUP BY producto_id) sa ON sa.producto_id = p.id
-        LEFT JOIN (SELECT producto_id, SUM(CASE WHEN cantidad < 0 THEN -cantidad ELSE cantidad END)
-                          AS ajuste FROM movimientos
+        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ajuste FROM movimientos
                    WHERE sucursal_id = %s AND tipo = 'ajuste' AND DATE(fecha) = %s
                    GROUP BY producto_id) aj ON aj.producto_id = p.id
+        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS post FROM movimientos
+                   WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste')
+                     AND DATE(fecha) > %s
+                   GROUP BY producto_id) po ON po.producto_id = p.id
         WHERE p.activo = 1 AND (l.stock > 0 OR ent.ingreso > 0 OR sa.salida > 0
                                 OR p.sucursal_id = %s OR p.sucursal_id IS NULL)
         ORDER BY c.nombre, p.nombre
-    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid)).fetchall()
+    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid)).fetchall()
 
     for f in filas:
-        # El 'stock' ya incluye los movimientos del día; para reconstruir el inicial
-        # hay que restar el ingreso y las salidas, y devolver los ajustes.
-        inicial = (f["stock"] or 0) - (f["ingreso"] or 0) + (f["salida"] or 0) - (f["ajuste"] or 0)
+        # 'stock' es el stock de HOY. Si la planilla es de un día anterior, primero
+        # se deshacen los movimientos posteriores a esa fecha para obtener el stock
+        # al cierre de ese día; luego se deshacen los del propio día para llegar al
+        # inicial, cada uno con su signo:
+        #   stock_dia  = stock - posteriores
+        #   inicial    = stock_dia - ingreso + salida - ajuste
+        # 'ajuste' viene con signo (negativo = faltante, positivo = sobrante).
+        stock_dia = (f["stock"] or 0) - (f["posterior"] or 0)
+        inicial = (stock_dia - (f["ingreso"] or 0)
+                   + (f["salida"] or 0) - (f["ajuste"] or 0))
         if inicial < 0:
             inicial = 0.0
         disponible = inicial + (f["ingreso"] or 0)
@@ -146,7 +174,7 @@ def inventario_crear():
                  final, utilizada, diferencia, costo_promedio, precio_venta)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0, %s, %s)
         """, (inv_id, f["id"], f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
-              f["nombre"], f["codigo"], f["unidad"] or "unidad", f["stock"] or 0,
+              f["nombre"], f["codigo"], f["unidad"] or "unidad", stock_dia,
               inicial, f["ingreso"] or 0, disponible, disponible,
               f["costo_promedio"] or 0, f["precio_venta"] or 0))
 
@@ -169,6 +197,8 @@ def inventario_detalle(inv_id):
         conn.close()
         return err("Planilla no encontrada", 404)
     filas = _detalle(conn, inv_id)
+    stocks = _stocks_actuales(conn, inv["sucursal_id"])
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
     conn.close()
@@ -177,6 +207,14 @@ def inventario_detalle(inv_id):
     for f in filas:
         disponible = (f["inicial"] or 0) + (f["ingreso_dia"] or 0)
         conteo = f["conteo_fisico"]
+        # Stock del sistema tal como estaba al momento del conteo: el actual menos
+        # lo que se movió después de la fecha de la planilla.
+        stock_ref = stocks.get(f["producto_id"], 0.0) - posteriores.get(f["producto_id"], 0.0)
+        if conteo is None:
+            # Sin conteo no hay diferencia que informar (se calcula al cerrar).
+            diferencia = 0.0
+        else:
+            diferencia = round((f["final"] or 0) - stock_ref, 3)
         lineas.append({
             "id": f["id"],
             "producto_id": f["producto_id"],
@@ -184,14 +222,14 @@ def inventario_detalle(inv_id):
             "producto": f["producto_nombre"],
             "codigo": f["codigo"],
             "unidad": f["unidad"],
-            "stock_sistema": round(f["stock_sistema"] or 0, 3),
+            "stock_sistema": round(stock_ref, 3),
             "inicial": round(f["inicial"] or 0, 3),
             "ingreso_dia": round(f["ingreso_dia"] or 0, 3),
             "disponible": round(disponible, 3),
             "conteo_fisico": conteo,
             "final": round(f["final"] or 0, 3),
             "utilizada": round(f["utilizada"] or 0, 3),
-            "diferencia": round(f["diferencia"] or 0, 3),
+            "diferencia": diferencia,
             "costo_promedio": round(f["costo_promedio"] or 0, 2),
             "precio_venta": round(f["precio_venta"] or 0, 2),
             "observaciones": f["observaciones"] or "",
@@ -250,6 +288,8 @@ def inventario_guardar(inv_id):
         return err("Envía las líneas a actualizar", 400)
 
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
+    stocks = _stocks_actuales(conn, inv["sucursal_id"])
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
     for item in lineas:
         if not isinstance(item, dict):
             continue
@@ -268,10 +308,16 @@ def inventario_guardar(inv_id):
         ingreso = fila["ingreso_dia"] or 0
         disponible = inicial + ingreso
         final = conteo if conteo is not None else disponible
-        utilizada = max(disponible - final, 0.0)
-        # Diferencia = lo que hay de menos (-) o de más (+) respecto al sistema.
-        # Se compara contra el stock real de `lotes`, no contra `disponible`.
-        diferencia = final - (fila["stock_sistema"] or 0)
+        utilizada = max(disponible - final, 0)
+        if conteo is None:
+            # Sin conteo no hay diferencia: se calcula recién al cerrar.
+            diferencia = 0.0
+        else:
+            # Diferencia = lo que hay de menos (-) o de más (+) respecto al sistema.
+            # Se compara contra el stock real de `lotes` (al momento del conteo),
+            # no contra `disponible` ni contra el stock de cuando se abrió la planilla.
+            stock_ref = stocks.get(fila["producto_id"], 0.0) - posteriores.get(fila["producto_id"], 0.0)
+            diferencia = round(final - stock_ref, 3)
         conn.execute("""
             UPDATE inventario_detalle
             SET conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s, observaciones = %s
@@ -316,21 +362,37 @@ def inventario_cerrar(inv_id):
 
     fecha_cierre = datetime.now().isoformat(timespec="seconds")
     total_items = len(filas)
-    faltantes = sum(1 for f in filas if (f["diferencia"] or 0) < 0)
-    sobrantes = sum(1 for f in filas if (f["diferencia"] or 0) > 0)
-    valor_dif = sum((f["diferencia"] or 0) * (f["costo_promedio"] or 0) for f in filas)
     ajustes = 0
-
+    faltantes = 0
+    sobrantes = 0
+    valor_dif = 0.0
+    # El ajuste se calcula contra el stock REAL al momento del conteo (el de
+    # lotes menos lo que se movió después de la fecha de la planilla), no contra
+    # el stock de cuando se abrió: si hubo entradas/salidas mientras la planilla
+    # estuvo abierta, usar el valor viejo dejaba el stock descuadrado.
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
+    dif_por_linea = {}
     for f in filas:
-        dif = f["diferencia"] or 0
+        final = f["final"]
+        if final is None:
+            continue
+        stock_actual = stock_lotes(conn, f["producto_id"], inv["sucursal_id"])
+        stock_ref = (stock_actual or 0.0) - posteriores.get(f["producto_id"], 0.0)
+        dif = round((final or 0) - stock_ref, 3)
+        dif_por_linea[f["id"]] = dif
         if abs(dif) < 1e-9:
             continue
+        if dif < 0:
+            faltantes += 1
+        else:
+            sobrantes += 1
+        valor_dif += dif * (f["costo_promedio"] or 0)
         # Ajuste: cantidad negativa = faltó (baja stock), positiva = sobró (sube stock).
         try:
             registrar_movimiento(
                 conn, f["producto_id"], "ajuste", dif,
                 f["costo_promedio"] or 0, fecha_cierre,
-                f"Inventario físico {inv['fecha']} (ajuste "
+                f"Inventario diario {inv['fecha']} (ajuste "
                 f"{'faltante' if dif < 0 else 'sobrante'})",
                 session.get("usuario", ""), inv["sucursal_id"])
         except ValueError as e:
@@ -339,6 +401,13 @@ def inventario_cerrar(inv_id):
             conn.close()
             return err(f"{f['producto_nombre']}: {str(e)}", 400)
         ajustes += 1
+
+    # La diferencia real que se ajustó queda registrada en la planilla (es la que
+    # se ve en pantalla y en el Excel).
+    if dif_por_linea:
+        conn.executemany(
+            "UPDATE inventario_detalle SET diferencia = %s WHERE id = %s",
+            [(d, lid) for lid, d in dif_por_linea.items()])
 
     conn.execute("""
         UPDATE inventario_diario
@@ -384,6 +453,56 @@ def inventario_lista():
 
 
 # --------------------------------------------------------------------------
+# Planilla imprimible (hoja del almacén) para llenar a mano y archivar
+# --------------------------------------------------------------------------
+@inventario_bp.route("/inventario-diario/<int:inv_id>/imprimir")
+@login_requerido
+def inventario_imprimir(inv_id):
+    """Hoja A4 con la planilla del día. Si el inventario final ya está contado
+    se imprime el valor; si no, la casilla va en blanco para llenarla a mano."""
+    conn = get_conn()
+    inv, permitido = _sucursal_de_planilla(conn, inv_id)
+    if not permitido:
+        conn.close()
+        return redirect("/")
+    filas = _detalle(conn, inv_id)
+    sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
+                            (inv["sucursal_id"],)).fetchone()
+    stocks = _stocks_actuales(conn, inv["sucursal_id"])
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"])
+    conn.close()
+
+    lineas = []
+    for f in filas:
+        conteo = f["conteo_fisico"]
+        disponible = (f["inicial"] or 0) + (f["ingreso_dia"] or 0)
+        if conteo is None:
+            final = ""
+            utilizada = ""
+        else:
+            final = f["final"] or 0
+            utilizada = round(max(disponible - (f["final"] or 0), 0), 3)
+        lineas.append({
+            "categoria": f["categoria_nombre"] or "Sin categoría",
+            "producto": f["producto_nombre"],
+            "unidad": f["unidad"] or "unidad",
+            "inicial": round(f["inicial"] or 0, 3),
+            "ingreso_dia": round(f["ingreso_dia"] or 0, 3),
+            "disponible": round(disponible, 3),
+            "final": final,
+            "utilizada": utilizada,
+            "observaciones": f["observaciones"] or "",
+            "contado": conteo is not None,
+        })
+
+    return render_template("planilla_inventario.html", inv=inv,
+                           sucursal_nombre=sucursal["nombre"] if sucursal else "",
+                           lineas=lineas,
+                           total_utilizada=round(sum(l["utilizada"] for l in lineas
+                                                      if l["contado"]), 3))
+
+
+# --------------------------------------------------------------------------
 # Exportar la planilla a Excel (misma plantilla que usan en el almacén)
 # --------------------------------------------------------------------------
 @inventario_bp.route("/api/inventario-diario/<int:inv_id>/excel")
@@ -408,7 +527,7 @@ def inventario_excel(inv_id):
                  f["utilizada"] or 0, f["diferencia"] or 0, f["observaciones"] or "")
                 for f in filas]
 
-    titulo = "PLANILLA DE INVENTARIO FÍSICO DIARIO DE ALMACÉN"
+    titulo = "PLANILLA DE INVENTARIO DIARIO DE ALMACÉN"
     return responder_excel(
         f"inventario_{inv['fecha']}.xlsx", enc, filas_xl,
         [22, 32, 9, 17, 15, 18, 16, 18, 11, 40],

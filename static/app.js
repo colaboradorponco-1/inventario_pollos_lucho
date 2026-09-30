@@ -2735,6 +2735,10 @@ $('#btn-inv-cerrar')?.addEventListener('click', cerrarInventario);
 $('#btn-inv-excel')?.addEventListener('click', () => {
     if (INV_ID) window.open(API + '/inventario-diario/' + INV_ID + '/excel', '_blank');
 });
+$('#btn-inv-print')?.addEventListener('click', () => {
+    if (INV_ID) window.open('/inventario-diario/' + INV_ID + '/imprimir', '_blank');
+    else toast('Abre una planilla del día primero', 'err');
+});
 $('#aud-desde').addEventListener('change', loadAuditoria);
 $('#aud-hasta').addEventListener('change', loadAuditoria);
 
@@ -2840,7 +2844,7 @@ function renderPagination(containerId, total, pagina, porPagina, loadFn) {
     });
 }
 
-// ---------------- Inventario Físico Diario ----------------
+// ---------------- Inventario Diario ----------------
 // Planilla por categoría y producto: Inicial + Ingreso del día = Disponible del día;
 // Disponible - Final (conteo físico) = Utilizada. Al cerrar, la diferencia entre el
 // conteo y el stock del sistema se corrige con un movimiento de ajuste.
@@ -2901,7 +2905,7 @@ async function listarInventario() {
 async function crearInventario() {
     const fecha = $('#inv-fecha').value;
     const hora = $('#inv-hora').value;
-    if (!fecha) { toast('Selecciona la fecha del inventario', 'error'); return; }
+    if (!fecha) { toast('Selecciona la fecha del inventario', 'err'); return; }
     const qs = new URLSearchParams({ fecha, hora: hora || '' });
     const r = await request(API + '/inventario-diario?' + qs.toString(), { method: 'POST' });
     toast(r.message || 'Planilla lista', 'ok');
@@ -3021,10 +3025,12 @@ async function cerrarInventario() {
     if (!INV_ID) return;
     const sinContar = $$('#inv-tbody .inv-conteo').filter((i) => i.value === '').length;
     if (sinContar > 0) {
-        toast(`Faltan ${sinContar} productos por contar`, 'error');
+        toast(`Faltan ${sinContar} productos por contar`, 'err');
         return;
     }
     if (!confirm('Al cerrar la planilla se ajustará el stock de los productos con diferencia. ¿Continuar?')) return;
+    // Primero se guarda el conteo digitado: si no, el cierre usaría valores viejos.
+    await guardarInventario();
     const r = await request(API + '/inventario-diario/' + INV_ID + '/cerrar', { method: 'POST' });
     toast(r.message || 'Planilla cerrada', 'ok');
     await abrirInventario(INV_ID);

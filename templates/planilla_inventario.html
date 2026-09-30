@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planilla de inventario {{ inv.fecha }} - Pollos Lucho</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Jost', 'Segoe UI', sans-serif; background: #f4f2ed; color: #0C0908; padding: 20px; }
+        .topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+        .topbar h1 { font-size: 18px; flex: 1; }
+        .btn {
+            padding: 9px 16px; border-radius: 8px; border: 1px solid #d8d4cc; background: #fff;
+            cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 600; color: #0C0908;
+        }
+        .btn-primary { background: #FCC302; border-color: #FCC302; }
+        .btn-primary:hover { background: #e5b900; }
+        .hoja {
+            background: #fff; max-width: 1100px; margin: 0 auto; border-radius: 10px;
+            padding: 22px 26px; box-shadow: 0 1px 5px rgba(0,0,0,.08);
+        }
+        .head { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #FCC302; padding-bottom: 12px; gap: 12px; flex-wrap: wrap; }
+        .head .brand { font-family: 'Passione One', 'Arial Black', sans-serif; font-size: 24px; letter-spacing: .03em; }
+        .head .brand small { display: block; font-size: 11px; font-family: 'Jost', 'Segoe UI', sans-serif; letter-spacing: 2px; color: #8a8a8a; }
+        .head .titulo { font-size: 15px; font-weight: 700; text-align: right; text-transform: uppercase; letter-spacing: .4px; }
+        .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 18px; font-size: 12.5px; margin: 12px 0 14px; }
+        .meta div span { color: #8a8a8a; display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; }
+        .meta div b { font-size: 13.5px; }
+        .estado { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+        .estado-ab { background: rgba(252,195,2,.25); color: #7a6000; }
+        .estado-ce { background: #0F3D2E; color: #fff; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        thead th {
+            background: #0C0908; color: #fff; font-size: 9.5px; text-transform: uppercase;
+            letter-spacing: .3px; padding: 6px 4px; text-align: center; line-height: 1.2;
+        }
+        thead th.izq { text-align: left; }
+        tbody td { padding: 5px 4px; border-bottom: 1px solid #e8e5df; text-align: center; }
+        tbody td.izq { text-align: left; }
+        tbody td.cat { font-size: 10.5px; color: #8a6d00; }
+        tbody td.prod { font-weight: 600; }
+        tbody td.obs { font-size: 10.5px; color: #555; }
+        .vacia { display: inline-block; min-width: 52px; border-bottom: 1px solid #999; height: 13px; }
+        .obs-vacia { display: inline-block; width: 100%; border-bottom: 1px solid #ddd; height: 13px; }
+        .resumen { display: flex; gap: 22px; flex-wrap: wrap; font-size: 12px; color: #555; border-top: 2px solid #FCC302; margin-top: 12px; padding-top: 8px; }
+        .firma { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 30px; text-align: center; font-size: 12px; color: #555; }
+        .firma div { border-top: 1px solid #bbb; padding-top: 6px; }
+        .firma .nombre { margin-top: 14px; font-size: 11px; color: #8a8a8a; }
+        .pie { margin-top: 14px; text-align: center; font-size: 10.5px; color: #8a8a8a; border-top: 1px dashed #ccc; padding-top: 8px; }
+        thead { display: table-header-group; }
+        tr { page-break-inside: avoid; }
+        @media print {
+            body { background: #fff; padding: 0; }
+            .topbar { display: none !important; }
+            .hoja { box-shadow: none; max-width: none; padding: 0; }
+            @page { size: A4 landscape; margin: 10mm; }
+        }
+    </style>
+</head>
+<body>
+    <div class="topbar">
+        <h1>Planilla de inventario diario</h1>
+        <button class="btn btn-primary" onclick="window.print()">Imprimir</button>
+        <button class="btn" onclick="location.href='/'">Volver al sistema</button>
+    </div>
+    <div class="hoja">
+        <div class="head">
+            <div class="brand">POLLOS LUCHO<small>CONTROL DE ALMACÉN</small></div>
+            <div class="titulo">Planilla de Inventario<br>Diario de Almacén</div>
+        </div>
+
+        <div class="meta">
+            <div><span>Fecha</span><b>{{ inv.fecha }}</b></div>
+            <div><span>Hora de corte</span><b>{{ inv.hora_corte or '—' }}</b></div>
+            <div><span>Sucursal / Almacén</span><b>{{ sucursal_nombre or '—' }}</b></div>
+            <div><span>Estado</span>
+                {% if inv.estado == 'cerrado' %}<b><span class="estado estado-ce">CERRADA</span></b>
+                {% else %}<b><span class="estado estado-ab">ABIERTA</span></b>{% endif %}
+            </div>
+            <div><span>Abrida por</span><b>{{ inv.usuario or '—' }}</b></div>
+            {% if inv.estado == 'cerrado' %}
+            <div><span>Cerrada por</span><b>{{ inv.cerrado_por or '—' }}</b></div>
+            <div><span>Cierre</span><b>{{ inv.fecha_hora_cierre or '—' }}</b></div>
+            {% endif %}
+        </div>
+
+        {% if inv.observaciones %}
+        <p style="font-size:12px;color:#555;margin-bottom:10px"><strong>Observaciones:</strong> {{ inv.observaciones }}</p>
+        {% endif %}
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width:3%">#</th>
+                    <th class="izq" style="width:15%">Categoría</th>
+                    <th class="izq" style="width:25%">Producto</th>
+                    <th style="width:7%">Unidad</th>
+                    <th style="width:9%">Inventario<br>Inicial</th>
+                    <th style="width:9%">Ingreso<br>del día</th>
+                    <th style="width:9%">Disp.<br>Día</th>
+                    <th style="width:10%">Inv.<br>Final</th>
+                    <th style="width:9%">Cantidad<br>Utilizada</th>
+                    <th style="width:14%">Observaciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for l in lineas %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td class="izq cat">{{ l.categoria }}</td>
+                    <td class="izq prod">{{ l.producto }}</td>
+                    <td>{{ l.unidad }}</td>
+                    <td>{{ l.inicial }}</td>
+                    <td>{{ l.ingreso_dia }}</td>
+                    <td><strong>{{ l.disponible }}</strong></td>
+                    <td>{% if l.contado %}{{ l.final }}{% else %}<span class="vacia"></span>{% endif %}</td>
+                    <td>{% if l.contado %}{{ l.utilizada }}{% else %}<span class="vacia"></span>{% endif %}</td>
+                    <td class="obs">{% if l.observaciones %}{{ l.observaciones }}{% else %}<span class="obs-vacia"></span>{% endif %}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="10" style="padding:18px;text-align:center;color:#8a8a8a">La planilla no tiene productos.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="resumen">
+            <span>Ítems: <strong>{{ lineas|length }}</strong></span>
+            <span>Total utilizada: <strong>{{ total_utilizada }}</strong></span>
+            <span>{% if inv.estado != 'cerrado' %}Pendiente de cerrar: escribir el inventario final y firmar.{% else %}Planilla cerrada y stock ajustado.{% endif %}</span>
+        </div>
+
+        <div class="firma">
+            <div>Encargado que realizó el conteo<div class="nombre">Nombre y firma</div></div>
+            <div>Responsable del almacén<div class="nombre">Nombre, firma y sello</div></div>
+        </div>
+
+        <div class="pie">Planilla generada desde el sistema el {{ inv.fecha_hora_cierre or inv.fecha }}{% if inv.usuario %} por {{ inv.usuario }}{% endif %}</div>
+    </div>
+</body>
+</html>

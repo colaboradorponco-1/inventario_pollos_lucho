@@ -60,7 +60,7 @@
                 </button>
                 <button class="menu-btn" data-view="inventario">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                    Inventario Físico
+                    Inventario Diario
                 </button>
                 <button class="menu-btn" data-view="proveedores">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -411,10 +411,10 @@
             </div>
         </section>
 
-        <!-- INVENTARIO FÍSICO DIARIO -->
+        <!-- INVENTARIO DIARIO -->
         <section id="view-inventario" class="view">
             <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:16px">
-                <h2 style="margin-bottom:0">Planilla de Inventario Físico Diario de Almacén</h2>
+                <h2 style="margin-bottom:0">Planilla de Inventario Diario de Almacén</h2>
                 <div class="toolbar small" style="margin:0">
                     <label class="scan-input" style="margin:0">
                         <span class="scan-icon">Fecha</span>
@@ -463,6 +463,7 @@
                         <input type="text" id="inv-observaciones" placeholder="Observaciones generales del día...">
                     </label>
                     <button class="btn" id="btn-inv-excel">Exportar planilla</button>
+                    <button class="btn" id="btn-inv-print">Imprimir planilla</button>
                     <button class="btn" id="btn-inv-guardar">Guardar conteo</button>
                     <button class="btn btn-primary" id="btn-inv-cerrar">Cerrar y ajustar stock</button>
                 </div>
