@@ -14,6 +14,8 @@ VENV="$APP_DIR/venv"
 REPO="https://github.com/colaboradorponco-1/inventario_pollos_lucho.git"
 SELF="/root/desplegar.sh"
 SELF_RAW="https://raw.githubusercontent.com/colaboradorponco-1/inventario_pollos_lucho/main/deploy/desplegar.sh"
+# Version del script: sirve para saber desde el log que version corrio en el droplet.
+SCRIPT_VERSION="2026-09-30b"
 
 # Auto-actualizacion: si GitHub tiene este script mas nuevo, reemplazarse y reintentar.
 tmp_self="$(mktemp)"
@@ -42,6 +44,7 @@ fi
 # quedo como root (rsync previo, restauracion manual, cron...), el respaldo falla
 # con PermissionError y set -e aborta TODO el despliegue aunque la app este bien.
 # Por eso los permisos se aseguran ANTES de respaldar, no solo despues del rsync.
+echo "==> Script de despliegue $SCRIPT_VERSION ($(date '+%F %T'))"
 echo "==> Asegurando permisos del directorio de la app"
 mkdir -p "$APP_DIR"
 chown pollos:pollos "$APP_DIR"
