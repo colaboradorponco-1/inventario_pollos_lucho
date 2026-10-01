@@ -129,6 +129,40 @@ def _stocks_actuales(conn, sucursal_id):
         "WHERE sucursal_id = %s GROUP BY producto_id", (sucursal_id,)).fetchall()}
 
 
+def _ingresos_del_dia(conn, sucursal_id, fecha):
+    """{producto_id: total que ENTRÓ} a la sucursal en ese día.
+
+    Es la fuente real del "ingreso del día" de la planilla, y se calcula SIEMPRE
+    desde `movimientos`, nunca desde lo que escriba el encargado. Todo lo que
+    entra a un almacén se registra como movimiento 'entrada': los pedidos que
+    despacha otro almacén y también las compras o devoluciones que se cargan a
+    mano en "Registrar movimiento". Por eso el ingreso ya sale solo.
+
+    Es justamente lo que hace peligroso dejar el campo editable: si el despacho
+    de un pedido ya lo Inga como 'entrada' y el encargado además escribe la
+    misma cantidad en la planilla, el ingreso queda duplicado. Caso real: una
+    sucursal pide 30 papas, el almacén se las entrega, el stock sube 30 y la
+    planilla marca 60 de ingreso — cuando en el depósito solo hay 30.
+    """
+    return {r["producto_id"]: r["i"] or 0.0 for r in conn.execute(
+        "SELECT producto_id, SUM(cantidad) AS i FROM movimientos "
+        "WHERE sucursal_id = %s AND tipo = 'entrada' AND DATE(fecha) = %s "
+        "GROUP BY producto_id", (sucursal_id, fecha)).fetchall()}
+
+
+def _ingresos_de_linea(ingresos, fila, abierto):
+    """Ingreso que se muestra y se guarda en una línea de la planilla.
+
+    Mientras la planilla está ABIERTA se toma el valor actual de los movimientos,
+    para que una mercadería que llegó después de abrirla igual sume (antes se
+    congelaba al crearla y el ingreso se perdía en silencio). Si la planilla ya
+    está CERRADA se respeta el valor con el que se cerró: es un registro
+    histórico y no debe cambiar solo por registrar un movimiento belatedado."""
+    if not abierto:
+        return fila["ingreso_dia"] or 0.0
+    return ingresos.get(fila["producto_id"], 0.0)
+
+
 def _movimientos_posteriores(conn, sucursal_id, fecha, hora_corte=None):
     """Efecto neto en el stock de los movimientos registrados DESPUÉS del corte de la
     planilla: ya están en el stock actual pero no en el conteo físico.
@@ -313,6 +347,8 @@ def inventario_detalle(inv_id):
     filas = _detalle(conn, inv_id)
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
     posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
+    ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
+    abierto = inv["estado"] != "cerrado"
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
     cat = None
@@ -323,7 +359,10 @@ def inventario_detalle(inv_id):
 
     lineas = []
     for f in filas:
-        disponible = (f["inicial"] or 0) + (f["ingreso_dia"] or 0)
+        # El ingreso sale de los movimientos, no de lo que se escriba a mano: por
+        # eso es de solo lectura en pantalla y no se acepta en el guardado.
+        ingreso = _ingresos_de_linea(ingresos, f, abierto)
+        disponible = (f["inicial"] or 0) + ingreso
         conteo = f["conteo_fisico"]
         # Stock del sistema tal como estaba al momento del conteo: el actual menos
         # lo que se movió después de la fecha de la planilla.
@@ -342,7 +381,7 @@ def inventario_detalle(inv_id):
             "unidad": f["unidad"],
             "stock_sistema": round(stock_ref, 3),
             "inicial": round(f["inicial"] or 0, 3),
-            "ingreso_dia": round(f["ingreso_dia"] or 0, 3),
+            "ingreso_dia": round(ingreso, 3),
             "disponible": round(disponible, 3),
             "conteo_fisico": conteo,
             "final": round(f["final"] or 0, 3),
@@ -423,6 +462,7 @@ def inventario_guardar(inv_id):
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
     posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
+    ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
     try:
         for item in lineas:
             if not isinstance(item, dict):
@@ -432,14 +472,28 @@ def inventario_guardar(inv_id):
             if not fila:
                 continue
             conteo = _campo(item.get("conteo_fisico"), "El inventario final")
-            # El encargado puede corregir el inicial y el ingreso a mano; si los
-            # deja vacíos se conservan los valores deducidos de los movimientos.
+            # El encargado puede corregir el INICIAL a mano (el stock con el que
+            # arrancó el día no siempre cuadra con el que tiene el sistema).
             inicial = _campo(item.get("inicial"), "El inventario inicial")
             if inicial is None:
                 inicial = fila["inicial"] or 0
-            ingreso = _campo(item.get("ingreso_dia"), "El ingreso del día")
-            if ingreso is None:
-                ingreso = fila["ingreso_dia"] or 0
+            # El INGRESO NO se acepta desde el formulario: se deduce de los
+            # movimientos. Si el navegador manda un valor distinto al deducido se
+            # avisa en vez de guardarlo en silencio, porque casi siempre significa
+            # que el encargado esta anotando de nuevo una entrada que el sistema
+            # ya registro (el caso clasico: se pide X, el almacen lo entrega, y en
+            # la planilla se escribe X otra vez -> el ingreso queda duplicado).
+            ingreso = _ingresos_de_linea(ingresos, fila, True)
+            enviado = item.get("ingreso_dia")
+            if enviado not in (None, ""):
+                v_env = flotante(enviado, None)
+                if v_env is not None and abs(v_env - ingreso) > 1e-9:
+                    raise _DatoInvalido(
+                        f"{fila['producto_nombre']}: el ingreso del día no se escribe a mano, "
+                        f"el sistema ya tiene {round(ingreso, 3)} de entrada (suman las compras y los "
+                        f"pedidos entregados). Si llego mercadería que NO está registrada, registrala "
+                        f"en 'Registrar movimiento' como entrada y acá aparecerá sola."
+                    )
             disponible = inicial + ingreso
             final = conteo if conteo is not None else disponible
             utilizada = max(disponible - final, 0)
@@ -725,12 +779,18 @@ def inventario_imprimir(inv_id):
                            (inv["categoria_id"],)).fetchone()
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
     posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
+    ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
+    abierto = inv["estado"] != "cerrado"
     conn.close()
 
     lineas = []
     for f in filas:
         conteo = f["conteo_fisico"]
-        disponible = (f["inicial"] or 0) + (f["ingreso_dia"] or 0)
+        # Mismo criterio que en pantalla: el ingreso sale de los movimientos y la
+        # planilla abierta se recalcula, para que el Excel y la pantalla digan
+        # exactamente lo mismo.
+        ingreso = _ingresos_de_linea(ingresos, f, abierto)
+        disponible = (f["inicial"] or 0) + ingreso
         if conteo is None:
             final = ""
             utilizada = ""
@@ -742,7 +802,7 @@ def inventario_imprimir(inv_id):
             "producto": f["producto_nombre"],
             "unidad": f["unidad"] or "unidad",
             "inicial": round(f["inicial"] or 0, 3),
-            "ingreso_dia": round(f["ingreso_dia"] or 0, 3),
+            "ingreso_dia": round(ingreso, 3),
             "disponible": round(disponible, 3),
             "final": final,
             "utilizada": utilizada,
@@ -775,6 +835,11 @@ def inventario_excel(inv_id):
         conn.close()
         return err("Planilla no encontrada", 404)
     filas = _detalle(conn, inv_id)
+    # El Excel se arma con el MISMO ingreso que se ve en pantalla. Si se usara el
+    # valor guardado al crear la planilla, el reporte podria decir una cosa y la
+    # pantalla otra, que es justo como se cuelan los errores de inventario.
+    ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
+    abierto = inv["estado"] != "cerrado"
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
     nombre_cat = "Todas las categorías"
@@ -789,8 +854,9 @@ def inventario_excel(inv_id):
            "Disponible del día", "Inventario final", "Cantidad utilizada",
            "Diferencia", "Observaciones"]
     filas_xl = [(f["categoria_nombre"] or "Sin categoría", f["producto_nombre"],
-                 f["unidad"] or "", f["inicial"] or 0, f["ingreso_dia"] or 0,
-                 (f["inicial"] or 0) + (f["ingreso_dia"] or 0), f["final"] or 0,
+                 f["unidad"] or "", f["inicial"] or 0, _ingresos_de_linea(ingresos, f, abierto),
+                 (f["inicial"] or 0) + _ingresos_de_linea(ingresos, f, abierto),
+                 f["final"] or 0,
                  f["utilizada"] or 0, f["diferencia"] or 0, f["observaciones"] or "")
                 for f in filas]
 

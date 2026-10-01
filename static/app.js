@@ -3224,7 +3224,7 @@ async function abrirInventario(invId) {
     $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
-        : 'Llena a mano el inventario inicial, el ingreso del día y el inventario final. Disp. día = inicial + ingreso, y la cantidad utilizada = disponible - final. Puedes corregir todo hasta cerrar.';
+        : 'Solo se llenan a mano el inventario inicial y el conteo final. El ingreso del día ya lo pone el sistema (suma las compras y los pedidos que te entregaron) y va sombreado: si también lo anotas, la mercadería queda contada doble. Disponible = inicial + ingreso, y utilizada = disponible − conteo final.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
 
@@ -3257,9 +3257,10 @@ async function abrirInventario(invId) {
                            style="text-align:right">
                 </td>
                 <td>
-                    <input type="number" step="any" min="0" class="inv-ingreso" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.ingreso_dia))}" placeholder="—" ${bloq}
-                           style="text-align:right">
+                    <input type="number" step="any" class="inv-ingreso" data-id="${f.id}"
+                           value="${esc(fmtInvQ(f.ingreso_dia))}" readonly disabled
+                           title="El ingreso del día lo arma el sistema con las compras y los pedidos entregados. No se escribe a mano: si lo anotas acá, se cuenta dos veces."
+                           style="text-align:right;background:#f1f5f9;color:#475569;cursor:not-allowed">
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
@@ -3297,12 +3298,12 @@ function recalcFilaInv(e) {
     const id = Number(inp.dataset.id);
     const f = INV_FILAS.find((x) => x.id === id);
     if (!f) return;
-    // El encargado escribe a mano el inicial y el ingreso del día; el disponible
-    // es la suma de ambos y la utilizada sale del disponible menos el conteo.
+    // El encargado escribe a mano el inicial y el conteo final. El ingreso del día
+    // NO se escribe: viene del sistema, asi que se toma tal cual del servidor y no
+    // del input, que ademas es de solo lectura.
     const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
-    const ingIn = $(`#inv-tbody .inv-ingreso[data-id="${id}"]`);
     const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
-    const ingreso = ingIn && ingIn.value !== '' ? Number(ingIn.value) : (f.ingreso_dia || 0);
+    const ingreso = Number(f.ingreso_dia || 0);
     const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
     const conteo = inp.value === '' ? null : Number(inp.value);
     const final = conteo === null || Number.isNaN(conteo) ? disponible : conteo;
@@ -3322,11 +3323,9 @@ function collectedInventario() {
         const id = Number(inp.dataset.id);
         const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
         const ini = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
-        const ing = $(`#inv-tbody .inv-ingreso[data-id="${id}"]`);
         return {
             id,
             inicial: ini && ini.value !== '' ? Number(ini.value) : null,
-            ingreso_dia: ing && ing.value !== '' ? Number(ing.value) : null,
             conteo_fisico: inp.value === '' ? null : Number(inp.value),
             observaciones: obs ? obs.value : '',
         };
