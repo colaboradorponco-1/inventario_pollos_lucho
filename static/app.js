@@ -2799,6 +2799,7 @@ $('#btn-inv-print')?.addEventListener('click', () => {
     if (INV_ID) window.open('/inventario-diario/' + INV_ID + '/imprimir', '_blank');
     else toast('Abre una planilla del día primero', 'err');
 });
+$('#btn-inv-borrar')?.addEventListener('click', invClick(borrarInventario));
 $('#btn-inv-cerrar-panel')?.addEventListener('click', invClick(async () => {
     const Digitado = Array.from($$('#inv-tbody .inv-conteo')).some((i) => i.value !== '');
     if (Digitado && INV_CERRADA === false) {
@@ -3148,6 +3149,7 @@ async function abrirInventario(invId) {
 
     $('#btn-inv-guardar').style.display = INV_CERRADA ? 'none' : '';
     $('#btn-inv-cerrar').style.display = INV_CERRADA ? 'none' : '';
+    $('#btn-inv-borrar').style.display = INV_CERRADA ? 'none' : '';
     $('#btn-inv-excel').style.display = '';
     $('#btn-inv-print').style.display = '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
@@ -3248,6 +3250,19 @@ async function cerrarInventario() {
     const r = await request(API + '/inventario-diario/' + INV_ID + '/cerrar', { method: 'POST' });
     toast(r.message || 'Planilla cerrada', 'ok');
     await abrirInventario(INV_ID);
+    await listarInventario();
+}
+
+async function borrarInventario() {
+    if (!INV_ID) return;
+    if (!confirm('Borrar esta planilla abierta?\n\n' +
+        'Se elimina el conteo que hiciste. El stock NO se toca, porque solo se ' +
+        'ajusta al cerrar.\n\nSolo se puede borrar si sigue abierta.')) return;
+    const r = await request(API + '/inventario-diario/' + INV_ID, { method: 'DELETE' });
+    toast(r.message || 'Planilla borrada', 'ok');
+    $('#inv-panel-conteo').style.display = 'none';
+    INV_ID = null;
+    INV_FILAS = [];
     await listarInventario();
 }
 

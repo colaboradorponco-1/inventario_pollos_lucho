@@ -21,7 +21,8 @@ propia sucursal; un admin/superadmin puede ver las de todas.
 """
 from datetime import date, datetime
 
-from flask import Blueprint, redirect, render_template, request, session
+from flask import (Blueprint, current_app, redirect, render_template, request,
+                   session)
 
 from database import get_conn
 from .lotes import stock_lotes
@@ -533,6 +534,50 @@ def inventario_cerrar(inv_id):
                "total_faltantes": faltantes, "total_sobrantes": sobrantes,
                "valor_diferencia": round(valor_dif, 2)},
               message=f"Planilla cerrada con {ajustes} ajuste(s) de stock")
+
+
+# --------------------------------------------------------------------------
+# Borrado de una planilla abierta
+# --------------------------------------------------------------------------
+@inventario_bp.route("/api/inventario-diario/<int:inv_id>", methods=["DELETE"])
+@login_requerido
+def inventario_borrar(inv_id):
+    """Elimina una planilla que sigue ABIERTA.
+
+    Guardar el conteo nunca mueve stock, así que borrar una planilla abierta es
+    seguro: no toca `lotes` ni `movimientos`. Una planilla CERRADA no se puede
+    borrar porque ya generó ajustes de stock; esos movimientos se quedan como
+    registro y quien los produjo tiene que corregirlos a mano."""
+    conn = get_conn()
+    try:
+        inv = conn.execute("SELECT * FROM inventario_diario WHERE id = %s", (inv_id,)).fetchone()
+        if not inv:
+            conn.close()
+            return err("La planilla no existe", 404)
+        if inv["sucursal_id"] != sucursal_operativa():
+            conn.close()
+            return err("Solo puedes borrar planillas de tu sucursal", 403)
+        if inv["estado"] == "cerrado":
+            conn.close()
+            return err(
+                "La planilla está cerrada y ya ajustó el stock. No se puede borrar: "
+                "los movimientos de ajuste quedan como registro.", 400)
+
+        lineas = conn.execute(
+            "SELECT COUNT(*) AS n FROM inventario_detalle WHERE inventario_id = %s",
+            (inv_id,)).fetchone()["n"]
+        conn.execute("DELETE FROM inventario_detalle WHERE inventario_id = %s", (inv_id,))
+        conn.execute("DELETE FROM inventario_diario WHERE id = %s", (inv_id,))
+        conn.commit()
+        conn.close()
+        return ok({"id": inv_id, "lineas": lineas},
+                  message=f"Planilla abierta borrada ({lineas} productos, sin cambios en el stock)")
+    except Exception:
+        conn.rollback()
+        conn.close()
+        app_logger = current_app.logger
+        app_logger.exception("Error al borrar la planilla %s", inv_id)
+        return err("No se pudo borrar la planilla", 500)
 
 
 # --------------------------------------------------------------------------
