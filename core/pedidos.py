@@ -526,15 +526,31 @@ def pedidos_bandeja():
     elif not es_gestion():
         conn.close()
         return ok([])
-    # Reseteo diario: por defecto solo los pedidos del día actual. El filtro
-    # desde/hasta permite ver días anteriores (mismo patrón que el resto del sistema).
-    hoy = datetime.now().strftime("%Y-%m-%d")
-    desde = request.args.get("desde", "") or hoy
-    hasta = request.args.get("hasta", "") or hoy
-    where += " AND date(p.fecha) >= date(?)"
-    params.append(desde)
-    where += " AND date(p.fecha) <= date(?)"
-    params.append(hasta)
+    # La bandeja es una COLA DE TRABAJO, no un parte diario: por defecto muestra
+    # todo lo pendiente sin limite de fechas.
+    #
+    # Antes hacia `desde = request.args.get("desde", "") or hoy`, o sea que sin
+    # filtro solo miraba el dia de hoy. Como la fecha del pedido es cuando se
+    # CREO (no cuando hay que despacharlo), un pedido del viernes 17:46 a la
+    # espera del lunes desaparecia de la bandeja al pasar las 00:00, en
+    # silencio: el encargado veia "No hay pedidos para mostrar" con trabajo
+    # real pendiente. Los filtros desde/hasta siguen disponibles para cuando si
+    # se quiere acotar a un rango.
+    #
+    # El estado tambien es opcional: por defecto solo `pendiente` (lo que hay que
+    # hacer). Los ya despachados/cumplidos se ven en el historial.
+    estado = (request.args.get("estado", "") or "pendiente").strip().lower()
+    if estado in _ESTADOS:
+        where += " AND p.estado = ?"
+        params.append(estado)
+    desde = (request.args.get("desde", "") or "").strip()
+    hasta = (request.args.get("hasta", "") or "").strip()
+    if desde:
+        where += " AND date(p.fecha) >= date(?)"
+        params.append(desde[:10])
+    if hasta:
+        where += " AND date(p.fecha) <= date(?)"
+        params.append(hasta[:10])
     rows = conn.execute("""
         SELECT p.id, p.nro_ticket, p.fecha, p.estado, p.nota, p.usuario, p.sucursal_id,
                s.nombre AS sucursal_nombre

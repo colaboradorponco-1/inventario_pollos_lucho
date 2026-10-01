@@ -4017,9 +4017,18 @@ async function cargarBandeja() {
         }
         const total = grupos.reduce((a, g) => a + g.pedidos.length, 0);
         const resumen = $('#historial-resumen');
-        if (resumen) resumen.textContent = total ? `${total} pedido(s)` : '';
+        if (resumen) resumen.textContent = total ? `${total} pendiente(s)` : '';
         if (!total) {
-            $('#bandeja-contenido').innerHTML = '<p class="empty">No hay pedidos para mostrar.</p>';
+            // Distinguir "no hay nada pendiente" de "tu filtro de fecha lo
+            // esconde": antes ambos casos mostraban el mismo texto, y por eso
+            // un pedido de ayer sin despachar era indistinguible de no tener
+            // trabajo. Ahora el mensaje dice si hay que tocar los filtros.
+            const conFiltro = desde || hasta;
+            $('#bandeja-contenido').innerHTML = conFiltro
+                ? '<p class="empty">No hay pedidos pendientes en el rango de fechas filtrado. ' +
+                  'Limpia las fechas para ver todos los pendientes.</p>'
+                : '<p class="empty">No hay pedidos pendientes. ' +
+                  'Los ya despachados o cumplidos están en el historial.</p>';
             return;
         }
         const puedeDespachar = esGestionPed() || esAlmacenPpal();
