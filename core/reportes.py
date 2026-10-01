@@ -3,7 +3,8 @@ from flask import Blueprint, current_app, g, request
 from database import get_conn
 from .util import (ok, err, login_requerido, rol_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen, clausula_sucursal,
-                   ids_ciudad_permitidos, cond_ciudad, registrar_auditoria)
+                   ids_ciudad_permitidos, cond_ciudad, registrar_auditoria,
+                   tipos_movimiento_desconocidos, signo_movimiento)
 from .productos import scope_productos
 
 reportes_bp = Blueprint("reportes", __name__)
@@ -544,17 +545,23 @@ def reporte_vencimientos():
 
 def _auditar(conn):
     """Resumen de consistencia numérica del sistema (solo lectura)."""
-    rows = conn.execute("""
+    # Signos: entrada suma lo que dice, salida resta, 'ajuste' ya viene con signo.
+    # Antes era IF(tipo='entrada', cantidad, -cantidad), que trataba un 'ajuste'
+    # negativo como si restara su valor absoluto, o sea lo contraryo a como está
+    # grabado. La misma regla que aplica la reconciliación (signo_movimiento).
+    signo_sql = ("SUM(CASE ml.tipo WHEN 'salida' THEN -ml.cantidad "
+                 "ELSE ml.cantidad END)")
+    rows = conn.execute(f"""
         SELECT p.nombre, p.id AS producto_id, l.sucursal_id, s.nombre AS sucursal,
                l.cantidad AS stock_tab, l.fecha_vencimiento AS venc,
-               SUM(IF(ml.tipo='entrada', ml.cantidad, -ml.cantidad)) AS mov,
-               l.cantidad - SUM(IF(ml.tipo='entrada', ml.cantidad, -ml.cantidad)) AS dif
+               {signo_sql} AS mov,
+               l.cantidad - {signo_sql} AS dif
         FROM lotes l
         JOIN productos p ON p.id = l.producto_id
         JOIN sucursales s ON s.id = l.sucursal_id
         LEFT JOIN movimientos ml ON ml.lote_id = l.id
         GROUP BY l.id, p.nombre, p.id, l.sucursal_id, s.nombre, l.cantidad, l.fecha_vencimiento
-        HAVING ABS(l.cantidad - SUM(IF(ml.tipo='entrada', ml.cantidad, -ml.cantidad))) > 0.001
+        HAVING ABS(l.cantidad - {signo_sql}) > 0.001
         ORDER BY p.nombre, s.nombre
     """).fetchall()
     ventas = conn.execute("""
@@ -587,6 +594,7 @@ def _auditar(conn):
     proveedores = conn.execute("SELECT COUNT(*) AS n FROM proveedores").fetchone()["n"]
     return {
         "descuadres": [dict(r) for r in rows],
+        "tipos_desconocidos": tipos_movimiento_desconocidos(conn),
         "ventas": dict(ventas),
         "repartos": dict(repartos),
         "valorizacion": [dict(r) for r in val],
@@ -645,6 +653,12 @@ def reporte_reconciliar():
     try:
         antes = _auditar(conn)
 
+        # 0. Tipos de movimiento que el código no sabe interpretar. Si existen, el
+        #    cálculo de abajo los estaría ignorando en silencio y escribiría un stock
+        #    equivocado (pasó con 'merma': el ACE quedó en 3.1 en vez de 2.1).
+        #    Se avisa siempre y se bloquea la escritura; la simulación sí informa.
+        desconocidos = antes.get("tipos_desconocidos") or []
+
         # 1. Movimientos huérfanos: apuntan a una venta/reparto que ya no existe.
         huerfanos = []
         cur = conn.execute("""SELECT id, nota FROM movimientos
@@ -663,8 +677,8 @@ def reporte_reconciliar():
                 huerfanos.append({"id": m["id"], "nota": m["nota"]})
 
         # 2. Qué lotes cambiarían, calculados en Python: se ve antes de escribir.
-        #    Solo lotes con movimientos. Se ignora el signo del tipo 'ajuste'
-        #    porque ese SÍ viene con signo en la tabla.
+        #    Solo lotes con movimientos. Los signos salen de signo_movimiento(), la
+        #    misma función que usa la auditoría.
         actual = conn.execute("""
             SELECT l.id, l.cantidad, p.nombre, s.nombre AS sucursal
             FROM lotes l
@@ -677,15 +691,18 @@ def reporte_reconciliar():
             FROM movimientos WHERE lote_id IS NOT NULL
             GROUP BY lote_id, tipo
         """).fetchall():
-            movs.setdefault(r["lote_id"], {})[r["tipo"]] = float(r["c"] or 0)
+            signo = signo_movimiento(r["tipo"], r["c"])
+            if signo is None:
+                continue  # tipo desconocido: ya se bloqueó arriba
+            movs.setdefault(r["lote_id"], {})
+            movs[r["lote_id"]][r["tipo"]] = signo
 
         cambios = []
         for l in actual:
             por_tipo = movs.get(l["id"])
             if not por_tipo:
                 continue  # sin movimientos: no se toca
-            calculado = por_tipo.get("entrada", 0.0) - por_tipo.get("salida", 0.0) \
-                + por_tipo.get("ajuste", 0.0)
+            calculado = sum(por_tipo.values())
             if abs(calculado - float(l["cantidad"] or 0)) > 0.001:
                 cambios.append({
                     "lote_id": l["id"], "producto": l["nombre"],
@@ -701,6 +718,7 @@ def reporte_reconciliar():
         resultado = {
             "simulado": simular,
             "motivo": motivo or None,
+            "tipos_desconocidos": desconocidos,
             "movimientos_huerfanos": len(huerfanos),
             "movimientos_huerfanos_detalle": huerfanos[:50],
             "lotes_a_cambiar": len(cambios),
@@ -712,6 +730,15 @@ def reporte_reconciliar():
         if simular:
             conn.close()
             return ok(resultado)
+
+        if desconocidos:
+            conn.rollback()
+            conn.close()
+            return err(
+                "Hay movimientos de tipos que el sistema no maneja ("
+                + ", ".join(f"{d['tipo']}: {d['n']}" for d in desconocidos)
+                + "). Reconciliar los ignoraría y dejaría el stock mal, así que no "
+                  "se aplicó nada. Revisá esos movimientos primero.", 409)
 
         if propuestas_negativas:
             conn.rollback()

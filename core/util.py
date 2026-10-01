@@ -158,6 +158,39 @@ def stock_actual(conn, prod_id, sucursal_id=None):
     return stock_lotes(conn, prod_id)
 
 
+# Tipos de movimiento que el sistema sabe interpretar.
+#   entrada / salida: se guardan SIEMPRE positivas (la salida resta).
+#   ajuste: ya viene con signo (negativo = faltó, positivo = sobró).
+# Cualquier tipo fuera de esta lista es basura histórica (p. ej. el 'merma' que dejó
+# la feature revertida) y hay que detectarlo: si se ignora en silencio, auditoría y
+# reconciliación dan un stock equivocado sin avisar, que es justo lo que pasó con
+# el ACE (2.1 -> 3.1).
+TIPOS_MOVIMIENTO = ("entrada", "salida", "ajuste")
+
+
+def signo_movimiento(tipo, cantidad):
+    """Cantidad con su signo para sumar al stock, o None si el tipo no se conoce.
+
+    Fuente única de verdad: auditoría y reconciliación tienen que usar EXACTAMENTE
+    la misma regla, o una corrige lo que la otra marca como descuadre.
+    """
+    if tipo == "entrada":
+        return float(cantidad or 0)
+    if tipo == "salida":
+        return -float(cantidad or 0)
+    if tipo == "ajuste":
+        return float(cantidad or 0)
+    return None
+
+
+def tipos_movimiento_desconocidos(conn):
+    """[(tipo, n)] de los tipos que hay en `movimientos` pero el código no maneja."""
+    filas = conn.execute(
+        "SELECT tipo, COUNT(*) AS n FROM movimientos GROUP BY tipo").fetchall()
+    return [{"tipo": r["tipo"], "n": int(r["n"] or 0)}
+            for r in filas if (r["tipo"] or "") not in TIPOS_MOVIMIENTO]
+
+
 def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota, usuario,
                          sucursal_id=None, proveedor_id=None, vencimiento=None, lote=None):
     """Inserta un movimiento y actualiza los lotes de la sucursal en la misma transacción.
@@ -171,6 +204,8 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
     Si no se indica sucursal y el usuario (p. ej. superadmin) no tiene una asignada,
     se usa la primera sucursal principal como destino del stock."""
     from .lotes import entrada_lote, salida_fefo, stock_lotes
+    if tipo not in TIPOS_MOVIMIENTO:
+        raise ValueError(f"Tipo de movimiento desconocido: {tipo!r}")
     if sucursal_id is None:
         sucursal_id = sucursal_operativa()
     if sucursal_id is None:

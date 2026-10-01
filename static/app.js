@@ -2830,6 +2830,15 @@ function renderAuditoria(a, titulo) {
     html += hacerFicha(a.productos_con_vencimiento, true, 'Con vencimiento');
     html += `</div>`;
     html += `<p class="sinc-val"><strong>Valorización total: Bs ${fmtNum(a.total_valorizacion)}</strong> · Productos con stock: ${a.productos_con_stock} · Proveedores: ${a.proveedores}</p>`;
+    // Movimientos de tipos que el código no sabe interpretar: hay que borrarlos o
+    // corregirlos a mano, porque ninguna cuenta los incluye y por eso el stock
+    // "parece" cuadrar cuando en realidad no.
+    const desconocidos = a.tipos_desconocidos || [];
+    if (desconocidos.length) {
+        html += `<div class="sinc-alerta"><strong>Movimientos con tipo desconocido:</strong> `
+            + desconocidos.map((d) => `${esc(d.tipo || '(vacío)')} × ${d.n}`).join(' · ')
+            + `. Reconciliar está bloqueado hasta que los revises.</div>`;
+    }
     if (a.valorizacion.length) {
         html += `<div class="table-scroll"><table class="data-table"><thead><tr><th>Sucursal</th><th>Prod. con stock</th><th>Valor (Bs)</th></tr></thead><tbody>` +
             a.valorizacion.map((v) => `<tr><td>${esc(v.sucursal)}</td><td>${v.unid}</td><td><strong>Bs ${fmtNum(v.valor)}</strong></td></tr>`).join('') + `</tbody></table></div>`;
@@ -2874,6 +2883,13 @@ async function reconciliarInventario() {
         + `<li>Lotes que cambiarían: <strong>${n}</strong></li>`
         + `<li>Movimientos huérfanos a borrar: <strong>${h}</strong></li>`
         + `<li>Lotes que quedarían en negativo: <strong>${sim.lotes_negativos_sugeridos}</strong></li></ul>`;
+    const simDesconocidos = sim.tipos_desconocidos || [];
+    if (simDesconocidos.length) {
+        html += `<p class="text-red"><strong>Movimientos con tipo desconocido:</strong> `
+            + simDesconocidos.map((d) => `${esc(d.tipo || '(vacío)')} × ${d.n}`).join(' · ')
+            + `. Ninguna cuenta los incluye, así que el stock que se calcularía sería `
+            + `falso y no se puede aplicar.</p>`;
+    }
     if (n) {
         html += `<div class="table-scroll" style="max-height:280px"><table><thead><tr>`
             + `<th>Producto</th><th>Sucursal</th><th>Stock actual</th>`
@@ -2899,6 +2915,14 @@ async function reconciliarInventario() {
         caja.innerHTML += `<p class="text-red">No se puede aplicar: `
             + `${sim.lotes_negativos_sugeridos} lote(s) quedarían en negativo, lo que `
             + `significa que faltan movimientos. Revísalos primero.</p>`;
+        return;
+    }
+    if (sim.tipos_desconocidos && sim.tipos_desconocidos.length) {
+        caja.innerHTML += `<p class="text-red">No se puede aplicar: hay movimientos con `
+            + `tipo desconocido (`
+            + sim.tipos_desconocidos.map((d) => `${esc(d.tipo || '(vacío)')} × ${d.n}`).join(', ')
+            + `). Ninguna cuenta los incluye, así que el stock que se calcularía sería `
+            + `falso. Corregí o borrá esos movimientos primero.</p>`;
         return;
     }
 

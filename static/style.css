@@ -878,6 +878,11 @@ body.rol-encargado .panel-finance {
 .sinc-mal { background: rgba(207, 20, 29, .12); border-color: rgba(207, 20, 29, .5); }
 .sinc-val { margin: 8px 0; }
 .sinc-mal-row td { background: rgba(207, 20, 29, .08); }
+.sinc-alerta {
+    margin: 10px 0; padding: 10px 12px; border-radius: 8px; font-size: 14px;
+    background: rgba(207, 20, 29, .1); border: 1px solid rgba(207, 20, 29, .45);
+    color: #8b0000;
+}
 #sincronia-resultado { margin-top: 12px; }
 #sincronia-resultado h3 { margin: 0 0 4px; }
 
