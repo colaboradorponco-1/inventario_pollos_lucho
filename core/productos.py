@@ -487,13 +487,6 @@ def importar_productos():
     archivo = request.files.get("archivo")
     if not archivo:
         return err("No se envió ningún archivo")
-    # `wb` y `conn` se abren antes del try y se cierran en el finally. Antes, cualquier
-    # error a mitad de la importación (una columna rara, un tipo de dato, un corte de
-    # conexión) salía por el `except` de abajo y dejaba el archivo .xlsx abierto —que
-    # load_workbook mantiene abierto como zip— y una conexión MySQL viva. Con unos
-    # pocos intentos fallidos el servidor se queda sin conexiones y deja de responder.
-    wb = None
-    conn = None
     try:
         from openpyxl import load_workbook
         wb = load_workbook(archivo, read_only=True)
@@ -548,9 +541,13 @@ def importar_productos():
         sid_imp = None
         raw_suc = request.form.get("sucursal_id", "").strip()
         if raw_suc in ("", "0"):
+            conn.close()
+            wb.close()
             return err("Debes elegir una sucursal para importar los productos", 400)
         s = int(raw_suc)
         if not (es_gestion() or es_encargado_almacen(conn)) and s != sucursal_actual():
+            conn.close()
+            wb.close()
             return err("No tienes permisos para importar a esa sucursal", 403)
         sid_imp = s
         cat_fallback = request.form.get("categoria_id", "").strip()
@@ -628,6 +625,8 @@ def importar_productos():
             except Exception as e:
                 errores.append(f"Fila {row_idx}: {str(e)}")
         conn.commit()
+        conn.close()
+        wb.close()
         resumen = f"{importados} producto(s) importado(s)"
         if errores:
             resumen += f" · {len(errores)} error(es): " + "; ".join(errores[:8])
@@ -635,23 +634,4 @@ def importar_productos():
                 resumen += "..."
         return ok({"importados": importados, "errores": errores}, message=resumen)
     except Exception as e:
-        # La fila que falló se anota en `errores` y el resto sigue; solo si la
-        # transacción entera no aguanta se llega acá. Se revierte para no dejar
-        # productos a medio insertar.
-        if conn is not None:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
         return err(f"Error al leer el archivo: {str(e)}")
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
-        if wb is not None:
-            try:
-                wb.close()
-            except Exception:
-                pass

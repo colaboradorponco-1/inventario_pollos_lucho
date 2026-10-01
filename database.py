@@ -819,6 +819,15 @@ def migrar_esquema():
         # 6) Cada sucursal tendrá sus propios almacenes base (modelo jerárquico:
         # los almacenes pertenecen a una sucursal). Las filiales nuevas (La Paz)
         # reciben así "sus almacenes", no los del almacén principal.
+        cur.execute("""SELECT INDEX_NAME FROM information_schema.STATISTICS
+                       WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'almacenes'
+                       AND COLUMN_NAME = 'nombre'""", (MYSQL_DB,))
+        for _idx in cur.fetchall():
+            try:
+                cur.execute("ALTER TABLE almacenes DROP INDEX `%s`" % _idx["INDEX_NAME"])
+            except Exception:
+                pass
+        db.commit()
         cur.execute("SELECT id FROM sucursales ORDER BY id")
         _ids_suc = [f["id"] for f in cur.fetchall()]
         cur.execute("SELECT DISTINCT sucursal_id FROM almacenes WHERE sucursal_id IS NOT NULL")
@@ -830,43 +839,6 @@ def migrar_esquema():
             for nm in _BASE_ALMACENES:
                 cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (%s, %s, %s)",
                             (nm, "", sid))
-        db.commit()
-
-        # 7) UNIQUE de almacenes. El índice UNIQUE solo sobre `nombre` ya no
-        # corresponde al modelo jerárquico: "Cocina" en AP1 y "Cocina" en Siglo XX
-        # son almacenes distintos. Antes la migración se limitaba a BORRAR ese
-        # índice en cada arranque, así que la restricción desaparecía para siempre:
-        # se podían crear tres "Cocina" en la misma sucursal sin que saltara nada, y
-        # el mensaje de duplicado del POST nunca se llegaba a disparar.
-        # Ahora el nombre queda único POR SUCURSAL, que es lo que tiene que ser.
-        cur.execute("""SELECT INDEX_NAME FROM information_schema.STATISTICS
-                       WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'almacenes'
-                       AND COLUMN_NAME = 'nombre'""", (MYSQL_DB,))
-        for _idx in cur.fetchall():
-            try:
-                cur.execute("ALTER TABLE almacenes DROP INDEX `%s`" % _idx["INDEX_NAME"])
-            except Exception:
-                pass
-        db.commit()
-        if not _indice_existe(cur, "almacenes", "uq_alm_suc_nombre"):
-            _dups = cur.execute("""
-                SELECT sucursal_id, LOWER(TRIM(nombre)) AS n, COUNT(*) AS c
-                FROM almacenes WHERE nombre IS NOT NULL
-                GROUP BY sucursal_id, LOWER(TRIM(nombre)) HAVING COUNT(*) > 1
-            """).fetchall()
-            if _dups:
-                # No se puede crear el índice sin renombrar o borrar los repetidos.
-                # No es motivo para tumbar la app: se avisa y la API valida igual.
-                print(f"[migrar] AVISO: almacenes con nombre repetido en la misma "
-                      f"sucursal {[(d['sucursal_id'], d['n'], d['c']) for d in _dups]}: "
-                      f"no se crea uq_alm_suc_nombre hasta que se renombreen")
-            else:
-                try:
-                    cur.execute("ALTER TABLE almacenes ADD UNIQUE KEY "
-                                "uq_alm_suc_nombre (sucursal_id, nombre)")
-                    print("[migrar] UNIQUE (sucursal_id, nombre) agregado a almacenes")
-                except Exception:
-                    pass
         db.commit()
     finally:
         db.close()
