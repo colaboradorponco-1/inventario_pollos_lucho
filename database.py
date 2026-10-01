@@ -519,30 +519,33 @@ def _indice_existe(cur, tabla, indice):
     return cur.fetchone()["c"] > 0
 
 
-# Firmas exactas de los movimientos que dejaron las pruebas de la feature de
-# merma, que se revirtió. Son filas basura: el tipo 'merma' ya no existe en el
-# código, así que ni el FEFO ni el cálculo de stock las cuentan bien.
-_NOTA_MERMA_PRUEBA = "REVERSION de prueba de merma"
+# Firmas de los movimientos que dejaron las pruebas de la feature de merma, que se
+# revirtió. Son filas basura: el tipo 'merma' ya no existe en el código, así que ni
+# el FEFO ni el cálculo de stock las cuentan bien.
+# OJO con el acento: la nota real dice "REVERSIÓN", por eso se compara con un
+# prefijo que no lo incluye (LIKE 'REVERSI%') en vez de la nota completa.
+_NOTA_MERMA_PRUEBA = "REVERSI%de prueba de merma%"
 
 
 def _limpiar_movimientos_merma_prueba(cur):
     """Borra los movimientos de la merma de prueba y recalcula SOLO los lotes que
     esos movimientos tocaban.
 
-    Es deliberadamente estrecho: exige usuario 'admin', la nota exacta de la
-    reversión (o el tipo 'merma' huérfano) y la fecha exacta del día en que se
-    hicieron esas pruebas. Si no encuentra nada no hace nada (idempotente).
+    Es deliberadamente estrecho: exige producto 39 (el ACE del inventario diario),
+    usuario 'admin', la nota de la reversión (o el tipo 'merma' huérfano) y la fecha
+    exacta del día en que se hicieron esas pruebas. Si no encuentra nada no hace
+    nada (idempotente).
 
-    Antes esta limpieza la hizo 'reconciliar stock', que.reescribió el stock del
+    Antes esta limpieza la hizo 'reconciliar stock', que reescribió el stock del
     producto a 3.1 en lugar de 2.1. Acá se parte del estado real: se borra la
     basura y el stock vuelve a ser el que dicen los movimientos legítimos.
     """
     cur.execute("""
         SELECT id, lote_id FROM movimientos
-        WHERE usuario = 'admin'
+        WHERE producto_id = 39 AND usuario = 'admin'
           AND (tipo = 'merma' OR nota LIKE %s)
           AND fecha >= '2026-09-30 00:00:00' AND fecha < '2026-10-01 00:00:00'
-    """, (_NOTA_MERMA_PRUEBA + "%",))
+    """, (_NOTA_MERMA_PRUEBA,))
     filas = cur.fetchall()
     if not filas:
         return 0
