@@ -504,6 +504,11 @@ def inventario_cerrar(inv_id):
 @inventario_bp.route("/api/inventario-diario")
 @login_requerido
 def inventario_lista():
+    """Lista las planillas de inventario diario.
+
+    Acepta desde/hasta (fechas), busqueda (categoría o sucursal), categoria_id,
+    estado y sucursal_id. Sin paginación: son pocas por día (una por categoría) y
+    se piden todas para poder filtrar en el navegador."""
     conn = get_conn()
     sid = sucursal_actual()
     cond = []
@@ -511,6 +516,18 @@ def inventario_lista():
     if not (es_gestion() or es_encargado_almacen(conn)):
         cond.append("i.sucursal_id = %s")
         params.append(sid)
+    desde = request.args.get("desde", "").strip()
+    hasta = request.args.get("hasta", "").strip()
+    if desde:
+        cond.append("i.fecha >= %s")
+        params.append(desde)
+    if hasta:
+        cond.append("i.fecha <= %s")
+        params.append(hasta)
+    busqueda = request.args.get("busqueda", "").strip()
+    if busqueda:
+        cond.append("(c.nombre LIKE %s OR s.nombre LIKE %s)")
+        params += [f"%{busqueda}%"] * 2
     cat_arg = request.args.get("categoria_id")
     if cat_arg:
         cond.append("i.categoria_id = %s")
@@ -518,16 +535,38 @@ def inventario_lista():
     if request.args.get("estado"):
         cond.append("i.estado = %s")
         params.append(request.args["estado"])
-    q = """SELECT i.*, s.nombre AS sucursal_nombre, c.nombre AS categoria_nombre
+    if request.args.get("sucursal_id") and (es_gestion() or es_encargado_almacen(conn)):
+        cond.append("i.sucursal_id = %s")
+        params.append(int(request.args["sucursal_id"]))
+    q = """SELECT i.*, s.nombre AS sucursal_nombre, c.nombre AS categoria_nombre,
+                  (SELECT COUNT(*) FROM inventario_detalle d
+                   WHERE d.inventario_id = i.id) AS items_det,
+                  (SELECT COUNT(*) FROM inventario_detalle d
+                   WHERE d.inventario_id = i.id AND d.conteo_fisico IS NULL) AS items_sin_contar
            FROM inventario_diario i
            JOIN sucursales s ON s.id = i.sucursal_id
            LEFT JOIN categorias c ON c.id = i.categoria_id"""
     if cond:
         q += " WHERE " + " AND ".join(cond)
-    q += " ORDER BY i.fecha DESC, i.id DESC LIMIT 200"
+    # Abiertas primero (son las que hay que terminar), luego por fecha y categoría.
+    q += " ORDER BY (i.estado = 'abierto') DESC, i.fecha DESC, c.nombre ASC"
     rows = conn.execute(q, params).fetchall()
     conn.close()
-    return ok([dict(r) for r in rows])
+    lista = []
+    for r in rows:
+        d = dict(r)
+        # En una planilla ABIERTA los totales de la tabla solo se rellenan al cerrar,
+        # así que se calculan al vuelo para que la lista no muestre ceros falsos.
+        if d["estado"] != "cerrado":
+            contados = (d["items_det"] or 0) - (d["items_sin_contar"] or 0)
+            d["total_items"] = d["items_det"] or 0
+            d["total_faltantes"] = d["items_sin_contar"] or 0
+            d["total_sobrantes"] = 0
+            d["contados"] = contados
+        else:
+            d["contados"] = d["total_items"] or 0
+        lista.append(d)
+    return ok(lista)
 
 
 # --------------------------------------------------------------------------

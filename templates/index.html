@@ -477,11 +477,19 @@
 
             <div class="panel">
                 <h3 style="margin-bottom:12px">Historial de planillas</h3>
+                <div class="toolbar small">
+                    <span class="tb-tag">Filtros</span>
+                    <input type="date" id="inv-lista-desde" placeholder="Desde">
+                    <input type="date" id="inv-lista-hasta" placeholder="Hasta">
+                    <input type="text" id="inv-lista-busqueda" placeholder="Buscar por categoría o sucursal...">
+                    <button class="btn" id="btn-inv-lista-filtrar">Filtrar</button>
+                    <button class="btn" id="btn-inv-lista-limpiar">Limpiar</button>
+                </div>
                 <div class="table-scroll"><table class="data-table">
                         <thead><tr><th>Fecha</th><th>Categoría</th><th>Sucursal</th><th>Hora corte</th><th>Estado</th><th>Ítems</th><th>Faltan</th><th>Sobran</th><th>Valor dif.</th><th>Cerrada por</th><th></th></tr></thead>
                     <tbody id="inv-lista-tbody"></tbody>
                 </table></div>
-                <p class="empty" id="inv-lista-empty">Todavía no hay planillas registradas.</p>
+                <p class="empty" id="inv-lista-empty">No se encontraron planillas.</p>
             </div>
         </section>
 

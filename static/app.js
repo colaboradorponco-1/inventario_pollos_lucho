@@ -2922,7 +2922,15 @@ async function loadInventario() {
 
 async function listarInventario() {
     try {
-        const resp = await request(API + '/inventario-diario');
+        const desde = ($('#inv-lista-desde') || {}).value || '';
+        const hasta = ($('#inv-lista-hasta') || {}).value || '';
+        const busq = ($('#inv-lista-busqueda') || {}).value || '';
+        const qs = new URLSearchParams();
+        if (desde) qs.append('desde', desde);
+        if (hasta) qs.append('hasta', hasta);
+        if (busq) qs.append('busqueda', busq);
+        const url = API + '/inventario-diario' + (qs.toString() ? ('?' + qs.toString()) : '');
+        const resp = await request(url);
         const filas = resp.data || resp || [];
         const tb = $('#inv-lista-tbody');
         if (!tb) return;
@@ -2934,7 +2942,7 @@ async function listarInventario() {
                 <td>${esc(f.sucursal_nombre || '')}</td>
                 <td>${esc(f.hora_corte || '')}</td>
                 <td><span class="badge ${f.estado === 'cerrado' ? 'badge-compra' : 'badge-entrada'}">${f.estado === 'cerrado' ? 'Cerrada' : 'Abierta'}</span></td>
-                <td>${f.total_items || 0}</td>
+                <td>${f.total_items || 0}${(f.estado !== 'cerrado' && (f.contados || 0) > 0) ? ` <small style="color:var(--muted)">${f.contados} contados</small>` : ''}</td>
                 <td>${f.total_faltantes || 0}</td>
                 <td>${f.total_sobrantes || 0}</td>
                 <td>Bs ${esc(fmtNum(f.valor_diferencia || 0))}</td>
@@ -2950,6 +2958,14 @@ async function listarInventario() {
         }));
     } catch (e) { /* la lista no es crítica */ }
 }
+$('#btn-inv-lista-filtrar').addEventListener('click', listarInventario);
+$('#btn-inv-lista-limpiar').addEventListener('click', () => {
+    if ($('#inv-lista-desde')) $('#inv-lista-desde').value = '';
+    if ($('#inv-lista-hasta')) $('#inv-lista-hasta').value = '';
+    if ($('#inv-lista-busqueda')) $('#inv-lista-busqueda').value = '';
+    listarInventario();
+});
+on('#inv-lista-busqueda', 'input', debounce(() => listarInventario(), 300));
 
 async function crearInventario() {
     // Modal: pregunta si se inicia el inventario del día y por qué categoría.
