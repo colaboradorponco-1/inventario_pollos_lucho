@@ -816,18 +816,66 @@ def migrar_esquema():
                         (p1["id"],))
         db.commit()
 
-        # 6) Cada sucursal tendrá sus propios almacenes base (modelo jerárquico:
-        # los almacenes pertenecen a una sucursal). Las filiales nuevas (La Paz)
-        # reciben así "sus almacenes", no los del almacén principal.
-        cur.execute("""SELECT INDEX_NAME FROM information_schema.STATISTICS
-                       WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'almacenes'
-                       AND COLUMN_NAME = 'nombre'""", (MYSQL_DB,))
-        for _idx in cur.fetchall():
+        # 6) UNIQUE de almacenes: el nombre único POR SUCURSAL.
+        #
+        # El modelo jerárquico hace que "Cocina" en AP1 y "Cocina" en Siglo XX sean
+        # almacenes distintos, así que el UNIQUE solo sobre `nombre` estorba. Antes la
+        # migración lo borraba y ahí quedaba: la restricción desaparecía para siempre
+        # y se podían crear tres "Cocina" en la misma sucursal sin avisar.
+        #
+        # Va ANTES del paso 7 porque los almacenes base se llaman "Cocina"/"Limpieza"
+        # en todas las sucursales: con el UNIQUE global puesto, el segundo INSERT
+        # revienta.
+        #
+        # OJO con la API de pymysql: `cur.execute()` devuelve el rowcount (un int),
+        # NO el cursor — hay que pedir las filas en una llamada aparte. Encadenar
+        # `cur.execute(...).fetchall()` tira AttributeError y tumba la app al
+        # arrancar (pasó el 2026-10-01). Solo `conn.execute()` devuelve el cursor.
+        try:
+            cur.execute("""SELECT INDEX_NAME FROM information_schema.STATISTICS
+                           WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'almacenes'
+                           AND COLUMN_NAME = 'nombre'
+                           AND INDEX_NAME <> 'uq_alm_suc_nombre'
+                           GROUP BY INDEX_NAME""", (MYSQL_DB,))
+            for _idx in cur.fetchall():
+                try:
+                    cur.execute("ALTER TABLE almacenes DROP INDEX `%s`"
+                                % _idx["INDEX_NAME"])
+                except Exception:
+                    pass
+            db.commit()
+            if not _indice_existe(cur, "almacenes", "uq_alm_suc_nombre"):
+                cur.execute("""
+                    SELECT sucursal_id, LOWER(TRIM(nombre)) AS n, COUNT(*) AS c
+                    FROM almacenes WHERE nombre IS NOT NULL
+                    GROUP BY sucursal_id, LOWER(TRIM(nombre)) HAVING COUNT(*) > 1
+                """)
+                _dups = cur.fetchall()
+                if _dups:
+                    # Con repetidos no se puede crear el índice. No es motivo para
+                    # tumbar la app: se avisa y la API valida el duplicado igual.
+                    print("[migrar] AVISO: almacenes con nombre repetido en la misma "
+                          f"sucursal {[(d['sucursal_id'], d['n'], d['c']) for d in _dups]}: "
+                          "no se crea uq_alm_suc_nombre hasta que se renombreen")
+                else:
+                    cur.execute("ALTER TABLE almacenes ADD UNIQUE KEY "
+                                "uq_alm_suc_nombre (sucursal_id, nombre)")
+                    print("[migrar] UNIQUE (sucursal_id, nombre) agregado a almacenes")
+            db.commit()
+        except Exception as _e:
+            # Este bloque es una mejora, nunca un requisito para arrancar. Cualquier
+            # fallo acá (permisos, MySQL viejo, un índice en uso) se avisa y se sigue.
             try:
-                cur.execute("ALTER TABLE almacenes DROP INDEX `%s`" % _idx["INDEX_NAME"])
+                db.rollback()
             except Exception:
                 pass
-        db.commit()
+            print(f"[migrar] AVISO: no se pudo ajustar el UNIQUE de almacenes: {_e}")
+
+        # 7) Cada sucursal tendrá sus propios almacenes base (modelo jerárquico:
+        # los almacenes pertenecen a una sucursal). Las filiales nuevas (La Paz)
+        # reciben así "sus almacenes", no los del almacén principal.
+        # El INSERT va envuelto porque un UNIQUE por sucursal choca si la sucursal
+        # ya tiene uno con ese nombre, y eso tampoco puede impedir el arranque.
         cur.execute("SELECT id FROM sucursales ORDER BY id")
         _ids_suc = [f["id"] for f in cur.fetchall()]
         cur.execute("SELECT DISTINCT sucursal_id FROM almacenes WHERE sucursal_id IS NOT NULL")
@@ -837,8 +885,11 @@ def migrar_esquema():
             if sid in _con_alm:
                 continue
             for nm in _BASE_ALMACENES:
-                cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (%s, %s, %s)",
-                            (nm, "", sid))
+                try:
+                    cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) "
+                                "VALUES (%s, %s, %s)", (nm, "", sid))
+                except Exception:
+                    pass
         db.commit()
     finally:
         db.close()
