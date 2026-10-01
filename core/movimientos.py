@@ -22,9 +22,13 @@ def movimientos():
             return err("Datos inválidos")
         prod_id = data.get("producto_id")
         tipo = data.get("tipo")
-        if tipo not in ("entrada", "salida"):
+        if tipo not in ("entrada", "salida", "merma"):
             conn.close()
             return err("Tipo de movimiento inválido")
+        motivo = (data.get("motivo") or "").strip()
+        if tipo == "merma" and not motivo:
+            conn.close()
+            return err("La merma necesita un motivo")
         try:
             prod_id = int(prod_id)
         except (TypeError, ValueError):
@@ -72,18 +76,22 @@ def movimientos():
 
         stock_actual_val = stock_actual(conn, prod_id, sid)
 
-        if tipo == "salida" and stock_actual_val < cantidad:
+        # La merma también puede vaciar el almacén, así que exige stock igual que la
+        # salida: no se puede perder más de lo que hay.
+        if tipo in ("salida", "merma") and stock_actual_val < cantidad:
             conn.close()
             return err(f"Stock insuficiente. Disponible: {stock_actual_val}")
 
         registrar_movimiento(conn, prod_id, tipo, cantidad, precio, fecha,
                              nota, session.get("usuario", ""), proveedor_id=proveedor_id,
-                             sucursal_id=sid, vencimiento=data.get("vencimiento"))
+                             sucursal_id=sid, vencimiento=data.get("vencimiento"),
+                             motivo=motivo)
         conn.commit()
         conn.close()
         registrar_auditoria("Movimiento registrado",
-                            f"{tipo.capitalize()} {cantidad} de producto ID {prod_id}")
-        return ok(message="Movimiento registrado")
+                            f"{tipo.capitalize()} {cantidad} de producto ID {prod_id}"
+                            + (f" ({motivo})" if motivo else ""))
+        return ok(message=("Merma registrada" if tipo == "merma" else "Movimiento registrado"))
 
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
@@ -124,8 +132,8 @@ def movimientos():
             q += " AND m.tipo = ?"
             params.append(tipo)
     if filtro:
-        q += " AND (p.nombre LIKE ? OR m.nota LIKE ? OR m.usuario LIKE ? OR pr.nombre LIKE ?)"
-        params += [f"%{filtro}%"] * 4
+        q += " AND (p.nombre LIKE ? OR m.nota LIKE ? OR m.usuario LIKE ? OR pr.nombre LIKE ? OR m.motivo LIKE ?)"
+        params += [f"%{filtro}%"] * 5
     count_q = "SELECT COUNT(*) AS c FROM (" + q.replace("m.*, p.nombre AS producto_nombre, p.unidad, s.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre", "1") + ") AS sub"
     total = conn.execute(count_q, params).fetchone()["c"]
     offset, limit, pagina, por_pagina = paginar_params()
@@ -143,10 +151,13 @@ def movimientos_lote():
     tipo = data.get("tipo", "entrada")
     items = data.get("items", [])
     nota = data.get("nota", "")
+    motivo = (data.get("motivo") or "").strip()
     fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     proveedor_id = data.get("proveedor_id")
-    if tipo not in ("entrada", "salida"):
+    if tipo not in ("entrada", "salida", "merma"):
         return err("Tipo inválido")
+    if tipo == "merma" and not motivo:
+        return err("La merma necesita un motivo")
     if not items:
         return err("No hay productos para registrar")
     conn = get_conn()
@@ -175,18 +186,21 @@ def movimientos_lote():
             errores.append(f"{prod['nombre']}: el producto no pertenece a esta sucursal")
             continue
         stock_val = stock_actual(conn, prod_id, sid)
-        if tipo == "salida" and stock_val < cantidad:
+        if tipo in ("salida", "merma") and stock_val < cantidad:
             errores.append(f"{prod['nombre']}: stock insuficiente ({stock_val})")
             continue
         registrar_movimiento(conn, prod_id, tipo, cantidad,
                              float(item.get("precio_unitario", 0) or 0),
                              fecha, nota, session.get("usuario", ""),
                              proveedor_id=proveedor_id, sucursal_id=sid,
-                             vencimiento=item.get("vencimiento"))
+                             vencimiento=item.get("vencimiento"),
+                             motivo=motivo if tipo == "merma" else None)
         registrados += 1
     conn.commit()
     conn.close()
     msg = f"{registrados} movimiento(s) registrado(s)"
+    if tipo == "merma":
+        msg = f"{registrados} merma(s) registrada(s)"
     if errores:
         msg += ". Errores: " + "; ".join(errores)
     return ok({"registrados": registrados, "errores": errores}, message=msg)
@@ -287,7 +301,7 @@ def exportar_movimientos():
     sid_filtro = request.args.get("sucursal_id", "")
     conn = get_conn()
     q = """
-        SELECT m.fecha, p.nombre AS producto_nombre, p.unidad, m.tipo,
+        SELECT m.fecha, p.nombre AS producto_nombre, p.unidad, m.tipo, m.motivo,
                m.cantidad, m.precio_unitario, s.nombre AS sucursal_nombre,
                m.proveedor_id, pr.nombre AS proveedor_nombre, m.nota, m.usuario
         FROM movimientos m
@@ -316,20 +330,24 @@ def exportar_movimientos():
         q += " AND m.tipo = ?"
         params.append(tipo)
     if filtro:
-        q += " AND (p.nombre LIKE ? OR m.nota LIKE ? OR m.usuario LIKE ? OR pr.nombre LIKE ?)"
-        params += [f"%{filtro}%"] * 4
+        q += " AND (p.nombre LIKE ? OR m.nota LIKE ? OR m.usuario LIKE ? OR pr.nombre LIKE ? OR m.motivo LIKE ?)"
+        params += [f"%{filtro}%"] * 5
     q += " ORDER BY m.fecha DESC, m.id DESC"
     rows = conn.execute(q, params).fetchall()
     conn.close()
+    _tipos = {"entrada": "Entrada", "salida": "Salida", "merma": "Merma",
+              "ajuste": "Ajuste"}
     filas = [(r["fecha"], r["producto_nombre"], r["unidad"],
               "Compra" if r["tipo"] == "entrada" and r["proveedor_id"] else
-              ("Entrada" if r["tipo"] == "entrada" else "Salida"),
+              _tipos.get(r["tipo"], r["tipo"].capitalize()),
               r["cantidad"], round(r["precio_unitario"] or 0, 2),
-              r["sucursal_nombre"] or "", r["proveedor_nombre"] or "", r["nota"] or "", r["usuario"] or "") for r in rows]
+              r["sucursal_nombre"] or "", r["proveedor_nombre"] or "",
+              r["motivo"] or "", r["nota"] or "", r["usuario"] or "") for r in rows]
     return responder_excel("movimientos.xlsx",
                          ["Fecha y hora", "Producto", "Unidad", "Tipo", "Cantidad",
-                          "Precio (Bs)", "Sucursal", "Proveedor", "Nota", "Usuario"], filas,
-                         [20, 25, 10, 10, 10, 13, 15, 20, 25, 12])
+                          "Precio (Bs)", "Sucursal", "Proveedor", "Motivo", "Nota", "Usuario"],
+                         filas,
+                         [20, 25, 10, 10, 10, 13, 15, 20, 16, 25, 12])
 
 
 @movimientos_bp.route("/api/exportar/gastos")

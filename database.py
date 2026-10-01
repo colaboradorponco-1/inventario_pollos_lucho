@@ -319,6 +319,7 @@ def init_db():
                     "conteo_fisico DOUBLE,"
                     "final DOUBLE DEFAULT 0,"
                     "utilizada DOUBLE DEFAULT 0,"
+                    "merma DOUBLE DEFAULT 0,"
                     "diferencia DOUBLE DEFAULT 0,"
                     "costo_promedio DOUBLE DEFAULT 0,"
                     "precio_venta DOUBLE DEFAULT 0,"
@@ -563,6 +564,13 @@ def migrar_esquema():
             _add_columna(cur, "pedido_detalle", "tacho_fraccion DOUBLE DEFAULT 0")
         if not _col_existe(cur, "pedido_detalle", "tacho_texto"):
             _add_columna(cur, "pedido_detalle", "tacho_texto VARCHAR(50) DEFAULT ''")
+        # Merma / desperdicio: qué se perdió y por qué (se rompió, se pudrió, venció...).
+        if not _col_existe(cur, "movimientos", "motivo"):
+            _add_columna(cur, "movimientos", "motivo VARCHAR(50) DEFAULT ''")
+        # La merma del día va en la planilla como columna propia: si no, se mezclaría
+        # con «Utilizada» y el consumo real de la cocina quedaría inflado.
+        if not _col_existe(cur, "inventario_detalle", "merma"):
+            _add_columna(cur, "inventario_detalle", "merma DOUBLE DEFAULT 0")
         # Varias planillas por día: una por categoría (categoria_id 0 = todas).
         if not _col_existe(cur, "inventario_diario", "categoria_id"):
             _add_columna(cur, "inventario_diario", "categoria_id INT NOT NULL DEFAULT 0")

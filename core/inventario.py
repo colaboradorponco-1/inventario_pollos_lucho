@@ -90,20 +90,21 @@ def _movimientos_posteriores(conn, sucursal_id, fecha, hora_corte=None):
     cerrada a las 10:00, con ventas de las 08:00, volvería a subir ese stock al
     ajustar contra el conteo de las 07:00.
 
-    OJO con el signo: en `movimientos` las ENTRADAS y las SALIDAS se guardan siempre
-    como cantidad positiva (una salida de 10 es `cantidad = 10`, no -10) y quien las
-    resta es el lote. Solo el tipo 'ajuste' viene con signo (negativo = faltó).
-    Por eso el neto NO es un SUM(cantidad) pelado: hay que restar las salidas, o el
-    stock de referencia saldría corrido en el doble de lo vendido después del corte."""
+    OJO con el signo: en `movimientos` las ENTRADAS, las SALIDAS y las MERMAS se
+    guardan siempre como cantidad positiva (una salida de 10 es `cantidad = 10`, no
+    -10) y quien las resta es el lote. Solo el tipo 'ajuste' viene con signo (negativo
+    = faltó). Por eso el neto NO es un SUM(cantidad) pelado: hay que restar las salidas
+    y las mermas, o el stock de referencia saldría corrido en el doble de lo vendido
+    y lo perdido después del corte."""
     cond = "DATE(fecha) > %s"
     params = [sucursal_id, fecha]
     if hora_corte:
         cond = "(DATE(fecha) > %s OR (DATE(fecha) = %s AND TIME(fecha) > %s))"
         params = [sucursal_id, fecha, fecha, hora_corte]
     return {r["producto_id"]: r["s"] or 0.0 for r in conn.execute(
-        "SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad "
-        "ELSE cantidad END) AS s FROM movimientos "
-        "WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste') "
+        "SELECT producto_id, SUM(CASE WHEN tipo IN ('salida', 'merma') "
+        "THEN -cantidad ELSE cantidad END) AS s FROM movimientos "
+        "WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'merma', 'ajuste') "
         f"AND {cond} GROUP BY producto_id", params).fetchall()}
 
 
@@ -170,6 +171,7 @@ def inventario_crear():
                COALESCE(l.stock, 0) AS stock,
                COALESCE(ent.ingreso, 0) AS ingreso,
                COALESCE(sa.salida, 0) AS salida,
+               COALESCE(me.merma, 0) AS merma,
                COALESCE(aj.ajuste, 0) AS ajuste,
                COALESCE(po.post, 0) AS posterior
         FROM productos p
@@ -182,19 +184,25 @@ def inventario_crear():
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS salida FROM movimientos
                    WHERE sucursal_id = %s AND tipo = 'salida' AND DATE(fecha) = %s
                    GROUP BY producto_id) sa ON sa.producto_id = p.id
+        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS merma FROM movimientos
+                   WHERE sucursal_id = %s AND tipo = 'merma' AND DATE(fecha) = %s
+                   GROUP BY producto_id) me ON me.producto_id = p.id
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ajuste FROM movimientos
                    WHERE sucursal_id = %s AND tipo = 'ajuste' AND DATE(fecha) = %s
                    GROUP BY producto_id) aj ON aj.producto_id = p.id
-        LEFT JOIN (SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad
-                   ELSE cantidad END) AS post FROM movimientos
-                   WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste')
+        LEFT JOIN (SELECT producto_id, SUM(CASE WHEN tipo IN ('salida', 'merma')
+                   THEN -cantidad ELSE cantidad END) AS post FROM movimientos
+                   WHERE sucursal_id = %s
+                     AND tipo IN ('entrada', 'salida', 'merma', 'ajuste')
                      AND DATE(fecha) > %s
                    GROUP BY producto_id) po ON po.producto_id = p.id
         WHERE p.activo = 1 AND (l.stock > 0 OR ent.ingreso > 0 OR sa.salida > 0
-                                OR p.sucursal_id = %s OR p.sucursal_id IS NULL)
+                                OR me.merma > 0 OR p.sucursal_id = %s
+                                OR p.sucursal_id IS NULL)
           AND (%s = 0 OR p.categoria_id = %s)
         ORDER BY c.nombre, p.nombre
-    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid, cat_id, cat_id)).fetchall()
+    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid,
+          cat_id, cat_id)).fetchall()
 
     for f in filas:
         # 'stock' es el stock de HOY. Si la planilla es de un día anterior, primero
@@ -202,11 +210,14 @@ def inventario_crear():
         # al cierre de ese día; luego se deshacen los del propio día para llegar al
         # inicial, cada uno con su signo:
         #   stock_dia  = stock - posteriores
-        #   inicial    = stock_dia - ingreso + salida - ajuste
-        # 'ajuste' viene con signo (negativo = faltante, positivo = sobrante).
+        #   inicial    = stock_dia - ingreso + salida + merma - ajuste
+        # 'salida' y 'merma' bajan stock (cantidad positiva), así que se suman de
+        # vuelta. La merma NO va en 'salida' a propósito: no se consumió en la
+        # cocina, se perdió, y por eso no debe aparecer como «Utilizada» en la
+        # planilla. 'ajuste' viene con signo (negativo = faltante, positivo = sobrante).
         stock_dia = (f["stock"] or 0) - (f["posterior"] or 0)
         inicial = (stock_dia - (f["ingreso"] or 0)
-                   + (f["salida"] or 0) - (f["ajuste"] or 0))
+                   + (f["salida"] or 0) + (f["merma"] or 0) - (f["ajuste"] or 0))
         if inicial < 0:
             inicial = 0.0
         disponible = inicial + (f["ingreso"] or 0)
@@ -214,12 +225,12 @@ def inventario_crear():
             INSERT INTO inventario_detalle
                 (inventario_id, producto_id, categoria_id, categoria_nombre, producto_nombre,
                  codigo, unidad, stock_sistema, inicial, ingreso_dia, disponible,
-                 final, utilizada, diferencia, costo_promedio, precio_venta)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0, %s, %s)
+                 final, utilizada, merma, diferencia, costo_promedio, precio_venta)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, %s, 0, %s, %s)
         """, (inv_id, f["id"], f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
               f["nombre"], f["codigo"], f["unidad"] or "unidad", stock_dia,
               inicial, f["ingreso"] or 0, disponible, disponible,
-              f["costo_promedio"] or 0, f["precio_venta"] or 0))
+              f["merma"] or 0, f["costo_promedio"] or 0, f["precio_venta"] or 0))
 
     conn.commit()
     conn.close()
@@ -278,6 +289,7 @@ def inventario_detalle(inv_id):
             "conteo_fisico": conteo,
             "final": round(f["final"] or 0, 3),
             "utilizada": round(f["utilizada"] or 0, 3),
+            "merma": round(f["merma"] or 0, 3),
             "diferencia": diferencia,
             "costo_promedio": round(f["costo_promedio"] or 0, 2),
             "precio_venta": round(f["precio_venta"] or 0, 2),
@@ -308,6 +320,8 @@ def inventario_detalle(inv_id):
             "cantidad_sobrante": round(sum(l["diferencia"] for l in sobrantes), 3),
             "valor_diferencia": round(sum(l["diferencia"] * l["costo_promedio"] for l in lineas), 2),
             "total_utilizada": round(sum(l["utilizada"] for l in lineas), 3),
+            "total_merma": round(sum(l["merma"] for l in lineas), 3),
+            "valor_merma": round(sum(l["merma"] * l["costo_promedio"] for l in lineas), 2),
         },
     })
 
@@ -373,7 +387,12 @@ def inventario_guardar(inv_id):
                 ingreso = fila["ingreso_dia"] or 0
             disponible = inicial + ingreso
             final = conteo if conteo is not None else disponible
-            utilizada = max(disponible - final, 0)
+            # La merma ya se descontó del stock como movimiento propio, así que se
+            # resta del disponible ANTES de calcular lo utilizado. Si no, lo que se
+            # pudrió se sumaría al consumo de la cocina y «Utilizada» quedaría
+            # inflado por cada kilo que se perdió.
+            merma = fila["merma"] or 0
+            utilizada = max(disponible - merma - final, 0)
             if conteo is None:
                 # Sin conteo no hay diferencia: se calcula recién al cerrar.
                 diferencia = 0.0
@@ -563,7 +582,8 @@ def inventario_imprimir(inv_id):
             utilizada = ""
         else:
             final = f["final"] or 0
-            utilizada = round(max(disponible - (f["final"] or 0), 0), 3)
+            # La merma del día se resta antes de calcular lo utilizado (ver guardar).
+            utilizada = round(max(disponible - (f["merma"] or 0) - (f["final"] or 0), 0), 3)
         lineas.append({
             "categoria": f["categoria_nombre"] or "Sin categoría",
             "producto": f["producto_nombre"],
@@ -571,6 +591,7 @@ def inventario_imprimir(inv_id):
             "inicial": round(f["inicial"] or 0, 3),
             "ingreso_dia": round(f["ingreso_dia"] or 0, 3),
             "disponible": round(disponible, 3),
+            "merma": round(f["merma"] or 0, 3),
             "final": final,
             "utilizada": utilizada,
             "observaciones": f["observaciones"] or "",
@@ -583,6 +604,7 @@ def inventario_imprimir(inv_id):
                            lineas=lineas,
                            suma_inicial=round(sum(l["inicial"] for l in lineas), 3),
                            suma_ingreso=round(sum(l["ingreso_dia"] for l in lineas), 3),
+                           suma_merma=round(sum(l["merma"] for l in lineas), 3),
                            suma_disponible=round(sum(l["disponible"] for l in lineas), 3),
                            suma_final=round(sum(l["final"] for l in lineas
                                                 if l["contado"]), 3),
@@ -613,18 +635,19 @@ def inventario_excel(inv_id):
     conn.close()
 
     enc = ["Categoría", "Producto", "Unidad", "Inventario inicial", "Ingreso del día",
-           "Disponible del día", "Inventario final", "Cantidad utilizada",
-           "Diferencia", "Observaciones"]
+           "Merma del día", "Disponible del día", "Inventario final",
+           "Cantidad utilizada", "Diferencia", "Observaciones"]
     filas_xl = [(f["categoria_nombre"] or "Sin categoría", f["producto_nombre"],
                  f["unidad"] or "", f["inicial"] or 0, f["ingreso_dia"] or 0,
-                 (f["inicial"] or 0) + (f["ingreso_dia"] or 0), f["final"] or 0,
-                 f["utilizada"] or 0, f["diferencia"] or 0, f["observaciones"] or "")
+                 f["merma"] or 0, (f["inicial"] or 0) + (f["ingreso_dia"] or 0),
+                 f["final"] or 0, f["utilizada"] or 0, f["diferencia"] or 0,
+                 f["observaciones"] or "")
                 for f in filas]
 
     titulo = "PLANILLA DE INVENTARIO DIARIO DE ALMACÉN"
     return responder_excel(
         f"inventario_{inv['fecha']}.xlsx", enc, filas_xl,
-        [22, 32, 9, 17, 15, 18, 16, 18, 11, 40],
+        [22, 32, 9, 17, 15, 14, 18, 16, 18, 11, 40],
         titulo=titulo,
         subtitulos=[sucursal["nombre"] if sucursal else "",
                     f"Categoría: {nombre_cat}",
