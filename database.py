@@ -519,6 +519,49 @@ def _indice_existe(cur, tabla, indice):
     return cur.fetchone()["c"] > 0
 
 
+# Firmas exactas de los movimientos que dejaron las pruebas de la feature de
+# merma, que se revirtió. Son filas basura: el tipo 'merma' ya no existe en el
+# código, así que ni el FEFO ni el cálculo de stock las cuentan bien.
+_NOTA_MERMA_PRUEBA = "REVERSION de prueba de merma"
+
+
+def _limpiar_movimientos_merma_prueba(cur):
+    """Borra los movimientos de la merma de prueba y recalcula SOLO los lotes que
+    esos movimientos tocaban.
+
+    Es deliberadamente estrecho: exige usuario 'admin', la nota exacta de la
+    reversión (o el tipo 'merma' huérfano) y la fecha exacta del día en que se
+    hicieron esas pruebas. Si no encuentra nada no hace nada (idempotente).
+
+    Antes esta limpieza la hizo 'reconciliar stock', que.reescribió el stock del
+    producto a 3.1 en lugar de 2.1. Acá se parte del estado real: se borra la
+    basura y el stock vuelve a ser el que dicen los movimientos legítimos.
+    """
+    cur.execute("""
+        SELECT id, lote_id FROM movimientos
+        WHERE usuario = 'admin'
+          AND (tipo = 'merma' OR nota LIKE %s)
+          AND fecha >= '2026-09-30 00:00:00' AND fecha < '2026-10-01 00:00:00'
+    """, (_NOTA_MERMA_PRUEBA + "%",))
+    filas = cur.fetchall()
+    if not filas:
+        return 0
+    lote_ids = {f["lote_id"] for f in filas if f["lote_id"] is not None}
+    for f in filas:
+        cur.execute("DELETE FROM movimientos WHERE id = %s", (f["id"],))
+    # Solo se tocan los lotes que esas filas tocaban. Un lote sin movimientos
+    # queda en 0: ya no hay nada que lo respalde.
+    for lid in lote_ids:
+        cur.execute("""
+            UPDATE lotes SET cantidad = COALESCE((
+                SELECT SUM(IF(tipo = 'entrada', cantidad,
+                       IF(tipo = 'salida', -cantidad, cantidad)))
+                FROM movimientos WHERE lote_id = %s), 0)
+            WHERE id = %s
+        """, (lid, lid))
+    return len(filas)
+
+
 def migrar_esquema():
     """Adapta una BD preexistente (esquema SQLite antiguo) al modelo jerárquico
     por sucursal y añade la sección de pedidos/tickets. Es idempotente."""
@@ -645,6 +688,13 @@ def migrar_esquema():
                            SET d.unidad = COALESCE(NULLIF(TRIM(p.unidad), ''), 'unidad')
                            WHERE d.unidad IS NULL OR d.unidad = ''""")
             db.commit()
+
+        # Basura de las pruebas de la feature de merma (ya revertida en el código).
+        _borrados = _limpiar_movimientos_merma_prueba(cur)
+        if _borrados:
+            db.commit()
+            print(f"[migrar] { _borrados} movimiento(s) de prueba de merma borrados "
+                  f"y sus lotes recalculados")
 
         # 2) Migrar tabla stock a PK compuesta (producto_id, sucursal_id)
         if _col_existe(cur, "stock", "sucursal_id") is False:
