@@ -3,9 +3,11 @@ from datetime import datetime
 from functools import wraps
 from io import BytesIO, StringIO
 import socket
+import sys
 import unicodedata
 
-from flask import jsonify, redirect, request, session, send_file
+from flask import (jsonify, redirect, request, session, send_file,
+                   current_app, has_app_context)
 
 from database import get_conn
 
@@ -135,6 +137,20 @@ def clausula_sucursal(col="sucursal_id"):
 
 
 def registrar_auditoria(accion, detalle=""):
+    """Deja rastro de una acción en la tabla `auditoria`.
+
+    Antes tenía `except Exception: pass`, o sea que si la BD estaba caída, la tabla
+    no existía o el detalle era demasiado largo, el rastro desaparecía sin dejar
+    ni una línea en el log. Eso es peligroso justo en las operaciones delicadas
+    (reconciliación, borrados, cambios de stock) donde el rastro es lo único que
+    explica después qué pasó.
+
+    Ahora se registra la traza completa en el log del servidor y, fuera de una
+    petición (scripts, respaldos), avise por stderr. La operación que se auditaba
+    NO se interrumpe: perder el rastro es malo, pero tumbar la venta porque no se
+    pudo anotar es peor.
+    """
+    conn = None
     try:
         conn = get_conn()
         conn.execute(
@@ -142,9 +158,20 @@ def registrar_auditoria(accion, detalle=""):
             (datetime.now().isoformat(timespec="seconds"),
              session.get("usuario", ""), accion, detalle))
         conn.commit()
-        conn.close()
     except Exception:
-        pass
+        try:
+            if has_app_context():
+                current_app.logger.exception(
+                    "No se pudo registrar la auditoría de %r: %r", accion, detalle)
+        except Exception:
+            print(f"[auditoria] NO se pudo registrar {accion!r}: {detalle!r}",
+                  file=sys.stderr)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def stock_actual(conn, prod_id, sucursal_id=None):
