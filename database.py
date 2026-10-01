@@ -816,32 +816,23 @@ def migrar_esquema():
                         (p1["id"],))
         db.commit()
 
-        # 6) Cada sucursal tendrá sus propios almacenes base (modelo jerárquico:
-        # los almacenes pertenecen a una sucursal). Las filiales nuevas (La Paz)
-        # reciben así "sus almacenes", no los del almacén principal.
-        cur.execute("SELECT id FROM sucursales ORDER BY id")
-        _ids_suc = [f["id"] for f in cur.fetchall()]
-        cur.execute("SELECT DISTINCT sucursal_id FROM almacenes WHERE sucursal_id IS NOT NULL")
-        _con_alm = {r["sucursal_id"] for r in cur.fetchall()}
-        _BASE_ALMACENES = ["Almacén Principal", "Cocina", "Limpieza"]
-        for sid in _ids_suc:
-            if sid in _con_alm:
-                continue
-            for nm in _BASE_ALMACENES:
-                cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (%s, %s, %s)",
-                            (nm, "", sid))
-        db.commit()
-
-        # 7) UNIQUE de almacenes. El índice UNIQUE solo sobre `nombre` ya no
+        # 6) UNIQUE de almacenes. El índice UNIQUE solo sobre `nombre` ya no
         # corresponde al modelo jerárquico: "Cocina" en AP1 y "Cocina" en Siglo XX
         # son almacenes distintos. Antes la migración se limitaba a BORRAR ese
         # índice en cada arranque, así que la restricción desaparecía para siempre:
         # se podían crear tres "Cocina" en la misma sucursal sin que saltara nada, y
         # el mensaje de duplicado del POST nunca se llegaba a disparar.
         # Ahora el nombre queda único POR SUCURSAL, que es lo que tiene que ser.
+        #
+        # IMPORTANTE: esto va ANTES del paso 7. Los almacenes base del paso 7 se
+        # llaman "Cocina"/"Limpieza" en todas las sucursales, así que con el UNIQUE
+        # global todavía puesto el segundo INSERT revienta y tumba la app al
+        # arrancar. Y el filtro excluye `uq_alm_suc_nombre` a propósito, o el
+        # próximo arranque borraría el índice que acabamos de crear.
         cur.execute("""SELECT INDEX_NAME FROM information_schema.STATISTICS
                        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'almacenes'
-                       AND COLUMN_NAME = 'nombre'""", (MYSQL_DB,))
+                       AND COLUMN_NAME = 'nombre' AND INDEX_NAME <> 'uq_alm_suc_nombre'
+                       GROUP BY INDEX_NAME""", (MYSQL_DB,))
         for _idx in cur.fetchall():
             try:
                 cur.execute("ALTER TABLE almacenes DROP INDEX `%s`" % _idx["INDEX_NAME"])
@@ -866,6 +857,28 @@ def migrar_esquema():
                                 "uq_alm_suc_nombre (sucursal_id, nombre)")
                     print("[migrar] UNIQUE (sucursal_id, nombre) agregado a almacenes")
                 except Exception:
+                    pass
+        db.commit()
+
+        # 7) Cada sucursal tendrá sus propios almacenes base (modelo jerárquico:
+        # los almacenes pertenecen a una sucursal). Las filiales nuevas (La Paz)
+        # reciben así "sus almacenes", no los del almacén principal.
+        # Va después del paso 6 porque necesita el UNIQUE global ya retirado.
+        cur.execute("SELECT id FROM sucursales ORDER BY id")
+        _ids_suc = [f["id"] for f in cur.fetchall()]
+        cur.execute("SELECT DISTINCT sucursal_id FROM almacenes WHERE sucursal_id IS NOT NULL")
+        _con_alm = {r["sucursal_id"] for r in cur.fetchall()}
+        _BASE_ALMACENES = ["Almacén Principal", "Cocina", "Limpieza"]
+        for sid in _ids_suc:
+            if sid in _con_alm:
+                continue
+            for nm in _BASE_ALMACENES:
+                try:
+                    cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) "
+                                "VALUES (%s, %s, %s)", (nm, "", sid))
+                except Exception:
+                    # Si una sucursal repetida ya lo tiene (o si algún día el UNIQUE
+                    # por sucursal choca), no se debe tumbar el arranque.
                     pass
         db.commit()
     finally:
