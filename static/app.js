@@ -2601,6 +2601,9 @@ async function cargarSucursales() {
             <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s.nombre)}</span></td>
             <td>${s.direccion || '—'}</td>
             <td><span class="badge ${s.principal ? 'badge-bajo' : 'badge-entrada'}">${s.principal ? 'Principal' : 'Sucursal'}</span></td>
+            <td>${s.principal || s.provee
+                ? '<span class="badge badge-compra" title="Las otras sucursales pueden pedirle mercadería">Sí</span>'
+                : '<span class="respaldo-txt" title="Nadie le puede pedir mercadería desde el formulario de pedidos">No</span>'}</td>
             <td>${s.num_repartos}</td>
             <td>Bs ${fmtNum(s.total_repartido)}</td>
             <td>
@@ -2613,6 +2616,7 @@ async function cargarSucursales() {
         $('#suc-nombre').value = s.nombre;
         $('#suc-direccion').value = s.direccion;
         $('#suc-principal').checked = !!s.principal;
+        $('#suc-provee').checked = !!s.provee;
         $('#btn-guardar-sucursal').dataset.edit = s.id;
     }));
     $$('[data-del-suc]').forEach((b) => b.addEventListener('click', async () => {
@@ -2634,6 +2638,7 @@ $('#btn-guardar-sucursal').addEventListener('click', async () => {
         nombre: $('#suc-nombre').value.trim(),
         direccion: $('#suc-direccion').value.trim(),
         principal: $('#suc-principal').checked ? 1 : 0,
+        provee: $('#suc-provee').checked ? 1 : 0,
     };
     if (!body.nombre) return toast('Ingresa el nombre de la sucursal', 'err');
     try {
@@ -2646,6 +2651,7 @@ $('#btn-guardar-sucursal').addEventListener('click', async () => {
         $('#suc-nombre').value = '';
         $('#suc-direccion').value = '';
         $('#suc-principal').checked = false;
+        $('#suc-provee').checked = false;
         delete $('#btn-guardar-sucursal').dataset.edit;
         cargarSucursales();
         loadRepartos();
@@ -3535,6 +3541,26 @@ function sucPrincipalPed() {
     return (catalogos.sucursales || []).find((x) => x.principal) || null;
 }
 
+//TODOS los almacenes principales. Antes solo se tenía en cuenta el primero
+// (`sucPrincipalPed`), lo que con dos almacenes principales descartaba al
+// segundo en silencio: todo se pedía a Almacén 1 y el "disponible" que se veía
+// era solo el de Almacén 1.
+function sucPrincipalesPed() {
+    return (catalogos.sucursales || []).filter((x) => x.principal);
+}
+
+// A qué almacén se le pide. Hay dos almacenes principales y una sucursal puede
+// pedirle a los dos, asi que:
+//   - '' (Automático): cada producto va al almacén donde vive. Un mismo pedido
+//     puede repartirse entre varios almacenes, que es como funciona de verdad
+//     (América despacha a Siglo XX y Simón López, Simón López a América y Siglo XX).
+//   - id de un almacén: todo el pedido va a ese almacén.
+function pedidoDestinoActual() {
+    const sel = $('#pedido-destino');
+    if (!sel || !sel.value) return null;
+    return +sel.value;
+}
+
 function proveedorCantShow(p) {
     if (p.sucursal_id) return p.sucursal_nombre || String(p.sucursal_id);
     return (sucPrincipalPed() || {}).nombre || 'Almacén Principal';
@@ -3542,7 +3568,11 @@ function proveedorCantShow(p) {
 
 // Solo las sucursales que PROVEEN pueden aparecer como proveedoras en el
 // pedido: los almacenes principales proveen a todos; América y Simón López
-// proveen a las demás. Siglo XX no provee y queda fuera.
+// pueden configurarse como proveedoras. Siglo XX y La Paz no proveen.
+//
+// OJO: `provee` sí existe como columna en `sucursales`. Antes se leía aquí
+// sin que existiera, daba `undefined` y por eso TODAS las filiales quedaban
+// fuera como destino de pedido, y sus productos desaparecían del formulario.
 function proveeActivo(provId) {
     const s = (catalogos.sucursales || []).find((x) => x.id === provId);
     if (!s) return false;
@@ -3819,6 +3849,39 @@ on('#pedido-sucursal', 'change', () => {
 });
 on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
 
+// Cambiar de almacén recarga el "disponible": el número depende de dónde esté
+// la mercadería, así que hay que volver a pedirlo al servidor.
+on('#pedido-destino', 'change', async () => {
+    pedidoProvFiltro = '';
+    pedidoSel = {};
+    pedidoTacho = {};
+    renderPedidoDestinoAviso();
+    try {
+        await cargarProductosPedido();
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+    renderTarjetasPedido();
+});
+
+// Avisa si el almacén elegido no tiene mercadería: es fácil pedir contra un
+// almacén vacío y solo darse cuenta al final.
+function renderPedidoDestinoAviso() {
+    const el = $('#pedido-destino-aviso');
+    if (!el) return;
+    const dest = pedidoDestinoActual();
+    if (!dest) {
+        // En automático cada producto va a su almacén, así que el disponible
+        // mostrado ya es el de cada destino: no hay nada que advertir.
+        el.textContent = '';
+        return;
+    }
+    const conStock = pedidoProdsAll.filter((p) => (p.stock_prov || 0) > 0).length;
+    el.textContent = conStock
+        ? `${conStock} producto(s) con stock en este almacén.`
+        : 'Este almacén no tiene stock: pedirá 0. Carga mercadería antes de pedir aquí.';
+}
+
 on('#pedido-prov-btns', 'click', (e) => {
     const b = e.target.closest('[data-prov]');
     if (!b) return;
@@ -3826,15 +3889,36 @@ on('#pedido-prov-btns', 'click', (e) => {
     renderTarjetasPedido();
 });
 
+async function cargarProductosPedido() {
+    // El "disponible" (stock del proveedor menos lo apartado en pedidos
+    // pendientes) se pide para el almacén elegido cuando es uno concreto: hay
+    // dos almacenes principales y lo que hay en Almacén 1 no es lo que hay en
+    // Almacén 2. En automático no se manda destino y cada producto se mide
+    // contra su propio almacén.
+    const dest = pedidoDestinoActual();
+    const qs = new URLSearchParams({ por_pagina: '1000' });
+    if (dest) qs.set('destino_id', String(dest));
+    const respP = await request(API + '/productos?' + qs.toString());
+    pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
+}
+
 async function loadPedidos() {
     try {
         await loadCatalogos();
-        const respP = await request(API + '/productos?por_pagina=1000');
-        // El "disponible" (stock del proveedor menos lo apartado en pedidos
-        // pendientes) ya viene calculado por el servidor en cada producto,
-        // igual que en la pantalla de Productos.
-        pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
+        await cargarProductosPedido();
         const sucursales = await request(API + '/sucursales');
+        // Selector de almacén destino: solo los principales (a una filial no se
+        // le pide), y no se ofrece la propia sucursal porque el backend
+        // rechaza pedirte a ti mismo.
+        const selDest = $('#pedido-destino');
+        if (selDest) {
+            const yo = window.SUCURSAL_ID;
+            const ppales = sucursales.filter((x) => x.principal && x.id !== yo);
+            // "Automático" primero: es el comportamiento de siempre y el que
+            // reparte el pedido entre los almacenes de cada producto.
+            selDest.innerHTML = '<option value="">Automático (cada producto a su almacén)</option>'
+                + ppales.map((x) => `<option value="${x.id}">Todo a ${esc(x.nombre)}</option>`).join('');
+        }
         const opciones = opcionesSucursales(sucursales, 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
         if (filtroSel) filtroSel.innerHTML = opciones;
@@ -3861,6 +3945,7 @@ async function loadPedidos() {
         }
         $('#pedidos-info').textContent = 'Cada sucursal llena su pedido en 3 pasos. El "disponible" descuenta lo que ya quedó apartado en pedidos pendientes.';
         renderTarjetasPedido();
+        renderPedidoDestinoAviso();
         inicializarPestanasPedidos();
         cargarPestanaActiva();
     } catch (e) {
@@ -3952,10 +4037,15 @@ $('#form-pedido').addEventListener('submit', async (e) => {
             const p = (pedidoProdsAll || []).find((x) => x.id === +id);
             const max = maxPedido(p);
             if (v > max) mal.push(p ? p.nombre : ('#' + id));
-            const ppal = sucPrincipalPed();
-            const destino = p ? (p.sucursal_id ? +p.sucursal_id : (ppal ? +ppal.id : undefined)) : undefined;
+            // Destino del pedido. Si se elige un almacén concreto, TODO el
+            // pedido va ahí (y el "disponible" se calculó contra ese almacén).
+            // En automático no se manda destino por línea, y el backend usa el
+            // almacén donde vive cada producto — que es lo que permite que un
+            // mismo pedido vaya a varios almacenes a la vez.
+            const destino = pedidoDestinoActual();
             const tch = tachoDe(id);
-            detalle.push({ producto_id: +id, cantidad: v, destino_id: destino,
+            detalle.push({ producto_id: +id, cantidad: v,
+                           destino_id: destino || undefined,
                            tacho_fraccion: tch ? tch.f : 0, tacho_unidad: tch ? tch.u : 0 });
         }
     });

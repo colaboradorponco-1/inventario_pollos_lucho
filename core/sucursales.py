@@ -26,10 +26,11 @@ def sucursales():
             conn.close()
             return err("El nombre es obligatorio")
         principal = 1 if data.get("principal") else 0
+        provee = 1 if data.get("provee") else 0
         try:
             cur = conn.execute(
-                "INSERT INTO sucursales (nombre, direccion, principal) VALUES (?, ?, ?)",
-                (nombre, data.get("direccion", ""), principal))
+                "INSERT INTO sucursales (nombre, direccion, principal, provee) VALUES (?, ?, ?, ?)",
+                (nombre, data.get("direccion", ""), principal, provee))
             new_id = cur.lastrowid
             # Cada sucursal tiene su propio almacén (mantener sincronizados)
             conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
@@ -94,8 +95,9 @@ def sucursal(suc_id):
     if not nombre:
         conn.close()
         return err("El nombre es obligatorio")
-    conn.execute("UPDATE sucursales SET nombre = ?, direccion = ?, principal = ? WHERE id = ?",
-                 (nombre, data.get("direccion", ""), 1 if data.get("principal") else 0, suc_id))
+    conn.execute("UPDATE sucursales SET nombre = ?, direccion = ?, principal = ?, provee = ? WHERE id = ?",
+                 (nombre, data.get("direccion", ""), 1 if data.get("principal") else 0,
+                  1 if data.get("provee") else 0, suc_id))
     conn.execute("UPDATE almacenes SET nombre = ? WHERE sucursal_id = ?", (nombre, suc_id))
     conn.commit()
     conn.close()

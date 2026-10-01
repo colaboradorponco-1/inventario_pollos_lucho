@@ -24,6 +24,16 @@ pedidos_bp = Blueprint("pedidos", __name__)
 _ESTADOS = ("pendiente", "despachado", "cumplido")
 
 
+def _nombre_sucursal(conn, sucursal_id):
+    """Nombre de una sucursal para mensajes de error. Si no existe o no es un
+    id válido devuelve el propio id, que es más útil que 'None'."""
+    try:
+        f = conn.execute("SELECT nombre FROM sucursales WHERE id = ?", (sucursal_id,)).fetchone()
+    except Exception:
+        return sucursal_id
+    return (f or {}).get("nombre") or sucursal_id
+
+
 def _normalizar_fecha(v):
     """Convierte cualquier fecha a 'dd/mm/aaaa hh:mm' (acepta datetime, ISO y RFC/GMT).
     Si la hora es medianoche (00:00) se muestra solo la fecha."""
@@ -117,6 +127,14 @@ def pedidos():
         fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         destino_defecto = data.get("destino_id")
+        # Ids de las sucursales que pueden ser destino de un pedido. Se valida
+        # abajo contra esta lista: el destino lo elige la sucursal que pide y hay
+        # más de un almacén principal, así que no se puede asumir que sea el
+        # almacén del producto.
+        proveedores_validos = {
+            r["id"] for r in conn.execute(
+                "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1").fetchall()
+        }
         items = []
         for item in detalle:
             prod_id = item.get("producto_id")
@@ -162,6 +180,13 @@ def pedidos():
             if proveedor == sucursal_id:
                 conn.close()
                 return err(f"'{fila['nombre']}' es de tu propia sucursal; no puede pedirse a ti mismo")
+            # El destino tiene que ser una sucursal que de verdad provee (un
+            # almacén principal, o una filial marcada como proveedora). Sin esto
+            # se podía pedir a cualquier sucursal pasando su id a mano, incluso
+            # a una que no despacha.
+            if proveedor not in proveedores_validos:
+                conn.close()
+                return err(f"'{_nombre_sucursal(conn, proveedor)}' no es un almacén válido para pedir")
             texto_tacho = _texto_tacho(fraccion) if por_tacho else ""
             items.append((prod_id, fila["nombre"], cantidad, proveedor,
                           fila["unidad"] or "unidad", fraccion if por_tacho else 0,

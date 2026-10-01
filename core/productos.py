@@ -265,7 +265,9 @@ def productos():
     q += " LIMIT ? OFFSET ?"
     params += [limit, offset]
     rows = [dict(r) for r in conn.execute(q, params).fetchall()]
-    prov = _stock_disponible(conn)
+    dest = request.args.get("destino_id", "").strip()
+    destino = int(dest) if dest.isdigit() else None
+    prov = _stock_disponible(conn, destino_id=destino)
     for r in rows:
         r["stock_prov"] = prov.get(r["id"], 0)
     conn.close()
@@ -317,26 +319,48 @@ def producto_por_codigo():
     return ok(dict(row))
 
 
-def _stock_disponible(conn):
-    """Dict {producto_id: disponible}. "Disponible" = stock que tiene el proveedor
-    de cada producto menos lo ya apartado en pedidos pendientes (nadie pierde
-    stock por pedir lo mismo). Los productos globales se asocian al almacén
-    principal."""
+def _stock_disponible(conn, destino_id=None):
+    """Dict {producto_id: disponible} PARA UN ALMACÉN DETERMINADO.
+
+    "Disponible" = el stock que ese almacén puede despacho del producto, menos
+    lo ya apartado en pedidos pendientes (nadie pierde stock por pedir lo mismo).
+
+    Hay más de un almacén principal, así que el disponible ya no puede ser un
+    único número por producto: la misma mercadería puede estar en Almacén 1 y
+    no en Almacén 2. Por eso `destino_id` decide contra qué almacén se mide, y
+    es el mismo destino que se guarda en `pedido_detalle.destino_id`.
+
+    Sin `destino_id` se mantiene el comportamiento anterior (el almacén donde
+    vive el producto), que es lo que usan el resto de pantallas."""
     ppal = conn.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1").fetchone()
     if not ppal:
         return {}
+    # Sin `destino_id` cada producto se mide contra SU almacén (y los productos
+    # globales contra el primer almacén principal), que es lo que usan el resto
+    # de pantallas y no se toca.
+    # Con `destino_id` se mide contra ese almacén: cuenta lo que hay en sus
+    # lotes. No hace falta ningún caso especial para los productos globales,
+    # porque su stock también vive en lotes de un almacén concreto — si está en
+    # D suma, si está en otro no, que es exactamente lo que se quiere ver.
+    if destino_id:
+        cond_lote = "l.sucursal_id = %s"
+        params = (destino_id,)
+    else:
+        cond_lote = "l.sucursal_id = COALESCE(p.sucursal_id, %s)"
+        params = (ppal["id"],)
+    sql = """
+        SELECT l.producto_id AS id,
+               (COALESCE(SUM(CASE WHEN {cond_lote}
+                                  THEN l.cantidad ELSE 0 END), 0)
+                - COALESCE((SELECT SUM(d.cantidad) FROM pedido_detalle d
+                            JOIN pedidos pd ON pd.id = d.pedido_id
+                            WHERE d.producto_id = l.producto_id
+                              AND pd.estado = 'pendiente'), 0)) AS disp
+        FROM lotes l JOIN productos p ON p.id = l.producto_id
+        WHERE l.cantidad > 0 AND p.activo = 1
+        GROUP BY l.producto_id""".format(cond_lote=cond_lote)
     try:
-        rows = conn.execute("""
-            SELECT l.producto_id AS id,
-                   (COALESCE(SUM(CASE WHEN l.sucursal_id = COALESCE(p.sucursal_id, %s)
-                                      THEN l.cantidad ELSE 0 END), 0)
-                    - COALESCE((SELECT SUM(d.cantidad) FROM pedido_detalle d
-                                JOIN pedidos pd ON pd.id = d.pedido_id
-                                WHERE d.producto_id = l.producto_id
-                                  AND pd.estado = 'pendiente'), 0)) AS disp
-            FROM lotes l JOIN productos p ON p.id = l.producto_id
-            WHERE l.cantidad > 0 AND p.activo = 1
-            GROUP BY l.producto_id""", (ppal["id"],)).fetchall()
+        rows = conn.execute(sql, params).fetchall()
         return {int(r["id"]): float(max(0, r["disp"] or 0)) for r in rows}
     except Exception:
         return {}
@@ -346,9 +370,14 @@ def _stock_disponible(conn):
 @login_requerido
 def productos_disponible():
     """Disponible de cada producto para armar pedidos (stock del proveedor menos
-    lo apartado en pedidos pendientes)."""
+    lo apartado en pedidos pendientes).
+
+    `?destino_id=N` mide contra ese almacén: hay más de un almacén principal y
+    la misma mercadería puede estar en uno y no en el otro."""
     conn = get_conn()
-    disp = _stock_disponible(conn)
+    dest = request.args.get("destino_id", "").strip()
+    destino = int(dest) if dest.isdigit() else None
+    disp = _stock_disponible(conn, destino_id=destino)
     conn.close()
     return ok(disp)
 

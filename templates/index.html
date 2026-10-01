@@ -857,6 +857,8 @@
                             </div>
                         </div>
                         <div class="wiz-panel" data-paso="2">
+                            <label>Destino del pedido <select id="pedido-destino"></select></label>
+                            <span class="respaldo-txt" id="pedido-destino-aviso"></span>
                             <input type="text" id="pedido-buscar" placeholder="Buscar producto, sucursal, categoría..." autocomplete="off">
                             <div id="pedido-prov-btns" class="toolbar small"></div>
                             <div id="pedido-listado"></div>
@@ -1146,11 +1148,12 @@
             <div class="toolbar">
                 <input type="text" id="suc-nombre" placeholder="Nombre de la sucursal">
                 <input type="text" id="suc-direccion" placeholder="Dirección (opcional)">
-                <label class="chk"><input type="checkbox" id="suc-principal"> Principal</label>
+                        <label class="chk"><input type="checkbox" id="suc-principal"> Principal</label>
+                        <label class="chk" title="Si está marcado, las otras sucursales pueden pedirle mercadería a esta. Los almacenes principales ya proveen siempre."><input type="checkbox" id="suc-provee"> ¿Provee a otras?</label>
                 <button class="btn btn-primary" id="btn-guardar-sucursal">Guardar</button>
             </div>
             <div class="table-scroll"><table class="data-table">
-                <thead><tr><th>Sucursal</th><th>Dirección</th><th>Tipo</th><th>Repartos</th><th>Total repartido</th><th></th></tr></thead>
+                <thead><tr><th>Sucursal</th><th>Dirección</th><th>Tipo</th><th>¿Provee?</th><th>Repartos</th><th>Total repartido</th><th></th></tr></thead>
                 <tbody id="sucursales-tbody"></tbody>
             </table></div>
         </div>

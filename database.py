@@ -631,6 +631,13 @@ def migrar_esquema():
         # hace falta configurar el producto. 0 = no aplica.
         if not _col_existe(cur, "pedido_detalle", "tacho_unidad"):
             _add_columna(cur, "pedido_detalle", "tacho_unidad DOUBLE DEFAULT 0")
+        # Que sucursales además de los almacenes principales pueden ser destino
+        # de un pedido. Antes la interfaz leía `sucursales.provee` pero la
+        # columna nunca se creó, así que daba `undefined` y America y Simón López
+        # —que sí distribuyen— quedaban filtradas: sus productos no se podian
+        # pedir. La columna se crea ahora; 0 = no provee, que es lo seguro.
+        if not _col_existe(cur, "sucursales", "provee"):
+            _add_columna(cur, "sucursales", "provee TINYINT NOT NULL DEFAULT 0")
         db.commit()
         # Backfill: proveedores existentes van al primer almacén principal
         if _col_existe(cur, "proveedores", "sucursal_id"):
