@@ -2811,7 +2811,9 @@ $('#btn-inv-cerrar-panel')?.addEventListener('click', invClick(async () => {
     if (Digitado && INV_CERRADA === false) {
         const seguir = confirm('Hay conteos escritos sin guardar. ¿Guardar y cerrar el panel?');
         if (!seguir) return;
-        await guardarInventario();
+        try {
+            await guardarInventario();
+        } catch (e) { /* permisos o red: la X siempre cierra el panel */ }
     }
     INV_ID = null;
     INV_FILAS = [];
