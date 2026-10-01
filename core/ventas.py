@@ -27,10 +27,21 @@ def ventas():
         total = 0.0
         items_validados = []
         sid = sucursal_operativa()
+        if sid is None:
+            conn.close()
+            return err("Tu usuario no tiene sucursal asignada para registrar ventas", 400)
+        # El stock se valora UNA vez por producto, sumando todas las líneas que lo
+        # mencionan. Antes se comparaba cada línea contra el mismo stock sin
+        # descontar lo ya apartado: dos líneas del mismo producto pasaban las dos
+        # y la segunda moría en el FEFO con un error 500 en vez de 400.
+        pedido = {}
         for item in detalle:
             prod_id = item.get("producto_id")
             cantidad = flotante(item.get("cantidad"), 0)
             precio = flotante(item.get("precio_unitario"), 0)
+            if prod_id is None:
+                conn.close()
+                return err("Hay una línea sin producto")
             if cantidad is None or cantidad <= 0:
                 conn.close()
                 return err("La cantidad debe ser un número mayor a cero")
@@ -42,13 +53,19 @@ def ventas():
             if not fila:
                 conn.close()
                 return err("Producto no encontrado")
-            stock = stock_actual(conn, prod_id, sid)
-            if stock < cantidad:
-                conn.close()
-                return err(f"Stock insuficiente de {fila['nombre']}. Disponible: {stock}")
+            pedido[prod_id] = pedido.get(prod_id, 0.0) + cantidad
             items_validados.append((prod_id, fila["nombre"], cantidad, precio,
                                     fila["costo_promedio"] or 0, cantidad * precio))
             total += cantidad * precio
+
+        for prod_id, cantidad in pedido.items():
+            fila = conn.execute("SELECT nombre FROM productos WHERE id = %s", (prod_id,)).fetchone()
+            stock = stock_actual(conn, prod_id, sid)
+            if stock < cantidad:
+                conn.close()
+                return err(
+                    f"Stock insuficiente de {fila['nombre'] if fila else prod_id}. "
+                    f"Necesitas {cantidad} y hay {stock}.")
 
         cur = conn.execute(
             "INSERT INTO ventas (fecha, total, usuario, nota, sucursal_id) VALUES (?, ?, ?, ?, ?)",
@@ -118,10 +135,18 @@ def ventas():
 @login_requerido
 def venta_detalle(venta_id):
     conn = get_conn()
-    venta = conn.execute("SELECT * FROM ventas WHERE id = ?", (venta_id,)).fetchone()
+    # El listado filtra por sucursal; el detalle tiene que filtrar igual, o un
+    # encargado podría leer venta por venta las de otras sucursales (con costo).
+    venta = conn.execute(
+        "SELECT v.*, s.nombre AS sucursal_nombre FROM ventas v "
+        "LEFT JOIN sucursales s ON s.id = v.sucursal_id WHERE v.id = ?",
+        (venta_id,)).fetchone()
     if not venta:
         conn.close()
         return err("Venta no encontrada", 404)
+    if not (es_gestion() or es_encargado_almacen(conn) or venta["sucursal_id"] == sucursal_actual()):
+        conn.close()
+        return err("No tienes permisos para ver esta venta", 403)
     detalle = conn.execute(
         "SELECT * FROM venta_detalle WHERE venta_id = ?", (venta_id,)).fetchall()
     conn.close()

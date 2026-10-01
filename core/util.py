@@ -20,10 +20,22 @@ def ok_paginado(data, total, pagina, por_pagina):
                     "paginas": max(1, -(-total // por_pagina))})
 
 
+def _entero_query(nombre, defecto):
+    """Lee un query param que debe ser entero. Antes `?pagina=abc` reventaba con
+    500 en una docena de endpoints; ahora cae al valor por defecto."""
+    bruto = request.args.get(nombre, "").strip()
+    if not bruto:
+        return defecto
+    try:
+        return int(bruto)
+    except (TypeError, ValueError):
+        return defecto
+
+
 def paginar_params():
     """Extrae pagina/por_pagina de los query params. Retorna (offset, limit, pagina, por_pagina)."""
-    pagina = max(1, int(request.args.get("pagina", 1)))
-    por_pagina = min(2000, max(10, int(request.args.get("por_pagina", 50))))
+    pagina = max(1, _entero_query("pagina", 1))
+    por_pagina = min(2000, max(10, _entero_query("por_pagina", 50)))
     offset = (pagina - 1) * por_pagina
     return offset, por_pagina, pagina, por_pagina
 
@@ -206,19 +218,36 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
 
 def _recalcular_costo_promedio(conn, producto_id, stock_previo, cantidad, precio):
     """Actualiza productos.costo_promedio con el método de promedio móvil tras una
-    entrada con precio: nuevo = (stock_previo*costo + cantidad*precio) / (stock_previo+cantidad).
-    Si no hay stock previo, el costo pasa a ser el precio de esta entrada."""
+    entrada con precio: nuevo = (stock*costo + cantidad*precio) / (stock+cantidad).
+    Si no hay stock previo, el costo pasa a ser el precio de esta entrada.
+
+    `productos.costo_promedio` es UNA sola columna, pero el mismo nombre de producto
+    vive en varias sucursales. Antes el promedio se mezclaba con el stock de una sola
+    sucursal: comprar 100 kg a Bs 12 en La Paz con stock_previo=0 dejaba el costo en
+    12 para TODAS las sucursales, pisando el promedio de América. Ahora el stock que
+    entra en la fórmula es el total del producto en todos los almacenes, que es lo
+    que corresponde a una columna global.
+
+    El precio de compra es por kg/unidad, no depende de la sucursal: por eso el costo
+    promedio puede ser único. Lo que sí es por sucursal es el stock.
+    """
     if cantidad <= 0:
         return
     fila = conn.execute("SELECT costo_promedio FROM productos WHERE id = ?", (producto_id,)).fetchone()
     if not fila:
         return
     costo_previo = float(fila["costo_promedio"] or 0)
-    nuevo_stock = stock_previo + cantidad
-    if stock_previo <= 0:
+    total = conn.execute(
+        "SELECT COALESCE(SUM(cantidad), 0) AS s FROM lotes WHERE producto_id = %s",
+        (producto_id,)).fetchone()
+    stock_global = float(total["s"] or 0.0)
+    # Si ninguna sucursal tiene stock, se usa el precio de esta entrada.
+    base = stock_global if stock_global > 0 else 0.0
+    nuevo_stock = base + cantidad
+    if base <= 0:
         costo_nuevo = float(precio)
     else:
-        costo_nuevo = ((stock_previo * costo_previo) + (cantidad * float(precio))) / nuevo_stock
+        costo_nuevo = ((base * costo_previo) + (cantidad * float(precio))) / nuevo_stock
     conn.execute("UPDATE productos SET costo_promedio = ? WHERE id = ?",
                  (round(costo_nuevo, 2), producto_id))
 

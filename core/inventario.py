@@ -19,7 +19,7 @@ Cada día se pueden hacer VARIAS planillas por sucursal: una por categoría
 (UNIQUE sucursal_id + categoria_id + fecha). El encargado llena y cierra las de su
 propia sucursal; un admin/superadmin puede ver las de todas.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from flask import (Blueprint, current_app, redirect, render_template, request,
                    session)
@@ -33,11 +33,34 @@ from .util import (ok, err, login_requerido, responder_excel, sucursal_actual,
 inventario_bp = Blueprint("inventario", __name__)
 
 # Un día no puede tener más de 2 años hacia atrás ni 1 día hacia delante.
-_MIN_FECHA = (date.today().replace(year=date.today().year - 2)).isoformat()
+# Ojo: replace(year=...) falla el 29 de febrero en año bisiesto; por eso se
+# construye desde timedelta en vez de replace.
+_MIN_FECHA = (date.today() - timedelta(days=731)).isoformat()
 
 
 class _DatoInvalido(Exception):
     """Valor escrito a mano por el encargado que no se puede guardar."""
+
+
+def _validar_hora(valor):
+    """Normaliza la hora de corte a 'HH:MM' (o '' si no viene).
+
+    Antes se guardaba tal cual, sin validar. MySQL compara `TIME(fecha) > 'lo-que-sea'`
+    como texto, así que un valor raro (por ejemplo '99:99' o una fecha) hacía que la
+    comparación fuera siempre falsa: `_movimientos_posteriores` ignoraba los
+    movimientos del mismo día y el ajuste del cierre salía mal sin dar ningún error.
+    """
+    if valor is None:
+        return ""
+    s = str(valor).strip()
+    if not s:
+        return ""
+    for formato in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(s, formato).strftime("%H:%M")
+        except ValueError:
+            continue
+    return None  # formato inválido: el llamador responde 400
 
 
 def _fecha_iso(valor):
@@ -67,10 +90,18 @@ def _validar_fecha(valor):
         return None
 
 
-def _sucursal_de_planilla(conn, inv_id, escribir=False):
+def _sucursal_de_planilla(conn, inv_id, escribir=False, bloquear=False):
     """Devuelve (planilla, ok). Verifica que el usuario tenga acceso a esa planilla:
-    el encargado solo a las de su sucursal; gestión a todas."""
-    inv = conn.execute("SELECT * FROM inventario_diario WHERE id = ?", (inv_id,)).fetchone()
+    el encargado solo a las de su sucursal; gestión a todas.
+
+    `bloquear=True` añade FOR UPDATE para que nadie pueda tocar la fila mientras
+    se opera sobre ella. Sin esto, dos cierres simultáneos de la misma planilla
+    pasaban los dos la comprobación de 'estado' y generaban los ajustes dos veces.
+    """
+    sql = "SELECT * FROM inventario_diario WHERE id = ?"
+    if bloquear:
+        sql += " FOR UPDATE"
+    inv = conn.execute(sql, (inv_id,)).fetchone()
     if not inv:
         return None, False
     sid = sucursal_actual()
@@ -145,7 +176,7 @@ def inventario_crear():
     if fecha < _MIN_FECHA or fecha > date.today().isoformat():
         conn.close()
         return err("Fecha fuera de rango", 400)
-    hora = (request.args.get("hora") or datetime.now().strftime("%H:%M"))[:20]
+    hora = _validar_hora(request.args.get("hora")) or datetime.now().strftime("%H:%M")
 
     try:
         cat_id = int(request.args.get("categoria_id") or 0)
@@ -432,9 +463,13 @@ def inventario_guardar(inv_id):
         conn.close()
         return err(str(e), 400)
 
+    hora_nueva = _validar_hora(data.get("hora_corte"))
+    if hora_nueva is None:
+        conn.close()
+        return err("La hora de corte no tiene un formato válido (debe ser HH:MM)", 400)
     conn.execute("UPDATE inventario_diario SET observaciones = %s, hora_corte = %s WHERE id = %s",
                  ((data.get("observaciones") or inv["observaciones"] or "")[:2000] or None,
-                  (data.get("hora_corte") or inv["hora_corte"] or "")[:20] or None, inv_id))
+                  hora_nueva or inv["hora_corte"] or None, inv_id))
     conn.commit()
     conn.close()
     return ok(message="Conteo guardado")
@@ -450,20 +485,27 @@ def inventario_cerrar(inv_id):
     'ajuste' para que el stock del sistema coincida con el conteo físico. La operación
     es idempotente: una planilla cerrada no se vuelve a cerrar."""
     conn = get_conn()
-    inv, permitido = _sucursal_de_planilla(conn, inv_id)
+    # FOR UPDATE: bloquea la fila para que un doble clic o dos usuarios a la vez
+    # no puedan pasar los dos la comprobación de estado y aplicar los ajustes dos
+    # veces (eso inflaría el stock con los sobrantes).
+    inv, permitido = _sucursal_de_planilla(conn, inv_id, bloquear=True)
     if not permitido:
+        conn.rollback()
         conn.close()
         return err("Planilla no encontrada", 404)
     if inv["estado"] == "cerrado":
+        conn.rollback()
         conn.close()
         return err("La planilla ya está cerrada", 400)
     if inv["sucursal_id"] != sucursal_operativa():
+        conn.rollback()
         conn.close()
         return err("Solo puedes cerrar la planilla de tu sucursal", 403)
 
     filas = _detalle(conn, inv_id)
     sin_contar = [f for f in filas if f["conteo_fisico"] is None]
     if sin_contar:
+        conn.rollback()
         conn.close()
         return err(f"Faltan {len(sin_contar)} productos por contar antes de cerrar", 400)
 
@@ -502,10 +544,12 @@ def inventario_cerrar(inv_id):
                 f"Inventario diario {inv['fecha']} (ajuste "
                 f"{'faltante' if dif < 0 else 'sobrante'})",
                 session.get("usuario", ""), inv["sucursal_id"])
-        except (ValueError, Exception) as e:
+        except Exception as e:
             # Un ajuste a la baja no puede dejar el stock en negativo o hay otro error.
-            import traceback
-            traceback.print_exc()
+            # Se revierte TODO, incluyendo los ajustes ya aplicados: la planilla queda
+            # abierta y el stock como estaba.
+            current_app.logger.exception("Error ajustando %s en la planilla %s",
+                                         f["producto_nombre"], inv_id)
             conn.rollback()
             conn.close()
             return err(f"{f['producto_nombre']}: {str(e)}", 400)
@@ -518,13 +562,20 @@ def inventario_cerrar(inv_id):
             "UPDATE inventario_detalle SET diferencia = %s WHERE id = %s",
             [(d, lid) for lid, d in dif_por_linea.items()])
 
-    conn.execute("""
+    # El estado solo se cambia si sigue 'abierto'. La fila está bloqueada con
+    # FOR UPDATE desde el inicio del cierre, así que la condición es una red de
+    # seguridad extra: si algo la cerró en medio, no se pisa.
+    cur = conn.execute("""
         UPDATE inventario_diario
         SET estado = 'cerrado', cerrado_por = %s, fecha_hora_cierre = %s,
             total_items = %s, total_faltantes = %s, total_sobrantes = %s, valor_diferencia = %s
-        WHERE id = %s
+        WHERE id = %s AND estado = 'abierto'
     """, (session.get("usuario", ""), fecha_cierre, total_items, faltantes, sobrantes,
           round(valor_dif, 2), inv_id))
+    if cur.rowcount != 1:
+        conn.rollback()
+        conn.close()
+        return err("La planilla se cerró mientras se ajustaba. No se aplicó ningún cambio.", 409)
     conn.commit()
     conn.close()
     registrar_auditoria("Planilla de inventario cerrada",

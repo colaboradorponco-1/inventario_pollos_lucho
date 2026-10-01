@@ -37,6 +37,25 @@ def _pide_tacho(data):
     return 1 if str(v).lower() in ("1", "true", "on", "yes") else 0
 
 
+def _stock_sucursal_permitido(conn, ver_todo, sid):
+    """Valida ?stock_sucursal= antes de usarlo.
+
+    Sin esta comprobación cualquier encargado podía pedir el stock de OTRA
+    sucursal y conocer sus existencias. Devuelve (sucursal_id, respuesta_de_error).
+    """
+    pedido = request.args.get("stock_sucursal", "").strip()
+    try:
+        pedido = int(pedido)
+    except (TypeError, ValueError):
+        return None, err("El identificador de sucursal no es válido", 400)
+    existe = conn.execute("SELECT id FROM sucursales WHERE id = %s", (pedido,)).fetchone()
+    if not existe:
+        return None, err("La sucursal no existe", 400)
+    if not (ver_todo or pedido == sid):
+        return None, err("No tienes permisos para ver el stock de esa sucursal", 403)
+    return pedido, None
+
+
 def scope_productos(ver_todo, sid, scope):
     """(condición_sql, params) para filtrar productos por ámbito de visibilidad.
 
@@ -152,6 +171,15 @@ def productos():
     estado = request.args.get("estado", "").strip()
     sucursal = request.args.get("sucursal", "").strip()
     sid = sucursal_actual()
+    # Cualquier valor no numérico en un filtro devolvía 500 en vez de 400.
+    def _id_o_none(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    categoria = _id_o_none(categoria) if categoria else None
+    proveedor = _id_o_none(proveedor) if proveedor else None
+    sucursal = _id_o_none(sucursal) if sucursal else None
     # Admin, superadmin y encargados de almacén principal ven TODO el catálogo
     # (sus productos globales + los de todas las sucursales).
     ver_todo = es_gestion() or es_encargado_almacen(conn)
@@ -159,7 +187,10 @@ def productos():
     # de ventas/repartos usa el stock de la sucursal del usuario, no el total).
     stock_sid = None
     if request.args.get("stock_sucursal", "").strip():
-        stock_sid = int(request.args.get("stock_sucursal"))
+        stock_sid, e = _stock_sucursal_permitido(conn, ver_todo, sid)
+        if e:
+            conn.close()
+            return e
     elif not ver_todo and sid is not None:
         stock_sid = sid
     if stock_sid is not None:
@@ -209,13 +240,12 @@ def productos():
         q += " AND p.proveedor_id = ?"
         params.append(proveedor)
     if sucursal:
-        suc = int(sucursal)
-        if suc == 0:
+        if sucursal == 0:
             q += " AND p.sucursal_id IS NULL"
         else:
             # El scope de visibilidad limita a filiales: solo lo que pueden ver
             q += " AND p.sucursal_id = ?"
-            params.append(suc)
+            params.append(sucursal)
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":
@@ -253,7 +283,10 @@ def producto_por_codigo():
     ver_todo = es_gestion() or es_encargado_almacen(conn)
     stock_sid = None
     if request.args.get("stock_sucursal", "").strip():
-        stock_sid = int(request.args.get("stock_sucursal"))
+        stock_sid, e = _stock_sucursal_permitido(conn, ver_todo, sid)
+        if e:
+            conn.close()
+            return e
     elif not ver_todo and sid is not None:
         stock_sid = sid
     if stock_sid is not None:
@@ -376,12 +409,23 @@ def producto(prod_id):
     # Ajuste directo de stock: registra la diferencia como movimiento para mantener la sincronía
     stock_nuevo = data.get("stock")
     if stock_nuevo is not None:
-        stock_nuevo = float(stock_nuevo or 0)
+        try:
+            stock_nuevo = float(stock_nuevo or 0)
+        except (TypeError, ValueError):
+            conn.rollback()
+            conn.close()
+            return err("El stock debe ser un número", 400)
         if stock_nuevo < 0:
+            conn.rollback()
             conn.close()
             return err("El stock no puede ser negativo", 400)
-        sid_stock = fila["sucursal_id"] or sucursal_operativa()
+        # El ajuste va en la sucursal NUEVA (la que se acaba de guardar, sid_p).
+        # Antes se usaba `fila["sucursal_id"]`, que es el valor VIEJO de antes del
+        # UPDATE: si un admin movía el producto de América a La Paz y mandaba stock,
+        # el movimiento quedaba en América y el stock de La Paz no cambiaba.
+        sid_stock = sid_p or sucursal_operativa()
         if not sid_stock:
+            conn.rollback()
             conn.close()
             return err("No tienes una sucursal asignada para ajustar el stock", 400)
         actual = stock_actual(conn, prod_id, sid_stock)

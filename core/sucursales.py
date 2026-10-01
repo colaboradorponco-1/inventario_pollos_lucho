@@ -244,6 +244,10 @@ def reparto_detalle(reparto_id):
     if not reparto:
         conn.close()
         return err("Reparto no encontrado", 404)
+    # Igual que en ventas: el listado filtra por sucursal, el detalle también.
+    if not (es_gestion() or es_encargado_almacen(conn) or reparto["sucursal_id"] == sucursal_actual()):
+        conn.close()
+        return err("No tienes permisos para ver este reparto", 403)
     detalle = conn.execute(
         "SELECT * FROM reparto_detalle WHERE reparto_id = ?", (reparto_id,)).fetchall()
     conn.close()
