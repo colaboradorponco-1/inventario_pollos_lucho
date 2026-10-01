@@ -40,8 +40,6 @@
         tbody td.cat { font-size: 10.5px; color: #8a6d00; }
         tbody td.prod { font-weight: 600; }
         tbody td.obs { font-size: 10.5px; color: #555; }
-        /* La merma se imprime en ámbar para que no se confunda con el consumo. */
-        tbody td.merma, tfoot td.merma { color: #b45309; font-weight: 600; }
         .vacia { display: inline-block; min-width: 52px; border-bottom: 1px solid #999; height: 13px; }
         .obs-vacia { display: inline-block; width: 100%; border-bottom: 1px solid #ddd; height: 13px; }
         .totales { margin-top: -1px; }
@@ -98,16 +96,15 @@
             <thead>
                 <tr>
                     <th style="width:3%">#</th>
-                    <th class="izq" style="width:13%">Categoría</th>
-                    <th class="izq" style="width:22%">Producto</th>
-                    <th style="width:6%">Unidad</th>
-                    <th style="width:8%">Inventario<br>Inicial</th>
-                    <th style="width:8%">Ingreso<br>del día</th>
-                    <th style="width:8%">Disp.<br>Día</th>
-                    <th style="width:7%">Merma</th>
-                    <th style="width:9%">Inv.<br>Final</th>
-                    <th style="width:8%">Cantidad<br>Utilizada</th>
-                    <th style="width:13%">Observaciones</th>
+                    <th class="izq" style="width:15%">Categoría</th>
+                    <th class="izq" style="width:25%">Producto</th>
+                    <th style="width:7%">Unidad</th>
+                    <th style="width:9%">Inventario<br>Inicial</th>
+                    <th style="width:9%">Ingreso<br>del día</th>
+                    <th style="width:9%">Disp.<br>Día</th>
+                    <th style="width:10%">Inv.<br>Final</th>
+                    <th style="width:9%">Cantidad<br>Utilizada</th>
+                    <th style="width:14%">Observaciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -120,13 +117,12 @@
                     <td>{{ l.inicial }}</td>
                     <td>{{ l.ingreso_dia }}</td>
                     <td><strong>{{ l.disponible }}</strong></td>
-                    <td class="merma">{{ l.merma }}</td>
                     <td>{% if l.contado %}{{ l.final }}{% else %}<span class="vacia"></span>{% endif %}</td>
                     <td>{% if l.contado %}{{ l.utilizada }}{% else %}<span class="vacia"></span>{% endif %}</td>
                     <td class="obs">{% if l.observaciones %}{{ l.observaciones }}{% else %}<span class="obs-vacia"></span>{% endif %}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="11" style="padding:18px;text-align:center;color:#8a8a8a">La planilla no tiene productos.</td></tr>
+                <tr><td colspan="10" style="padding:18px;text-align:center;color:#8a8a8a">La planilla no tiene productos.</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -138,7 +134,6 @@
                     <td>{{ suma_inicial }}</td>
                     <td>{{ suma_ingreso }}</td>
                     <td><strong>{{ suma_disponible }}</strong></td>
-                    <td class="merma">{{ suma_merma }}</td>
                     <td>{{ suma_final }}</td>
                     <td>{{ total_utilizada }}</td>
                     <td class="obs"></td>
@@ -149,7 +144,6 @@
         <div class="resumen">
             <span>Ítems: <strong>{{ lineas|length }}</strong></span>
             <span>Total utilizada: <strong>{{ total_utilizada }}</strong></span>
-            <span>Total merma: <strong>{{ suma_merma }}</strong></span>
             <span>{% if inv.estado != 'cerrado' %}Pendiente de cerrar: escribir el inventario final y firmar.{% else %}Planilla cerrada y stock ajustado.{% endif %}</span>
         </div>
 

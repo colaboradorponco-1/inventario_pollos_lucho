@@ -147,23 +147,15 @@ def stock_actual(conn, prod_id, sucursal_id=None):
 
 
 def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota, usuario,
-                         sucursal_id=None, proveedor_id=None, vencimiento=None, lote=None,
-                         motivo=None):
+                         sucursal_id=None, proveedor_id=None, vencimiento=None, lote=None):
     """Inserta un movimiento y actualiza los lotes de la sucursal en la misma transacción.
 
     - entrada: acumula en el lote con esa fecha de vencimiento (None = lote general).
     - salida:   consume por FEFO (primero el lote que vence antes); puede generar
                 varios movimientos si la salida abarca más de un lote.
-    - merma:    como la salida (baja stock, cantidad positiva) pero además guarda el
-                motivo de la pérdida. NO cuenta como consumo en los reportes de venta.
     - ajuste:   corrige el stock a una cantidad contada en el inventario físico.
                 cantidad negativa = faltó (baja stock), positiva = sobró (sube stock).
                 No recalcula el costo promedio, porque no es una compra real.
-
-    OJO con el signo: en la tabla `movimientos`, tanto 'salida' como 'merma' se
-    guardan con cantidad POSITiva (10 unidades perdidas = cantidad 10, no -10); lo
-    que las resta es el lote. Solo 'ajuste' llega con signo. Cualquier cálculo que
-    sume movimientos tiene que distinguir 'merma' de 'entrada' o suma de más el stock.
     Si no se indica sucursal y el usuario (p. ej. superadmin) no tiene una asignada,
     se usa la primera sucursal principal como destino del stock."""
     from .lotes import entrada_lote, salida_fefo, stock_lotes
@@ -171,8 +163,6 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
         sucursal_id = sucursal_operativa()
     if sucursal_id is None:
         raise ValueError("No se puede registrar el movimiento sin una sucursal definida")
-    if tipo == "merma" and not (motivo or "").strip():
-        raise ValueError("La merma necesita un motivo")
     if tipo == "ajuste":
         cantidad = float(cantidad)
         if abs(cantidad) < 1e-9:
@@ -208,10 +198,9 @@ def registrar_movimiento(conn, producto_id, tipo, cantidad, precio, fecha, nota,
     for lote_id, take in consumidos:
         conn.execute("""
             INSERT INTO movimientos (producto_id, tipo, cantidad, precio_unitario, fecha,
-                                     sucursal_id, lote_id, nota, usuario, motivo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (producto_id, tipo, take, precio, fecha, sucursal_id, lote_id, nota, usuario,
-              (motivo or "").strip() or None))
+                                     sucursal_id, lote_id, nota, usuario)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (producto_id, tipo, take, precio, fecha, sucursal_id, lote_id, nota, usuario))
     return None
 
 

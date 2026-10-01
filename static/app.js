@@ -57,26 +57,6 @@ function fmtFechaHoraES(valor) {
 
 const esc = (s) => { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; };
 
-// Etiqueta y color de un movimiento. La merma se pinta aparte de la salida:
-// no es consumo en cocina, es pérdida, y conviene distinguirla de un vistazo.
-const _ETIQUETA_MOV = {
-    entrada: ['Entrada', 'badge-entrada'],
-    compra: ['Compra', 'badge-compra'],
-    salida: ['Salida', 'badge-salida'],
-    merma: ['Merma', 'badge-merma'],
-    ajuste: ['Ajuste', 'badge-ajuste'],
-};
-function etiquetaMov(m) {
-    const clave = m.tipo === 'entrada' && m.proveedor_id ? 'compra' : m.tipo;
-    const [texto, clase] = _ETIQUETA_MOV[clave] || [String(m.tipo || ''), 'badge-salida'];
-    return `<span class="badge ${clase}">${esc(texto)}</span>`;
-}
-// En la merma el motivo va en su propia columna; en el resto se muestra la nota.
-function detalleMov(m) {
-    if (m.tipo === 'merma' && m.motivo) return esc(m.motivo);
-    return m.nota ? esc(m.nota) : '—';
-}
-
 const nomProd = (p) => esc(p.nombre) + (p.marca ? ` - ${esc(p.marca)}` : '');
 
 async function request(url, opts = {}) {
@@ -559,9 +539,9 @@ async function loadDashboard() {
             <tr>
                 <td>${fmtDate(m.fecha)}</td>
                 <td><strong>${m.producto_nombre}</strong></td>
-                <td>${etiquetaMov(m)}</td>
+<td><span class="badge ${m.tipo === 'entrada' ? (m.proveedor_id ? 'badge-compra' : 'badge-entrada') : 'badge-salida'}">${m.tipo === 'entrada' ? (m.proveedor_id ? 'Compra' : 'Entrada') : (m.tipo === 'salida' ? 'Salida' : 'Ajuste')}</span></td>
                 <td>${m.cantidad} ${m.unidad}</td>
-                <td>${detalleMov(m)}</td>
+                <td>${m.nota || ''}</td>
             </tr>`).join('')
             : '<tr><td colspan="5" class="empty">Sin movimientos registrados</td></tr>';
 
@@ -1337,12 +1317,12 @@ async function listarMovimientos() {
         <tr>
             <td>${fmtDate(m.fecha)}</td>
             <td>${esc(m.producto_nombre)}</td>
-            <td>${etiquetaMov(m)}</td>
+            <td><span class="badge ${m.tipo === 'entrada' ? (m.proveedor_id ? 'badge-compra' : 'badge-entrada') : 'badge-salida'}">${m.tipo === 'entrada' ? (m.proveedor_id ? 'Compra' : 'Entrada') : (m.tipo === 'salida' ? 'Salida' : 'Ajuste')}</span></td>
             <td>${m.cantidad} ${m.unidad}</td>
             <td>${fmtNum(m.precio_unitario)}</td>
             <td>${m.sucursal_nombre || '—'}</td>
             <td>${m.proveedor_nombre || '—'}</td>
-            <td>${detalleMov(m)}</td>
+            <td>${m.nota || '—'}</td>
             <td>${m.usuario || '—'}</td>
         </tr>`).join('') || '<tr><td colspan="8" class="empty">Sin movimientos</td></tr>';
     renderPagination('#movimientos-paginacion', total, pagina, porPagina, listarMovimientos);
@@ -1387,16 +1367,6 @@ $('#form-movimiento').addEventListener('submit', async (e) => {
         vencimiento: $('#mov-vencimiento').value || null,
     };
     if (!body.producto_id) return toast('Seleccione un producto', 'err');
-    if (body.tipo === 'merma') {
-        const motivo = $('#mov-motivo') ? $('#mov-motivo').value : '';
-        if (motivo === 'otro') {
-            const detalle = ($('#mov-motivo-texto') ? $('#mov-motivo-texto').value : '').trim();
-            if (!detalle) return toast('Escribe el motivo de la merma', 'err');
-            body.motivo = detalle;
-        } else if (motivo) {
-            body.motivo = motivo;
-        }
-    }
     if (window.__MODO_COMPRA) {
         body.tipo = 'entrada';
         if (!body.proveedor_id) return toast('Seleccione el proveedor (obligatorio en Compras)', 'err');
@@ -1404,10 +1374,8 @@ $('#form-movimiento').addEventListener('submit', async (e) => {
     try {
         await conSubmit(() => request(API + '/movimientos', { method: 'POST', body: JSON.stringify(body) }),
             '#form-movimiento button[type="submit"]');
-        toast(body.tipo === 'merma' ? 'Merma registrada' : 'Movimiento registrado');
+        toast('Movimiento registrado');
         e.target.reset();
-        if ($('#mov-tipo')) $('#mov-tipo').value = window.__MODO_COMPRA ? 'entrada' : 'entrada';
-        toggleMotivoMerma();
         listarMovimientos();
     } catch (err) {
         toast(err.message, 'err');
@@ -1418,31 +1386,6 @@ $('#mov-tipo').addEventListener('change', () => {
     const lbl = $('#mov-proveedor-label');
     if (lbl) lbl.style.display = $('#mov-tipo').value === 'salida' ? 'none' : 'block';
 });
-$('#mov-tipo').addEventListener('change', () => {
-    const label = $('#mov-precio');
-    $('#mov-tipo').value === 'salida'
-        ? label.closest('label').style.display = 'none'
-        : label.closest('label').style.display = 'flex';
-    toggleMotivoMerma();
-});
-
-// La merma pide motivo: se muestra solo cuando el tipo es «merma». Con motivo
-// «Otro» aparece un campo libre para escribir de qué se tratarse.
-function toggleMotivoMerma() {
-    const sel = $('#mov-tipo');
-    const esMerma = sel && sel.value === 'merma';
-    const lblMotivo = $('#mov-motivo-label');
-    const lblTexto = $('#mov-motivo-texto-label');
-    if (lblMotivo) lblMotivo.style.display = esMerma ? 'block' : 'none';
-    const motivo = $('#mov-motivo');
-    if (lblTexto) {
-        lblTexto.style.display = esMerma && motivo && motivo.value === 'otro' ? 'block' : 'none';
-    }
-    // La merma nunca lleva precio: no es una venta ni una compra.
-    const lblPrecio = $('#mov-precio');
-    if (lblPrecio && esMerma) lblPrecio.closest('label').style.display = 'none';
-}
-on('#mov-motivo', 'change', toggleMotivoMerma);
 
 $('#btn-filtrar-mov').addEventListener('click', () => { pagState['#movimientos-paginacion'] = 1; listarMovimientos(); });
 on('#mov-filtro', 'input', debounce(() => { pagState['#movimientos-paginacion'] = 1; listarMovimientos(); }, 300));
@@ -1457,6 +1400,12 @@ $('#btn-exportar-mov').addEventListener('click', () => {
     window.location.href = '/api/exportar/movimientos?desde=' + ($('#mov-desde') || {}).value + '&hasta=' + ($('#mov-hasta') || {}).value + '&tipo=' + tipo + '&filtro=' + ($('#mov-filtro') || {}).value + suc;
 });
 vincularEscaneo('#mov-escaneo', '#mov-producto', '#mov-cantidad');
+$('#mov-tipo').addEventListener('change', () => {
+    const label = $('#mov-precio');
+    $('#mov-tipo').value === 'salida'
+        ? label.closest('label').style.display = 'none'
+        : label.closest('label').style.display = 'flex';
+});
 
 // ---------------- Escaneo rápido ----------------
 let qrItems = {};
@@ -3057,7 +3006,6 @@ async function abrirInventario(invId) {
         `<span class="tb-tag">Planilla</span>` +
         `<span class="tb-tag">Ítems: <strong>${r.total_items || 0}</strong></span>` +
         `<span class="tb-tag">Total utilizada: <strong>${esc(fmtInvQ(r.total_utilizada || 0))}</strong></span>` +
-        (r.total_merma ? `<span class="tb-tag" style="color:#b45309">Merma: <strong>${esc(fmtInvQ(r.total_merma))}</strong> (Bs ${esc(fmtNum(r.valor_merma || 0))})</span>` : '') +
         `<span class="tb-tag" style="color:#dc2626">Faltantes: <strong>${r.total_faltantes || 0}</strong> (${esc(fmtInvQ(r.cantidad_faltante || 0))})</span>` +
         `<span class="tb-tag" style="color:#0F3D2E">Sobrantes: <strong>${r.total_sobrantes || 0}</strong> (${esc(fmtInvQ(r.cantidad_sobrante || 0))})</span>` +
         `<span class="tb-tag">Valor diferencia: <strong>Bs ${esc(fmtNum(r.valor_diferencia || 0))}</strong></span>`;
@@ -3068,7 +3016,7 @@ async function abrirInventario(invId) {
     INV_FILAS.forEach((f) => {
         if (f.categoria !== catActual) {
             catActual = f.categoria;
-            html += `<tr style="background:#F5F5F5"><td colspan="11"><strong>${esc(catActual)}</strong></td></tr>`;
+            html += `<tr style="background:#F5F5F5"><td colspan="10"><strong>${esc(catActual)}</strong></td></tr>`;
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
         const bloq = INV_CERRADA ? 'disabled' : '';
@@ -3087,7 +3035,6 @@ async function abrirInventario(invId) {
                            style="text-align:right">
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
-                <td class="num" style="color:#b45309" title="Se perdió (merma) — se descuenta del disponible">${esc(fmtInvQ(f.merma))}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
                            value="${conteo}" placeholder="—" ${bloq} style="text-align:right">
@@ -3123,8 +3070,7 @@ function recalcFilaInv(e) {
     const f = INV_FILAS.find((x) => x.id === id);
     if (!f) return;
     // El encargado escribe a mano el inicial y el ingreso del día; el disponible
-    // es la suma de ambos y la utilizada sale del disponible menos la merma y el
-    // conteo. La merma ya viene en f.merma porque se descuenta al registrarla.
+    // es la suma de ambos y la utilizada sale del disponible menos el conteo.
     const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
     const ingIn = $(`#inv-tbody .inv-ingreso[data-id="${id}"]`);
     const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
@@ -3132,8 +3078,7 @@ function recalcFilaInv(e) {
     const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
     const conteo = inp.value === '' ? null : Number(inp.value);
     const final = conteo === null || Number.isNaN(conteo) ? disponible : conteo;
-    const merma = f.merma || 0;
-    const utilizada = Math.max(disponible - merma - final, 0);
+    const utilizada = Math.max(disponible - final, 0);
     const dif = conteo === null || Number.isNaN(conteo) ? 0 : final - f.stock_sistema;
     const dEl = $(`[data-inv-disp="${id}"]`);
     if (dEl) dEl.textContent = fmtInvQ(disponible);

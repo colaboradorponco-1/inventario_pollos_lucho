@@ -244,7 +244,7 @@ def dashboard():
     cls_mov, params_mov = _cls("m.sucursal_id")
     mov_recientes = conn.execute("""
         SELECT m.fecha, m.tipo, m.cantidad, m.precio_unitario, m.nota, m.usuario,
-               m.proveedor_id, m.motivo,
+               m.proveedor_id,
                p.nombre AS producto_nombre, p.unidad
         FROM movimientos m
         JOIN productos p ON p.id = m.producto_id
