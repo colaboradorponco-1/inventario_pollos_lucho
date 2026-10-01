@@ -1,9 +1,9 @@
-from flask import Blueprint, g, request
+from flask import Blueprint, current_app, g, request
 
 from database import get_conn
 from .util import (ok, err, login_requerido, rol_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen, clausula_sucursal,
-                   ids_ciudad_permitidos, cond_ciudad)
+                   ids_ciudad_permitidos, cond_ciudad, registrar_auditoria)
 from .productos import scope_productos
 
 reportes_bp = Blueprint("reportes", __name__)
@@ -611,38 +611,147 @@ def reporte_auditoria():
 @login_requerido
 @rol_requerido("admin", "superadmin")
 def reporte_reconciliar():
+    """Recalcula el stock de los lotes a partir de los movimientos.
+
+    Esta operación ESCRIBE sobre `lotes` de TODAS las sucursales. Antes no pedía
+    confirmación, no tenía forma de ver qué iba a cambiar y no tenía rollback: si
+    un movimiento quedó a medias, el `SET l.cantidad = m.c` pisaba el stock real
+    con un valor reconstruido sin avisar.
+
+    Ahora por defecto es un simulacro (`simular=1`): devuelve qué cambiaría y no
+    escribe nada. Para escribir de verdad hay que mandar `confirmar=SI` Y
+    `motivo`, y el motivo queda en la auditoría.
+
+    Solo reconstruye los lotes que tienen movimientos: un lote sin movimientos NO
+    se toca (antes el `UPDATE ... JOIN` lo dejaba igual, pero el `cantidad < 0.0001`
+    de la línea siguiente lo ponía en cero, destruyendo fracciones legítimas).
+    """
     import re as _re
     conn = get_conn()
-    antes = _auditar(conn)
-    borrados = 0
-    cur = conn.execute("""SELECT id, nota FROM movimientos
-                          WHERE nota LIKE 'Venta #%' OR nota LIKE 'Reparto #%'
-                             OR nota LIKE 'Anulación%' OR nota LIKE 'Reposición%'
-                             OR nota LIKE 'Devolución%' OR nota LIKE 'Descuento%'""").fetchall()
-    for m in cur:
-        mm = _re.search(r"(venta|reparto)\s*#\s*(\d+)", m["nota"] or "", _re.I)
-        if not mm:
-            continue
-        tipo, nid = mm.group(1).lower(), int(mm.group(2))
-        tabla = "ventas" if tipo == "venta" else "repartos"
-        existe = conn.execute("SELECT id FROM {t} WHERE id = %s".format(t=tabla), (nid,)).fetchone()
-        if not existe:
-            conn.execute("DELETE FROM movimientos WHERE id = %s", (m["id"],))
-            borrados += 1
-    conn.execute("UPDATE lotes l JOIN "
-                 "(SELECT lote_id, SUM(IF(tipo='entrada', cantidad, -cantidad)) c "
-                 " FROM movimientos WHERE lote_id IS NOT NULL GROUP BY lote_id) m ON m.lote_id = l.id "
-                 "SET l.cantidad = m.c")
-    conn.execute("UPDATE lotes SET cantidad = 0 WHERE cantidad < 0.0001")
-    conn.execute("UPDATE ventas v JOIN (SELECT venta_id, SUM(subtotal) t FROM venta_detalle GROUP BY venta_id) d "
-                 "ON d.venta_id = v.id SET v.total = d.t")
-    conn.execute("UPDATE repartos r JOIN (SELECT reparto_id, SUM(subtotal) t FROM reparto_detalle GROUP BY reparto_id) d "
-                 "ON d.reparto_id = r.id SET r.total = d.t")
-    conn.commit()
-    despues = _auditar(conn)
-    conn.close()
-    return ok({
-        "movimientos_huerfanos_borrados": borrados,
-        "antes": antes,
-        "despues": despues,
-    })
+    confirmar = (request.args.get("confirmar") or "").strip().upper()
+    motivo = (request.args.get("motivo") or "").strip()
+    simular = request.args.get("simular", "1") != "0"
+
+    if not simular:
+        if confirmar != "SI" or len(motivo) < 10:
+            conn.close()
+            return err(
+                "Para reconciliar de verdad hay que mandar confirmar=SI y un "
+                "motivo de al menos 10 caracteres. Sin esto solo se simula.", 400)
+        if not es_gestion() and not sucursal_actual():
+            conn.close()
+            return err("Tu usuario no tiene sucursal asignada", 403)
+
+    try:
+        antes = _auditar(conn)
+
+        # 1. Movimientos huérfanos: apuntan a una venta/reparto que ya no existe.
+        huerfanos = []
+        cur = conn.execute("""SELECT id, nota FROM movimientos
+                              WHERE nota LIKE 'Venta #%' OR nota LIKE 'Reparto #%'
+                                 OR nota LIKE 'Anulación%' OR nota LIKE 'Reposición%'
+                                 OR nota LIKE 'Devolución%' OR nota LIKE 'Descuento%'""").fetchall()
+        for m in cur:
+            mm = _re.search(r"(venta|reparto)\s*#\s*(\d+)", m["nota"] or "", _re.I)
+            if not mm:
+                continue
+            tipo, nid = mm.group(1).lower(), int(mm.group(2))
+            tabla = "ventas" if tipo == "venta" else "repartos"
+            existe = conn.execute(
+                f"SELECT id FROM {tabla} WHERE id = %s", (nid,)).fetchone()
+            if not existe:
+                huerfanos.append({"id": m["id"], "nota": m["nota"]})
+
+        # 2. Qué lotes cambiarían, calculados en Python: se ve antes de escribir.
+        #    Solo lotes con movimientos. Se ignora el signo del tipo 'ajuste'
+        #    porque ese SÍ viene con signo en la tabla.
+        actual = conn.execute("""
+            SELECT l.id, l.cantidad, p.nombre, s.nombre AS sucursal
+            FROM lotes l
+            JOIN productos p ON p.id = l.producto_id
+            JOIN sucursales s ON s.id = l.sucursal_id
+        """).fetchall()
+        movs = {}
+        for r in conn.execute("""
+            SELECT lote_id, tipo, SUM(cantidad) AS c
+            FROM movimientos WHERE lote_id IS NOT NULL
+            GROUP BY lote_id, tipo
+        """).fetchall():
+            movs.setdefault(r["lote_id"], {})[r["tipo"]] = float(r["c"] or 0)
+
+        cambios = []
+        for l in actual:
+            por_tipo = movs.get(l["id"])
+            if not por_tipo:
+                continue  # sin movimientos: no se toca
+            calculado = por_tipo.get("entrada", 0.0) - por_tipo.get("salida", 0.0) \
+                + por_tipo.get("ajuste", 0.0)
+            if abs(calculado - float(l["cantidad"] or 0)) > 0.001:
+                cambios.append({
+                    "lote_id": l["id"], "producto": l["nombre"],
+                    "sucursal": l["sucursal"],
+                    "stock_actual": round(float(l["cantidad"] or 0), 3),
+                    "stock_segun_movimientos": round(calculado, 3),
+                    "diferencia": round(calculado - float(l["cantidad"] or 0), 3),
+                })
+        # Un ajuste reconstruido en negativo significa que faltan movimientos:
+        # avisar y NO escribir, porque imposing ese valor dejaría el stock bajo.
+        propuestas_negativas = [c for c in cambios if c["stock_segun_movimientos"] < -0.001]
+
+        resultado = {
+            "simulado": simular,
+            "motivo": motivo or None,
+            "movimientos_huerfanos": len(huerfanos),
+            "movimientos_huerfanos_detalle": huerfanos[:50],
+            "lotes_a_cambiar": len(cambios),
+            "cambios": cambios[:100],
+            "lotes_negativos_sugeridos": len(propuestas_negativas),
+            "antes": antes,
+        }
+
+        if simular:
+            conn.close()
+            return ok(resultado)
+
+        if propuestas_negativas:
+            conn.rollback()
+            conn.close()
+            return err(
+                f"La reconciliación dejaría {len(propuestas_negativas)} lote(s) en "
+                "negativo, lo que significa que faltan movimientos. No se aplicó "
+                "nada. Revisa los movimientos primero.", 409)
+
+        try:
+            for m in huerfanos:
+                conn.execute("DELETE FROM movimientos WHERE id = %s", (m["id"],))
+            for c in cambios:
+                conn.execute("UPDATE lotes SET cantidad = %s WHERE id = %s",
+                             (c["stock_segun_movimientos"], c["lote_id"]))
+            # Totales de ventas y repartos: solo los que quedaron descuadrados.
+            conn.execute(
+                "UPDATE ventas v JOIN (SELECT venta_id, SUM(subtotal) t "
+                "FROM venta_detalle GROUP BY venta_id) d ON d.venta_id = v.id "
+                "SET v.total = d.t WHERE v.total <> d.t")
+            conn.execute(
+                "UPDATE repartos r JOIN (SELECT reparto_id, SUM(subtotal) t "
+                "FROM reparto_detalle GROUP BY reparto_id) d ON d.reparto_id = r.id "
+                "SET r.total = d.t WHERE r.total <> d.t")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            conn.close()
+            current_app.logger.exception("Error reconciliando el stock")
+            return err("No se pudo reconciliar: se revirtió todo, el stock quedó como estaba", 500)
+
+        resultado["despues"] = _auditar(conn)
+        conn.close()
+        registrar_auditoria(
+            "Stock reconciliado",
+            f"{len(cambios)} lotes corregidos, {len(huerfanos)} movimientos huérfanos "
+            f"borrados. Motivo: {motivo}")
+        return ok(resultado)
+    except Exception:
+        conn.rollback()
+        conn.close()
+        current_app.logger.exception("Error en reporte_reconciliar")
+        return err("Error al reconciliar el stock", 500)

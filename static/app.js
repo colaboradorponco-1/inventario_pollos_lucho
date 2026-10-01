@@ -2852,18 +2852,86 @@ async function cargarAuditoria() {
     }
 }
 
+// Reconciliar ESCRIBE el stock de TODAS las sucursales a partir de los movimientos.
+// Por eso va en dos pasos: primero simula (no escribe nada) y muestra qué cambiaría;
+// solo si el admin lo confirma con un motivo se aplica.
 async function reconciliarInventario() {
-    if (!confirm('Se eliminarán movimientos huérfanos (ventas/repartos ya inexistentes), se recalculará el stock desde los movimientos y se re-calcularán los totales. ¿Continuar?')) return;
     const caja = $('#sincronia-resultado');
-    caja.innerHTML = 'Reconciliando...';
+    caja.innerHTML = 'Calculando qué cambiaría (no se está escribiendo nada)...';
+    let sim;
     try {
-        const r = await request(API + '/reportes/reconciliar', { method: 'POST' });
-        let html = `<p class="sinc-val">Reconciliación aplicada: <strong>${r.movimientos_huerfanos_borrados}</strong> movimiento(s) huérfano(s) eliminados.</p>`;
-        if (r.antes.descuadres.length) html += `<p>Descuadres antes: ${r.antes.descuadres.length} · Descuadres después: ${r.despues.descuadres.length}</p>`;
-        caja.innerHTML = html + renderAuditoria(r.despues, 'Resultado de la reconciliación');
+        sim = await request(API + '/reportes/reconciliar?simular=1', { method: 'POST' });
+    } catch (e) {
+        caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
+        return;
+    }
+
+    const n = sim.lotes_a_cambiar;
+    const h = sim.movimientos_huerfanos;
+    let html = `<p class="sinc-val"><strong>Simulación.</strong> Esto es lo que pasaría si se `
+        + `reconcilia; todavía no se escribió nada.</p>`;
+    html += `<ul style="margin:8px 0;padding-left:20px">`
+        + `<li>Lotes que cambiarían: <strong>${n}</strong></li>`
+        + `<li>Movimientos huérfanos a borrar: <strong>${h}</strong></li>`
+        + `<li>Lotes que quedarían en negativo: <strong>${sim.lotes_negativos_sugeridos}</strong></li></ul>`;
+    if (n) {
+        html += `<div class="table-scroll" style="max-height:280px"><table><thead><tr>`
+            + `<th>Producto</th><th>Sucursal</th><th>Stock actual</th>`
+            + `<th>Según movimientos</th><th>Diferencia</th></tr></thead><tbody>`
+            + sim.cambios.map((c) => `<tr><td>${esc(c.producto)}</td><td>${esc(c.sucursal)}</td>`
+                + `<td>${c.stock_actual}</td><td>${c.stock_segun_movimientos}</td>`
+                + `<td style="color:${c.diferencia < 0 ? 'var(--red)' : 'var(--green)'}">`
+                + `${c.diferencia > 0 ? '+' : ''}${c.diferencia}</td></tr>`).join('')
+            + `</tbody></table></div>`;
+        if (n > sim.cambios.length) {
+            html += `<p style="color:var(--muted);font-size:12px">Se muestran los primeros `
+                + `${sim.cambios.length} de ${n}.</p>`;
+        }
+    }
+    caja.innerHTML = html;
+
+    if (!n && !h) {
+        caja.innerHTML += `<p class="sinc-val">No hay nada que corregir: el stock ya `
+            + `coincide con los movimientos.</p>`;
+        return;
+    }
+    if (sim.lotes_negativos_sugeridos) {
+        caja.innerHTML += `<p class="text-red">No se puede aplicar: `
+            + `${sim.lotes_negativos_sugeridos} lote(s) quedarían en negativo, lo que `
+            + `significa que faltan movimientos. Revísalos primero.</p>`;
+        return;
+    }
+
+    const motivo = prompt(
+        'Esto va a ESCRIBIR el stock de todas las sucursales.\n\n'
+        + `Escribe el motivo (mínimo 10 caracteres). Quedará en la auditoría:\n`
+        + `(por ejemplo: "Auditoría mensual de Bs" o "Corrección tras importar Excel")`);
+    if (!motivo || motivo.trim().length < 10) {
+        caja.innerHTML += `<p>Cancelado. No se escribió nada.</p>`;
+        return;
+    }
+    if (!confirm(`Se van a corregir ${n} lote(s) y borrar ${h} movimiento(s) huérfano(s) `
+        + `en TODAS las sucursales.\n\nSi algo sale mal se revierte todo.\n\n¿Aplicar?`)) {
+        caja.innerHTML += `<p>Cancelado. No se escribió nada.</p>`;
+        return;
+    }
+
+    caja.innerHTML = 'Aplicando...';
+    const qs = new URLSearchParams({ simular: '0', confirmar: 'SI', motivo: motivo.trim() });
+    try {
+        const r = await request(API + '/reportes/reconciliar?' + qs.toString(), { method: 'POST' });
+        let fin = `<p class="sinc-val">Reconciliación aplicada: <strong>${r.lotes_a_cambiar}</strong> `
+            + `lote(s) corregido(s), <strong>${r.movimientos_huerfanos}</strong> huérfano(s) borrado(s).`;
+        if (r.antes && r.antes.descuadres) {
+            const despues = r.despues && r.despues.descuadres ? r.despues.descuadres.length : '?';
+            fin += ` Descuadres: ${r.antes.descuadres.length} → ${despues}.`;
+        }
+        fin += `</p>`;
+        caja.innerHTML = fin;
         loadReportes();
     } catch (e) {
         caja.innerHTML = `<p class="text-red">Error: ${esc(e.message)}</p>`;
+        loadReportes();
     }
 }
 
