@@ -9,6 +9,23 @@ from .util import (ok, err, login_requerido, es_gestion, es_superadmin,
 catalogos_bp = Blueprint("catalogos", __name__)
 
 
+def _nombre_almacen_duplicado(conn, nombre, sucursal_id, excluir_id=None):
+    """True si ya hay un almacén con ese nombre en esa sucursal.
+
+    El índice UNIQUE es (sucursal_id, nombre), pero MySQL considera que dos NULL
+    son distintos, así que los almacenes sin sucursal no los cubre. Además el
+    índice compara el nombre tal cual: "cocina" y "Cocina " se colarían. Esta
+    comprobación cierra los dos huecos.
+    """
+    q = ("SELECT id FROM almacenes WHERE LOWER(TRIM(nombre)) = LOWER(TRIM(%s)) "
+         "AND ((%s IS NULL AND sucursal_id IS NULL) OR sucursal_id <=> %s)")
+    params = [nombre, sucursal_id, sucursal_id]
+    if excluir_id is not None:
+        q += " AND id <> %s"
+        params.append(excluir_id)
+    return conn.execute(q, params).fetchone() is not None
+
+
 @catalogos_bp.route("/api/almacenes", methods=["GET", "POST"])
 @login_requerido
 def almacenes():
@@ -17,20 +34,33 @@ def almacenes():
         if not es_superadmin():
             conn.close()
             return err("Solo el superadministrador puede crear almacenes", 403)
-        data = request.get_json()
-        sid = data.get("sucursal_id")
+        data = request.get_json() or {}
+        nombre = (data.get("nombre") or "").strip()
+        if not nombre:
+            conn.close()
+            return err("El nombre del almacén no puede quedar vacío")
         try:
+            sid = int(data["sucursal_id"]) if data.get("sucursal_id") else None
+        except (TypeError, ValueError):
+            conn.close()
+            return err("Sucursal no válida")
+        if _nombre_almacen_duplicado(conn, nombre, sid):
+            conn.close()
+            return err("Ya existe un almacén con ese nombre en esa sucursal")
+        try:
+            ubicacion = (data.get("ubicacion") or "").strip()
             if sid:
                 conn.execute(
                     "INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
-                    (data["nombre"].strip(), data.get("ubicacion", "").strip(), int(sid)))
+                    (nombre, ubicacion, sid))
             else:
                 conn.execute("INSERT INTO almacenes (nombre, ubicacion) VALUES (?, ?)",
-                             (data["nombre"].strip(), data.get("ubicacion", "").strip()))
+                             (nombre, ubicacion))
             conn.commit()
             return ok(message="Almacén creado")
         except pymysql.err.IntegrityError:
-            return err("Ya existe un almacén con ese nombre")
+            conn.rollback()
+            return err("Ya existe un almacén con ese nombre en esa sucursal")
         finally:
             conn.close()
     rows = conn.execute("""
@@ -56,17 +86,36 @@ def almacen(alm_id):
             return err("No se puede eliminar: tiene productos asociados")
         finally:
             conn.close()
-    data = request.get_json()
-    sid = data.get("sucursal_id")
-    if sid:
-        conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ?, sucursal_id = ? WHERE id = ?",
-                     (data["nombre"].strip(), data.get("ubicacion", "").strip(), int(sid), alm_id))
-    else:
-        conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ?, sucursal_id = NULL WHERE id = ?",
-                     (data["nombre"].strip(), data.get("ubicacion", "").strip(), alm_id))
-    conn.commit()
-    conn.close()
-    return ok(message="Almacén actualizado")
+    data = request.get_json() or {}
+    nombre = (data.get("nombre") or "").strip()
+    if not nombre:
+        conn.close()
+        return err("El nombre del almacén no puede quedar vacío")
+    try:
+        sid = int(data["sucursal_id"]) if data.get("sucursal_id") else None
+    except (TypeError, ValueError):
+        conn.close()
+        return err("Sucursal no válida")
+    # El renombrado no tenía ninguna validación: un nombre repetido reventaba con
+    # un 500 en vez de avisar.
+    if _nombre_almacen_duplicado(conn, nombre, sid, excluir_id=alm_id):
+        conn.close()
+        return err("Ya existe un almacén con ese nombre en esa sucursal")
+    try:
+        ubicacion = (data.get("ubicacion") or "").strip()
+        if sid:
+            conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ?, sucursal_id = ? WHERE id = ?",
+                         (nombre, ubicacion, sid, alm_id))
+        else:
+            conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ?, sucursal_id = NULL WHERE id = ?",
+                         (nombre, ubicacion, alm_id))
+        conn.commit()
+        return ok(message="Almacén actualizado")
+    except pymysql.err.IntegrityError:
+        conn.rollback()
+        return err("Ya existe un almacén con ese nombre en esa sucursal")
+    finally:
+        conn.close()
 
 
 @catalogos_bp.route("/api/categorias", methods=["GET", "POST"])
