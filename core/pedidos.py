@@ -521,13 +521,21 @@ def _despachar_stock(conn, pedido, detalle=None):
                                  f"{org['nombre']}. Disponible: {stock}")
 
     conn.rollback()  # descartar transacción de lectura implícita
+    # La mercadería se mueve HOY, no el día en que se hizo el pedido.
+    # Si se usara `pedido["fecha"]`, un pedido del 30-sep entregado el 01-oct
+    # contabilizaría la entrada en la planilla del 30-sep (que puede estar
+    # cerrada) y la planilla del día de la entrega saldría sin ese ingreso.
+    # El ingreso del día de la planilla se deduce de los movimientos 'entrada'
+    # con DATE(fecha) = fecha de la planilla, así que la fecha que importa es
+    # la de la llegada real.
+    fecha_mov = datetime.now()
     total = 0.0
     reparto_ids = []
     for origen_id, items in grupos.items():
         cur = conn.execute(
             "INSERT INTO repartos (fecha, sucursal_id, origen_sucursal_id, total, usuario, nota, pedido_id) "
             "VALUES (?, ?, ?, 0, ?, ?, ?)",
-            (pedido["fecha"], pedido["sucursal_id"], origen_id,
+            (fecha_mov, pedido["sucursal_id"], origen_id,
              session.get("usuario", ""), f"Despacho del pedido {pedido['nro_ticket']}", pedido["id"]))
         reparto_id = cur.lastrowid
         reparto_ids.append(reparto_id)
@@ -545,11 +553,11 @@ def _despachar_stock(conn, pedido, detalle=None):
                 INSERT INTO reparto_detalle (reparto_id, producto_id, producto_nombre, cantidad, costo_unitario, subtotal)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (reparto_id, d["producto_id"], d["producto_nombre"], d["cantidad"], costo, round(subtotal, 2)))
-            registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, pedido["fecha"],
-                                 f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
-            registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, pedido["fecha"],
-                                 f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
-                                 pedido["sucursal_id"])
+            registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, fecha_mov,
+                                  f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
+            registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, fecha_mov,
+                                  f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
+                                  pedido["sucursal_id"])
         conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (round(subtotal_reparto, 2), reparto_id))
     return total, reparto_ids
 
