@@ -2787,6 +2787,9 @@ const invClick = (fn) => async (...args) => {
     try { await fn(...args); } catch (e) { toast(e.message || 'Error', 'err'); }
 };
 $('#btn-inv-crear')?.addEventListener('click', invClick(crearInventario));
+$('#inv-hora')?.addEventListener('change', revisarHoraCorte);
+$('#inv-hora')?.addEventListener('input', revisarHoraCorte);
+$('#inv-fecha')?.addEventListener('change', revisarHoraCorte);
 $('#btn-inv-guardar')?.addEventListener('click', invClick(guardarInventario));
 $('#btn-inv-cerrar')?.addEventListener('click', invClick(cerrarInventario));
 $('#btn-inv-excel')?.addEventListener('click', () => {
@@ -2944,7 +2947,54 @@ async function loadInventario() {
         const d = new Date();
         h.value = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     }
+    revisarHoraCorte();
     await listarInventario();
+}
+
+function _minutosDe(hhmm) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim());
+    if (!m) return null;
+    return (+m[1]) * 60 + (+m[2]);
+}
+
+function _hoyIso() {
+    const d = new Date();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// La hora de corte es el instante en que se terminó de contar. Si queda en el
+// pasado, todo lo que se movió desde entonces se lee como "posterior" y se
+// deshace al cerrar: ventas que sí están dentro de tu conteo se reportan como
+// faltante. Se avisa antes de que el encargado guarde, no después.
+function revisarHoraCorte() {
+    const box = $('#inv-aviso-corte');
+    if (!box) return true;
+    const hm = _minutosDe($('#inv-hora')?.value);
+    const fecha = $('#inv-fecha')?.value || _hoyIso();
+    if (hm === null || fecha !== _hoyIso()) {
+        box.style.display = 'none';
+        box.dataset.riesgo = '';
+        return true;
+    }
+    const ahora = new Date();
+    const dif = (ahora.getHours() * 60 + ahora.getMinutes()) - hm;
+    if (dif <= 0) {
+        box.style.display = 'none';
+        box.dataset.riesgo = '';
+        return true;
+    }
+    const h = Math.floor(dif / 60), m = dif % 60;
+    const atraso = h ? `h ${h}` : `${m} min`;
+    box.dataset.riesgo = '1';
+    box.innerHTML = `<strong>Ojo con la hora de corte.</strong> Pusiste ` +
+        `<strong>${$('#inv-hora').value}</strong> pero ya son las ` +
+        `<strong>${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}</strong> ` +
+        `(${atraso} después).<br>` +
+        `Al cerrar se deshace todo lo que entró o salió después de esa hora, ` +
+        `y eso puede reportar como faltante producto que sí contaste. ` +
+        `Usa la hora en que terminaste de contar.`;
+    box.style.display = '';
+    return false;
 }
 
 async function listarInventario() {
@@ -3150,6 +3200,14 @@ function collectedInventario() {
 
 async function guardarInventario() {
     if (!INV_ID) return false;
+    // Última barrera: si la hora de corte quedó atrás, el cierre va a reportar
+    // como faltante lo que se movió después. Se pregunta antes de escribir.
+    if (!revisarHoraCorte()) {
+        if (!confirm('La hora de corte quedó en el pasado.\n\n' +
+            'Al cerrar se va a deshacer todo lo que entró o salió después de esa ' +
+            'hora, y eso puede marcar como faltante producto que sí contaste.\n\n' +
+            '¿Guardar de todos modos?')) return false;
+    }
     const r = await request(API + '/inventario-diario/' + INV_ID, {
         method: 'PUT',
         body: JSON.stringify({
@@ -3171,6 +3229,13 @@ async function cerrarInventario() {
     if (sinContar > 0) {
         toast(`Faltan ${sinContar} productos por contar`, 'err');
         return;
+    }
+    if (!revisarHoraCorte()) {
+        if (!confirm('La hora de corte quedó en el pasado.\n\n' +
+            'Al cerrar se ajusta el stock deshaciendo todo lo que entró o salió ' +
+            'después de esa hora. Si pusiste una hora anterior a la real, vas a ' +
+            'tener diferencias falsas y el stock va a quedar mal.\n\n' +
+            '¿Estás seguro de que esa hora es correcta?')) return;
     }
     if (!confirm('Al cerrar la planilla se ajustará el stock de los productos con diferencia. ¿Continuar?')) return;
     // Primero se guarda el conteo digitado: si no, el cierre usaría valores viejos.

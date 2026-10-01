@@ -160,6 +160,27 @@ def inventario_crear():
             return err("La categoría no existe", 400)
         cat_nombre = c["nombre"] or f"Categoría {cat_id}"
 
+    # Una planilla "de todas las categorías" y una "por categoría" del mismo día
+    #meterían dos veces al mismo producto. Al cerrar, cada una compara contra el
+    # stock que dejó la anterior, así que la diferencia queda repartida entre las
+    # dos planillas y no se sabe dónde se contabilizó. Se impide mezclar.
+    criterio_opuesto = ("> 0" if cat_id == 0 else "= 0")
+    opuesta = conn.execute(
+        f"SELECT categoria_id FROM inventario_diario "
+        f"WHERE sucursal_id = %s AND fecha = %s AND categoria_id {criterio_opuesto}",
+        (sid, fecha)).fetchone()
+    if opuesta:
+        conn.close()
+        if cat_id == 0:
+            return err(
+                "Ese día ya hay una planilla por categoría. Cierra o borra esas "
+                "planillas antes de crear una de todas las categorías, o el mismo "
+                "producto se contaría dos veces.", 400)
+        return err(
+            "Ese día ya existe la planilla de 'Todas las categorías', que ya "
+            "incluye esta categoría.Ciérrala antes de crear una por categoría, "
+            "o el mismo producto se contaría dos veces.", 400)
+
     existente = conn.execute(
         "SELECT * FROM inventario_diario WHERE sucursal_id = %s AND categoria_id = %s AND fecha = %s",
         (sid, cat_id, fecha)).fetchone()
