@@ -2963,10 +2963,14 @@ function _hoyIso() {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-// La hora de corte es el instante en que se terminó de contar. Si queda en el
-// pasado, todo lo que se movió desde entonces se lee como "posterior" y se
-// deshace al cerrar: ventas que sí están dentro de tu conteo se reportan como
-// faltante. Se avisa antes de que el encargado guarde, no después.
+// La hora de corte NO es la hora en que aprietas "Cerrar". Es el momento en que
+// terminaste de contar en el almacén, y solo importa cuando cierras.
+//
+// Al cerrar, el sistema rehace la cuenta: toma el stock de hoy, le suma lo que
+// entró y le resta lo que salió DESPUÉS de esta hora, y lo compara contra tu
+// conteo. Si la hora está atrasada, esas ventas ya están dentro de lo que
+// contaste, y el sistema las va a descontar otra vez: aparecerá faltante que no
+// existe.
 function revisarHoraCorte() {
     const box = $('#inv-aviso-corte');
     if (!box) return true;
@@ -2979,21 +2983,25 @@ function revisarHoraCorte() {
     }
     const ahora = new Date();
     const dif = (ahora.getHours() * 60 + ahora.getMinutes()) - hm;
-    if (dif <= 0) {
+    if (dif < 2) { // 2 min de margen: si no, el aviso aparece solo por el reloj
         box.style.display = 'none';
         box.dataset.riesgo = '';
         return true;
     }
     const h = Math.floor(dif / 60), m = dif % 60;
-    const atraso = h ? `h ${h}` : `${m} min`;
+    const atraso = h ? `${h} h ${m} min` : `${m} min`;
+    const ahoraTxt = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
     box.dataset.riesgo = '1';
-    box.innerHTML = `<strong>Ojo con la hora de corte.</strong> Pusiste ` +
-        `<strong>${$('#inv-hora').value}</strong> pero ya son las ` +
-        `<strong>${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}</strong> ` +
-        `(${atraso} después).<br>` +
-        `Al cerrar se deshace todo lo que entró o salió después de esa hora, ` +
-        `y eso puede reportar como faltante producto que sí contaste. ` +
-        `Usa la hora en que terminaste de contar.`;
+    box.innerHTML =
+        `<strong>Ojo con la hora de corte.</strong> Ponerla no cierra nada: solo marca ` +
+        `hasta qué momento se hizo el conteo.<br>` +
+        `Escribiste <strong>${$('#inv-hora').value}</strong> y ya son las ` +
+        `<strong>${ahoraTxt}</strong> (${atraso} después). Al cerrar, el sistema ` +
+        `descontará otra vez todo lo que se movió después de las ` +
+        `<strong>${$('#inv-hora').value}</strong>, aunque eso ya esté dentro de tu ` +
+        `conteo. Te puede marcar como faltante producto que sí tenías.<br>` +
+        `<strong>Escribe la hora en que terminaste de contar en el almacén</strong>, ` +
+        `no la hora en que vas a apretar el botón.`;
     box.style.display = '';
     return false;
 }
