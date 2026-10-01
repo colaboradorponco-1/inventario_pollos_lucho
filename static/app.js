@@ -39,14 +39,41 @@ const DIAS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes'
 const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio',
                   'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
+// Una columna DATE de MySQL no es un instante en el tiempo: es un día. MySQL la
+// devuelve como texto RFC 1123 con medianoche UTC ('Tue, 29 Sep 2026 00:00:00 GMT')
+// y si eso pasa por new Date(), el navegador lo convierte a la hora local y en
+// Bolivia (UTC-4) la deja en el día ANTERIOR: el 29 se ve como 28. Por eso las
+// fechas puras se leen directamente del texto y nunca se pasan por Date.
+const _FECHA_SOLO = /^(\d{4})-(\d{2})-(\d{2})(?![\dT])/;
+
 function fmtFechaES(valor) {
     if (!valor) return '';
-    const d = new Date(valor);
-    if (Number.isNaN(d.getTime())) return String(valor).slice(0, 10);
+    const s = String(valor);
+    const m = _FECHA_SOLO.exec(s);
+    if (m) {
+        // 'AAAA-MM-DD': se arma la fecha a mediodía local para que getDay/getDate
+        // no puedan correrla de día por el desfase de zona horaria.
+        const d = new Date(+m[1], +m[2] - 1, +m[3], 12, 0, 0);
+        return `${DIAS_ES[d.getDay()]} ${m[3]}/${m[2]}/${m[1]}`;
+    }
+    // RFC 1123 con GMT (lo que devuelve MySQL en columnas DATE si llega en crudo):
+    // se toman día, mes y año del propio texto, sin convertir a hora local.
+    const rfc = /^\w{3}, (\d{2}) (\w{3}) (\d{4})/.exec(s);
+    if (rfc) {
+        const mi = MESES_ES.findIndex((mm) => mm.startsWith(rfc[2].toLowerCase()));
+        if (mi >= 0) {
+            const d = new Date(+rfc[3], mi, +rfc[1], 12, 0, 0);
+            return `${DIAS_ES[d.getDay()]} ${rfc[1]}/${String(mi + 1).padStart(2, '0')}/${rfc[3]}`;
+        }
+    }
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s;
     return `${DIAS_ES[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}/` +
            `${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
+// Fecha + hora. Solo para marcas de tiempo reales (fecha_hora_cierre, que se
+// guarda como 'AAAA-MM-DDTHH:MM:SS' en hora local y sí debe mostrarse en local).
 function fmtFechaHoraES(valor) {
     if (!valor) return '';
     const d = new Date(valor);

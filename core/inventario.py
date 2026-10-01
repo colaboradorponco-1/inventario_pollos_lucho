@@ -39,6 +39,22 @@ class _DatoInvalido(Exception):
     """Valor escrito a mano por el encargado que no se puede guardar."""
 
 
+def _fecha_iso(valor):
+    """MySQL devuelve las columnas DATE como texto RFC 1123 en UTC
+    ('Tue, 29 Sep 2026 00:00:00 GMT'). Si eso llega al navegador se convierte a la
+    hora local y en Bolivia la fecha se ve un día antes. Se devuelve como
+    'AAAA-MM-DD', que es una fecha y no un instante, para que no haya desfase."""
+    if not valor:
+        return valor
+    s = str(valor)
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    try:
+        return date.fromisoformat(s).isoformat()
+    except ValueError:
+        return s
+
+
 def _validar_fecha(valor):
     """Normaliza 'YYYY-MM-DD'; devuelve la fecha ISO o None si es inválida."""
     if not valor:
@@ -288,7 +304,7 @@ def inventario_detalle(inv_id):
     sobrantes = [l for l in lineas if l["diferencia"] > 0]
     return ok({
         "id": inv["id"],
-        "fecha": inv["fecha"],
+        "fecha": _fecha_iso(inv["fecha"]),
         "hora_corte": inv["hora_corte"] or "",
         "sucursal_id": inv["sucursal_id"],
         "sucursal_nombre": sucursal["nombre"] if sucursal else "",
@@ -555,6 +571,7 @@ def inventario_lista():
     lista = []
     for r in rows:
         d = dict(r)
+        d["fecha"] = _fecha_iso(d.get("fecha"))
         # En una planilla ABIERTA los totales de la tabla solo se rellenan al cerrar,
         # así que se calculan al vuelo para que la lista no muestre ceros falsos.
         if d["estado"] != "cerrado":
