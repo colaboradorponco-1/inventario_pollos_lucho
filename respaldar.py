@@ -24,6 +24,10 @@ sys.path.insert(0, BASE)
 from core.backup import nombre_respaldo, volcar_a_archivo  # noqa: E402
 from database import get_conn  # noqa: E402
 
+# El destino se puede pasar como argumento. Si no, se usa `respaldos/` en la raiz.
+# OJO: `deploy/respaldar_respaldo.sh` (el cron de las 4am) espera encontrar el
+# archivo en la RAIZ del proyecto y aborta con "ERROR: no se genero" si no esta
+# ahi. Si cambias la carpeta por defecto, hay que tocar tambien ese script.
 if len(sys.argv) > 1:
     destino = sys.argv[1]
 else:
