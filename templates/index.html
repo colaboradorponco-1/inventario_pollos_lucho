@@ -981,14 +981,15 @@
             <div class="grid-2">
                 <div class="panel">
                     <h2>Crear copia de seguridad</h2>
-                    <p class="respaldo-txt">Descarga toda la base de datos (productos, movimientos, ventas, usuarios). Guárdala en un lugar seguro (USB, Drive, etc.).</p>
+                    <p class="respaldo-txt">Descarga un archivo <b>.sql</b> con <b>todas</b> las tablas (productos, movimientos, ventas, pedidos, usuarios). Lleva el esquema y los datos, así que se puede restaurar sobre esta base. Guárdalo en un lugar seguro (USB, Drive, etc.).</p>
                     <button class="btn btn-primary" id="btn-backup">Descargar respaldo</button>
                 </div>
                 <div class="panel">
                     <h2>Restaurar respaldo</h2>
-                    <p class="respaldo-txt">Selecciona un archivo <b>.db</b> previamente respaldado. La base actual se guardará como copia de seguridad automática antes de restaurar.</p>
-                    <input type="file" id="archivo-restaurar" accept=".db">
-                    <button class="btn btn-primary" id="btn-restaurar">Restaurar base de datos</button>
+                    <p class="respaldo-txt">Selecciona un archivo <b>.sql</b> descargado desde aquí. Primero se valida el archivo y se te muestra qué contiene <b>sin tocar la base</b>. Al confirmar, se guarda una copia automática de la base actual en el servidor y recién ahí se restaura.</p>
+                    <input type="file" id="archivo-restaurar" accept=".sql,application/sql,text/plain">
+                    <button class="btn btn-primary" id="btn-restaurar">Validar y restaurar base de datos</button>
+                    <p class="respaldo-txt" style="margin-top:.6rem"><b>Atención:</b> restaurar reemplaza todos los datos actuales. Si el archivo no fue generado por esta aplicación, se rechaza.</p>
                 </div>
             </div>
         </section>

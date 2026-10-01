@@ -1,3 +1,4 @@
+import os
 from datetime import date
 
 import pymysql
@@ -5,15 +6,9 @@ from flask import Blueprint, request, session
 from werkzeug.security import generate_password_hash
 
 from database import get_conn
+from .backup import (DumpInvalido, aplicar, carpeta_respaldos, nombre_respaldo,
+                     revisar, volcar, volcar_a_archivo)
 from .util import ok, err, login_requerido, rol_requerido, registrar_auditoria, sucursal_actual, es_superadmin
-
-# Tablas cuyos datos se vuelcan/restauran en el backup (en orden de dependencias)
-_TABLAS_BACKUP = [
-    "almacenes", "categorias", "proveedores", "sucursales", "usuarios",
-    "productos", "lotes", "movimientos", "gastos", "ventas", "venta_detalle",
-    "repartos", "reparto_detalle", "auditoria",
-    "inventario_diario", "inventario_detalle",
-]
 
 usuarios_bp = Blueprint("usuarios", __name__)
 
@@ -173,98 +168,96 @@ def auditoria():
 @login_requerido
 @rol_requerido("admin")
 def backup():
+    """Descarga un dump SQL COMPLETO y restaurable.
+
+    Va por `core.backup.volcar`, que saca las tablas de SHOW TABLES. La version
+    anterior usaba una lista fija y se salia `pedidos`, `pedido_detalle`, `stock`
+    y `stock_v2` sin avisar; ademas solo escribia INSERT, sin CREATE TABLE, asi
+    que el archivo no se podia restaurar sobre la base que ya existia.
+    """
     from flask import Response
 
     def _dumpar():
-        yield f"-- Backup Pollos Lucho {date.today().isoformat()}\n"
-        yield "SET FOREIGN_KEY_CHECKS = 0;\n"
         conn = get_conn()
         try:
-            for tabla in _TABLAS_BACKUP:
-                try:
-                    cols = [r["COLUMN_NAME"] for r in conn.execute(
-                        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
-                        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s "
-                        "ORDER BY ORDINAL_POSITION", (tabla,)).fetchall()]
-                except Exception:
-                    continue
-                if not cols:
-                    continue
-                cols_sql = ", ".join(cols)
-                for fila in conn.execute(
-                        f"SELECT * FROM `{tabla}`").fetchall():
-                    vals = ", ".join(_lit(fila[c]) for c in cols)
-                    yield f"INSERT INTO `{tabla}` ({cols_sql}) VALUES ({vals});\n"
-
+            yield from volcar(conn)
         finally:
             conn.close()
-        yield "SET FOREIGN_KEY_CHECKS = 1;\n"
 
+    hoy = date.today().isoformat()
     registrar_auditoria("Respaldo creado", "Descarga de copia de seguridad SQL")
     return Response(_dumpar(), mimetype="application/sql",
-                    headers={"Content-Disposition": "attachment; "
-                             f"filename=inventario_pollos_lucho_{date.today().isoformat()}.sql"})
+                    headers={"Content-Disposition":
+                             "attachment; "
+                             f'filename="inventario_pollos_lucho_{hoy}.sql"'})
 
 
 @usuarios_bp.route("/api/restaurar", methods=["POST"])
 @login_requerido
 @rol_requerido("superadmin")
 def restaurar():
-    """Restaura un respaldo SQL. Solo superadmin: esto ejecuta el contenido del
-    archivo contra la base, así que un admin de filial no debe poder hacerlo."""
+    """Restaura un respaldo SQL. Solo superadmin.
+
+    Va en dos pasos. Sin `confirmar` NO se toca la base: solo se valida el
+    archivo y se devuelve un resumen de lo que vendria. Con `confirmar=1` se
+    hace primero una copia real de la base actual y, solo si esa copia sale
+    bien, se aplica el archivo.
+
+    Lo que hacia la version anterior, y por que era peligroso: ejecutaba el
+    archivo sentencia por sentencia sin mirar que tenia dentro (un `DELETE` o
+    un `DROP DATABASE` pegado a mano se ejecutaba sin pestear), y la UI prometia
+    una copia automatica que no existia en ningun sitio.
+    """
     archivo = request.files.get("archivo")
     if not archivo:
         return err("Debes seleccionar un archivo")
-    sql = archivo.read().decode("utf-8", errors="replace")
+    crudo = archivo.read()
+    if not crudo:
+        return err("El archivo esta vacio")
+    sql = crudo.decode("utf-8", errors="replace")
+
     conn = get_conn()
-    cur = conn.cursor()
-    aplicadas = 0
     try:
-        cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-        for stmt in _divide_sentencias(sql):
-            s = stmt.strip()
-            if not s:
-                continue
-            cur.execute(s)
-            aplicadas += 1
-        conn.commit()
-    except Exception as e:
-        conn.rollback()
-        return err(f"No se pudo restaurar: {str(e)[:200]}", 400)
+        try:
+            resumen = revisar(sql, conn)
+        except DumpInvalido as e:
+            registrar_auditoria(
+                "Respaldo rechazado",
+                f"Se subio un archivo que no es un respaldo restaurable: "
+                f"{str(e)[:180]}")
+            return err(str(e), 400)
+
+        confirmar = str(request.form.get("confirmar", "")).strip().lower() \
+            in ("1", "true", "si", "s", "sí")
+        if not confirmar:
+            return ok({**resumen, "por_confirmar": True},
+                      message="Archivo valido. Confirma para restaurar.")
+
+        # Copia REAL de la base actual, antes de tocar nada. Si esto falla no se
+        # restaura: quedarse sin la base actual y sin red es peor que no
+        # poder restaurar el respaldo.
+        try:
+            ruta = os.path.join(carpeta_respaldos(), nombre_respaldo("antes_de_restaurar"))
+            volcar_a_archivo(conn, ruta)
+        except Exception as e:
+            return err("No se pudo hacer la copia de seguridad previa, se "
+                       f"cancela la restauracion: {str(e)[:200]}", 500)
+
+        try:
+            aplicadas = aplicar(conn, sql)
+        except Exception as e:
+            registrar_auditoria(
+                "Restauracion fallida",
+                f"Se intento restaurar y fallo ({str(e)[:150]}). Copia previa: {ruta}")
+            return err(f"La restauracion fallo: {str(e)[:200]}. La base puede "
+                       f"quedar incompleta; la copia previa esta en {ruta}", 500)
     finally:
         conn.close()
-    registrar_auditoria("Base de datos restaurada",
-                        f"Se restauró la base de datos desde un respaldo ({aplicadas} sentencias)")
-    return ok({"sentencias": aplicadas}, message="Base de datos restaurada correctamente")
 
-
-def _lit(val):
-    """Escapa un valor de Python a literal SQL."""
-    if val is None:
-        return "NULL"
-    if isinstance(val, bool):
-        return "1" if val else "0"
-    if isinstance(val, (int, float)):
-        return repr(val)
-    # MySQL interpreta '\' como escape dentro de las cadenas: hay que duplicar la
-    # barra invertida ANTES de comillas, o un valor con \' cerraría la cadena
-    # y rompería (o inyectaría) el dump generado.
-    txt = str(val).replace("\\", "\\\\").replace("'", "''")
-    return "'" + txt + "'"
-
-
-def _divide_sentencias(sql):
-    """Divide un script SQL en sentencias individuales respetando comillas."""
-    sentencias = []
-    buf = []
-    in_s = False
-    for ch in sql:
-        if ch == "'" and (not buf or buf[-1] != "\\"):
-            in_s = not in_s
-        buf.append(ch)
-        if ch == ";" and not in_s:
-            sentencias.append("".join(buf))
-            buf = []
-    if "".join(buf).strip():
-        sentencias.append("".join(buf))
-    return sentencias
+    registrar_auditoria(
+        "Base de datos restaurada",
+        f"Se restauraron {aplicadas} sentencias desde un respaldo. "
+        f"Copia previa: {ruta}")
+    return ok({"sentencias": aplicadas, "tablas": resumen["tablas"],
+               "copia_previa": ruta},
+              message="Base de datos restaurada correctamente")

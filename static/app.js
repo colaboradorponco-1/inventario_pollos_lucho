@@ -2969,16 +2969,41 @@ $('#btn-backup').addEventListener('click', () => {
 
 $('#btn-restaurar').addEventListener('click', async () => {
     const archivo = $('#archivo-restaurar').files[0];
-    if (!archivo) return toast('Selecciona un archivo .db', 'err');
-    if (!confirm('¿Restaurar esta base de datos? Se reemplazará la actual. Antes se hará una copia automática.')) return;
+    if (!archivo) return toast('Selecciona un archivo .sql', 'err');
+
+    // Paso 1: el servidor valida el archivo y dice qué contiene. NO se toca la
+    // base todavía. Esto evita el "¿subo bien el archivo?" a ciegas: si el
+    // respaldo está incompleto o es de otra aplicación, se dice aquí.
     const fd = new FormData();
     fd.append('archivo', archivo);
+    let json;
     try {
         const res = await fetch('/api/restaurar', { method: 'POST', body: fd });
-        const json = await res.json();
+        json = await res.json();
         if (!json.ok) throw new Error(json.message);
-        toast('Base de datos restaurada');
-        setTimeout(() => window.location.href = '/login', 1200);
+    } catch (e) {
+        return toast(e.message, 'err');
+    }
+    const d = json.data || {};
+    const detalle = `tablas: ${(d.tablas || []).length}\n` +
+        `filas a cargar: ${d.filas}\n` +
+        `sentencias: ${d.sentencias}\n\n` +
+        `SE REEMPLAZA TODA LA BASE por este respaldo.\n` +
+        `Antes de aplicar se guarda una copia automática de la base actual en el servidor.\n\n` +
+        `¿Continuar?`;
+    if (!confirm(detalle)) return;
+
+    // Paso 2: confirmado, se aplica de verdad.
+    const fd2 = new FormData();
+    fd2.append('archivo', archivo);
+    fd2.append('confirmar', '1');
+    try {
+        const res2 = await fetch('/api/restaurar', { method: 'POST', body: fd2 });
+        const json2 = await res2.json();
+        if (!json2.ok) throw new Error(json2.message);
+        const copia = (json2.data || {}).copia_previa;
+        toast('Base de datos restaurada' + (copia ? `. Copia previa: ${copia}` : ''));
+        setTimeout(() => window.location.href = '/login', 2500);
     } catch (e) {
         toast(e.message, 'err');
     }
