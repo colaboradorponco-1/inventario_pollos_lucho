@@ -23,6 +23,17 @@ pedidos_bp = Blueprint("pedidos", __name__)
 
 _ESTADOS = ("pendiente", "despachado", "cumplido")
 
+# Transiciones válidas de estado. Lo importante es que NO se puede volver a
+# 'pendiente' desde 'despachado' o 'cumplido': en esos estados el stock ya salió
+# del almacén, así que volver a pendiente haría que la reserva volviera a
+# contar (el 'disponible' bajaría otra vez) y el siguiente despacho descontaría
+# una segunda vez.
+_TRANSICIONES = {
+    "pendiente": {"pendiente", "despachado", "cumplido"},
+    "despachado": {"despachado", "cumplido"},
+    "cumplido": {"cumplido"},
+}
+
 
 def _nombre_sucursal(conn, sucursal_id):
     """Nombre de una sucursal para mensajes de error. Si no existe o no es un
@@ -418,11 +429,129 @@ def pedido_estado(pedido_id):
     if estado not in _ESTADOS:
         conn.close()
         return err("Estado inválido")
+
+    actual = pedido["estado"]
+    if estado not in _TRANSICIONES.get(actual, {actual}):
+        conn.close()
+        return err(f"No se puede pasar de '{actual}' a '{estado}'. "
+                   "Un pedido despachado o cumplido ya movió el stock: "
+                   "volverlo a pendiente lo descontaría otra vez.")
+
+    # Salir de 'pendiente' a 'despachado' o 'cumplido' mueve el stock de verdad:
+    # descuenta del almacén que lo despacha y lo suma a la sucursal que lo pidió.
+    # Antes este endpoint solo hacía `UPDATE ... SET estado`, así que marcar un
+    # pedido como cumplido liberaba la reserva sin sacar la mercadería del
+    # almacén: el inventario quedaba inflado y el producto volvía a estar
+    # disponible aunque la sucursal nunca lo hubiera recibido.
+    if actual == "pendiente" and estado in ("despachado", "cumplido"):
+        # El movimiento de stock solo puede hacerlo el almacén destino del
+        # pedido, igual que al entregar. Una filial no puede descontar
+        # mercadería del almacén desde el desplegable de estado.
+        det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
+                           (pedido_id,)).fetchall()
+        es_destino = any((d["destino_id"] or pedido["destino_id"]) == sid_op for d in det)
+        if not (es_gestion() or es_encargado_almacen(conn)) or not es_destino:
+            conn.close()
+            return err("Para entregar la mercadería tienes que usar «Entregar». "
+                       "Marcar el estado no descuenta el inventario.")
+        movido = _despachar_stock(conn, pedido)
+        if movido[0] == "error":
+            conn.close()
+            return err(movido[1])
+        conn.execute("UPDATE pedidos SET estado = ?, total = ? WHERE id = ?",
+                     (estado, round(movido[0], 2), pedido_id))
+        conn.commit()
+        conn.close()
+        registrar_auditoria("Pedido actualizado", f"{pedido['nro_ticket']} -> {estado}")
+        return ok(message=f"Pedido {pedido['nro_ticket']} marcado como {estado}. "
+                          f"Se descontó el stock del almacén.")
+
     conn.execute("UPDATE pedidos SET estado = ? WHERE id = ?", (estado, pedido_id))
     conn.commit()
     conn.close()
     registrar_auditoria("Pedido actualizado", f"{pedido['nro_ticket']} -> {estado}")
     return ok(message=f"Pedido {pedido['nro_ticket']} marcado como {estado}")
+
+
+def _despachar_stock(conn, pedido, detalle=None):
+    """Mueve la mercadería de un pedido: la descuenta del almacén que lo despacha
+    y la suma a la sucursal que lo pidió, dejando un reparto por proveedor.
+
+    Devuelve `(total, reparto_ids)`, o `("error", mensaje)` si no se puede hacer.
+    OJO: los dos casos son tuplas, así que el que llama tiene que comparar
+    `movido[0] == "error"` — con `isinstance(movido, tuple)` el éxito se
+    confundiría con un fallo y nunca se movería stock.
+    NO hace commit ni cierra la conexión: eso es del llamador, para que
+    /despachar y el cambio de estado compartan exactamente la misma lógica y no
+    puedan divergir en el descuento de inventario."""
+    if detalle is None:
+        detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ?",
+                               (pedido["id"],)).fetchall()
+    if not detalle:
+        return "error", "El pedido no tiene productos"
+
+    # Agrupar líneas por proveedor (cada proveedor genera su propio reparto)
+    grupos = {}
+    sid_op = sucursal_operativa()
+    for d in detalle:
+        origen_id = d["destino_id"] or pedido["destino_id"]
+        if not origen_id:
+            return "error", "Una línea del pedido no tiene proveedor asignado"
+        if origen_id == pedido["sucursal_id"]:
+            return "error", "El origen no puede ser igual al destino del pedido"
+        if sid_op is not None and origen_id != sid_op:
+            return "error", "Solo puedes despachar líneas cuyo origen sea tu propia sucursal"
+        grupos.setdefault(origen_id, []).append(d)
+
+    suc = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
+                       (pedido["sucursal_id"],)).fetchone()
+    if not suc:
+        return "error", "Sucursal solicitante no encontrada"
+
+    # Validar stock en cada proveedor antes de despachar (evita stock negativo).
+    # Se valida TODO antes de mover nada: si una línea falla, no se movió ninguna.
+    for origen_id, items in grupos.items():
+        org = conn.execute("SELECT nombre FROM sucursales WHERE id = ?", (origen_id,)).fetchone()
+        if not org:
+            return "error", f"Proveedor {origen_id} no encontrado"
+        for d in items:
+            stock = stock_actual(conn, d["producto_id"], origen_id)
+            if stock < d["cantidad"]:
+                return "error", (f"Stock insuficiente de {d['producto_nombre']} en "
+                                 f"{org['nombre']}. Disponible: {stock}")
+
+    conn.rollback()  # descartar transacción de lectura implícita
+    total = 0.0
+    reparto_ids = []
+    for origen_id, items in grupos.items():
+        cur = conn.execute(
+            "INSERT INTO repartos (fecha, sucursal_id, origen_sucursal_id, total, usuario, nota, pedido_id) "
+            "VALUES (?, ?, ?, 0, ?, ?, ?)",
+            (pedido["fecha"], pedido["sucursal_id"], origen_id,
+             session.get("usuario", ""), f"Despacho del pedido {pedido['nro_ticket']}", pedido["id"]))
+        reparto_id = cur.lastrowid
+        reparto_ids.append(reparto_id)
+        subtotal_reparto = 0.0
+        for d in items:
+            costo = 0.0
+            prod = conn.execute("SELECT costo_promedio FROM productos WHERE id = ?",
+                                (d["producto_id"],)).fetchone()
+            if prod and prod["costo_promedio"]:
+                costo = float(prod["costo_promedio"])
+            subtotal = d["cantidad"] * costo
+            subtotal_reparto += subtotal
+            total += subtotal
+            conn.execute("""
+                INSERT INTO reparto_detalle (reparto_id, producto_id, producto_nombre, cantidad, costo_unitario, subtotal)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (reparto_id, d["producto_id"], d["producto_nombre"], d["cantidad"], costo, round(subtotal, 2)))
+            registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, pedido["fecha"],
+                                 f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
+            registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, pedido["fecha"],
+                                 f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
+                                 pedido["sucursal_id"])
+        conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (round(subtotal_reparto, 2), reparto_id))
+    return total, reparto_ids
 
 
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/despachar", methods=["POST"])
@@ -453,71 +582,13 @@ def pedido_despachar(pedido_id):
         conn.close()
         return err("El pedido no tiene productos")
 
-    # Agrupar líneas por proveedor (cada proveedor genera su propio reparto)
-    grupos = {}
-    sid_op = sucursal_operativa()
-    for d in detalle:
-        origen_id = d["destino_id"] or pedido["destino_id"]
-        if not origen_id:
-            conn.close()
-            return err("Una línea del pedido no tiene proveedor asignado")
-        if origen_id == pedido["sucursal_id"]:
-            conn.close()
-            return err("El origen no puede ser igual al destino del pedido")
-        if sid_op is not None and origen_id != sid_op:
-            conn.close()
-            return err("Solo puedes despachar líneas cuyo origen sea tu propia sucursal", 403)
-        grupos.setdefault(origen_id, []).append(d)
-
-    suc = conn.execute("SELECT nombre FROM sucursales WHERE id = ?", (pedido["sucursal_id"],)).fetchone()
-    if not suc:
+    movido = _despachar_stock(conn, pedido, detalle)
+    if movido[0] == "error":
         conn.close()
-        return err("Sucursal solicitante no encontrada")
-
-    # Validar stock en cada proveedor antes de despachar (evita stock negativo)
-    for origen_id, items in grupos.items():
-        org = conn.execute("SELECT nombre FROM sucursales WHERE id = ?", (origen_id,)).fetchone()
-        if not org:
-            conn.close()
-            return err(f"Proveedor {origen_id} no encontrado")
-        for d in items:
-            stock = stock_actual(conn, d["producto_id"], origen_id)
-            if stock < d["cantidad"]:
-                conn.close()
-                return err(f"Stock insuficiente de {d['producto_nombre']} en {org['nombre']}. "
-                           f"Disponible: {stock}")
-
-    conn.rollback()  # descartar transacción de lectura implícita
-    total = 0.0
-    reparto_ids = []
-    for origen_id, items in grupos.items():
-        cur = conn.execute(
-            "INSERT INTO repartos (fecha, sucursal_id, origen_sucursal_id, total, usuario, nota, pedido_id) "
-            "VALUES (?, ?, ?, 0, ?, ?, ?)",
-            (pedido["fecha"], pedido["sucursal_id"], origen_id,
-             session.get("usuario", ""), f"Despacho del pedido {pedido['nro_ticket']}", pedido_id))
-        reparto_id = cur.lastrowid
-        reparto_ids.append(reparto_id)
-        subtotal_reparto = 0.0
-        for d in items:
-            costo = 0.0
-            prod = conn.execute("SELECT costo_promedio FROM productos WHERE id = ?", (d["producto_id"],)).fetchone()
-            if prod and prod["costo_promedio"]:
-                costo = float(prod["costo_promedio"])
-            subtotal = d["cantidad"] * costo
-            subtotal_reparto += subtotal
-            total += subtotal
-            conn.execute("""
-                INSERT INTO reparto_detalle (reparto_id, producto_id, producto_nombre, cantidad, costo_unitario, subtotal)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (reparto_id, d["producto_id"], d["producto_nombre"], d["cantidad"], costo, round(subtotal, 2)))
-            registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, pedido["fecha"],
-                                 f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
-            registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, pedido["fecha"],
-                                 f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
-                                 pedido["sucursal_id"])
-        conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (round(subtotal_reparto, 2), reparto_id))
-    conn.execute("UPDATE pedidos SET estado = 'despachado', total = ? WHERE id = ?", (round(total, 2), pedido_id))
+        return err(movido[1])
+    total, reparto_ids = movido
+    conn.execute("UPDATE pedidos SET estado = 'despachado', total = ? WHERE id = ?",
+                 (round(total, 2), pedido_id))
     conn.commit()
     conn.close()
     registrar_auditoria("Pedido despachado",

@@ -1,3 +1,4 @@
+import logging
 import re
 import unicodedata
 from datetime import datetime
@@ -345,9 +346,18 @@ def _stock_disponible(conn, destino_id=None):
     if destino_id:
         cond_lote = "l.sucursal_id = %s"
         params = (destino_id,)
+        # La reserva se descuenta SOLO de los pedidos dirigidos a este almacén.
+        # Antes no se filtraba por destino, así que un pedido pendiente para
+        # Almacén 1 restaba mercadería del disponible de América y Simón López
+        # aunque allí no tuviera nada que ver: un almacén podía mostrarse sin
+        # stock por culpa de un pedido ajeno.
+        cond_apartado = "AND COALESCE(d.destino_id, pd.destino_id) = %s"
+        params_reserva = (destino_id,)
     else:
         cond_lote = "l.sucursal_id = COALESCE(p.sucursal_id, %s)"
         params = (ppal["id"],)
+        cond_apartado = ""
+        params_reserva = ()
     sql = """
         SELECT l.producto_id AS id,
                (COALESCE(SUM(CASE WHEN {cond_lote}
@@ -355,14 +365,19 @@ def _stock_disponible(conn, destino_id=None):
                 - COALESCE((SELECT SUM(d.cantidad) FROM pedido_detalle d
                             JOIN pedidos pd ON pd.id = d.pedido_id
                             WHERE d.producto_id = l.producto_id
-                              AND pd.estado = 'pendiente'), 0)) AS disp
+                              AND pd.estado = 'pendiente' {cond_apartado}), 0)) AS disp
         FROM lotes l JOIN productos p ON p.id = l.producto_id
         WHERE l.cantidad > 0 AND p.activo = 1
-        GROUP BY l.producto_id""".format(cond_lote=cond_lote)
+        GROUP BY l.producto_id""".format(cond_lote=cond_lote, cond_apartado=cond_apartado)
     try:
-        rows = conn.execute(sql, params).fetchall()
+        rows = conn.execute(sql, params + params_reserva).fetchall()
         return {int(r["id"]): float(max(0, r["disp"] or 0)) for r in rows}
-    except Exception:
+    except Exception as exc:
+        # Sin esto el fallo era invisible: devolvía {} y TODOS los productos
+        # aparecían como "sin stock disponible", que parece un dato real y en
+        # realidad es un error de SQL.
+        app_logger = logging.getLogger("app")
+        app_logger.error("fallo en _stock_disponible (destino_id=%s): %s", destino_id, exc)
         return {}
 
 
