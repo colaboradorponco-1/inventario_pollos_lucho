@@ -901,8 +901,8 @@
                     <h2>Pedidos que me realizaron (bandeja)</h2>
                     <div class="toolbar small">
                         <span class="tb-tag">Búsqueda y filtros</span>
-                        <input type="date" id="pedido-bandeja-desde">
-                        <input type="date" id="pedido-bandeja-hasta">
+                        <input type="date" id="pedido-bandeja-desde" data-sin-fecha-defecto>
+                        <input type="date" id="pedido-bandeja-hasta" data-sin-fecha-defecto>
                         <select id="pedido-sucursal-filtro" style="max-width:220px"></select>
                         <button class="btn" id="btn-filtrar-pedidos">Filtrar</button>
                         <span class="flex-grow"></span>
@@ -1345,7 +1345,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202609251925"></script>
+    <script src="/static/app.js?v=202610011930"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

@@ -4525,6 +4525,16 @@ function restaurarFiltros() {
         v.inputs.forEach((id) => {
             const el = document.getElementById(id);
             if (!el) return;
+            // La bandeja de pedidos es una cola de trabajo: sus fechas se
+            // dejan SIEMPRE vacías, sin valor por defecto y sin restaurar lo
+            // guardado. Rellenarlas con «hoy» (o con lo que quedara de ayer)
+            // hacía que el backend recibiera un rango explícito y los pedidos
+            // pendientes de días anteriores no aparecieran, mientras el punto
+            // rojo del menú —que no lleva fechas— sí los contaba.
+            if (el.hasAttribute('data-sin-fecha-defecto')) {
+                el.value = '';
+                return;
+            }
             const guardado = esHoy && data.vistas && data.vistas[v.vista] && data.vistas[v.vista][id];
             if (guardado) {
                 el.value = guardado;
