@@ -3217,7 +3217,7 @@ async function abrirInventario(invId) {
     $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
-        : 'Llena a mano el inventario inicial, el ingreso manual y el conteo final. Disponible = inicial + ingreso manual (el ingreso del sistema ya no se suma; la columna Sistema solo es de comparación). Utilizada = disponible − conteo final.';
+        : 'El inicial ya viene con el stock actual del sistema (ya incluye los pedidos entregados). Anota en ingreso manual SOLO lo que llegó sin pasar por el sistema (compra directa, devolución, de la casa), y el conteo final. Disponible = inicial + ingreso manual. La columna Sistema es solo de comparación.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
     const h = $('#inv-hora');
@@ -3253,8 +3253,9 @@ async function abrirInventario(invId) {
                 <td>${esc(f.unidad)}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-inicial" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.inicial))}" placeholder="—" ${bloq}
-                           style="text-align:right">
+                           value="${esc(fmtInvQ(f.inicial))}" readonly ${bloq}
+                           title="Viene del sistema (stock actual, ya incluye los pedidos entregados). No se edita."
+                           style="text-align:right;background:#F5F5F5">
                 </td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
@@ -3278,7 +3279,7 @@ async function abrirInventario(invId) {
     });
     tb.innerHTML = html;
 
-    $$('.inv-conteo, .inv-inicial, .inv-ingreso-man')
+    $$('.inv-conteo, .inv-ingreso-man')
         .forEach((inp) => inp.addEventListener('input', recalcFilaInv));
 
     $('#btn-inv-guardar').style.display = INV_CERRADA ? 'none' : '';

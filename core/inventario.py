@@ -177,11 +177,8 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
     cambios = 0
     for f in filas:
         stock_dia = (f["stock"] or 0) - (f["posterior"] or 0)
-        inicial = (stock_dia - (f["ingreso"] or 0)
-                   + (f["salida"] or 0) - (f["ajuste"] or 0))
-        if inicial < 0:
-            inicial = 0.0
-        disponible = inicial + (f["ingreso"] or 0)
+        inicial = max(stock_dia, 0.0)
+        disponible = inicial
         d = por_prod.get(f["id"])
         if d is None:
             conn.execute("""
@@ -192,17 +189,33 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0, %s, %s)
             """, (inv_id, f["id"], f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
                   f["nombre"], f["codigo"], f["unidad"] or "unidad", stock_dia,
-                  inicial, f["ingreso"] or 0, disponible, disponible,
+                  inicial, 0, disponible, disponible,
                   f["costo_promedio"] or 0, f["precio_venta"] or 0))
             cambios += 1
         else:
-            conn.execute("""
-                UPDATE inventario_detalle
-                SET categoria_id = %s, categoria_nombre = %s,
-                    producto_nombre = %s, codigo = %s, unidad = %s
-                WHERE id = %s
-            """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
-                  f["nombre"], f["codigo"], f["unidad"] or "unidad", d["id"]))
+            # Si todavía no hubo conteo se actualiza el inicial al stock actual:
+            # así, si un pedido se entregó después de crear la planilla, al abrirla
+            # ya figura (50 -> 60) y nadie lo anota dos veces. Si ya contaron (o
+            # escribieron observaciones) se respeta lo que hicieron.
+            if d["conteo_fisico"] is None and not (d["observaciones"] or ""):
+                conn.execute("""
+                    UPDATE inventario_detalle
+                    SET categoria_id = %s, categoria_nombre = %s,
+                        producto_nombre = %s, codigo = %s, unidad = %s,
+                        stock_sistema = %s, inicial = %s, ingreso_dia = 0,
+                        disponible = %s
+                    WHERE id = %s
+                """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
+                      f["nombre"], f["codigo"], f["unidad"] or "unidad",
+                      stock_dia, inicial, disponible, d["id"]))
+            else:
+                conn.execute("""
+                    UPDATE inventario_detalle
+                    SET categoria_id = %s, categoria_nombre = %s,
+                        producto_nombre = %s, codigo = %s, unidad = %s
+                    WHERE id = %s
+                """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
+                      f["nombre"], f["codigo"], f["unidad"] or "unidad", d["id"]))
             cambios += 1
     if cambios:
         conn.commit()
@@ -349,24 +362,20 @@ def inventario_crear():
     """, (sid, cat_id, fecha, hora, session.get("usuario", "")))
     inv_id = cur.lastrowid
 
-    # Inventario inicial = stock a las 00:00 = stock actual - ingresos del día
-    # + salidas del día. Los ajustes también mueven stock, así que se restan.
+    # Inventario inicial = stock ACTUAL del sistema (ya incluye los pedidos
+    # entregados, que sincronizan solos cuando se marcan como Entregado). Así el
+    # encargado cuenta contra lo que el sistema dice que hay y no anota dos veces
+    # lo que ya llegó por pedido.
     filas = _productos_planilla(conn, sid, fecha, cat_id)
 
     for f in filas:
         # 'stock' es el stock de HOY. Si la planilla es de un día anterior, primero
         # se deshacen los movimientos posteriores a esa fecha para obtener el stock
-        # al cierre de ese día; luego se deshacen los del propio día para llegar al
-        # inicial, cada uno con su signo:
-        #   stock_dia  = stock - posteriores
-        #   inicial    = stock_dia - ingreso + salida - ajuste
-        # 'ajuste' viene con signo (negativo = faltante, positivo = sobrante).
+        # al cierre de ese día:
+        #   stock_dia = stock - posteriores
         stock_dia = (f["stock"] or 0) - (f["posterior"] or 0)
-        inicial = (stock_dia - (f["ingreso"] or 0)
-                   + (f["salida"] or 0) - (f["ajuste"] or 0))
-        if inicial < 0:
-            inicial = 0.0
-        disponible = inicial + (f["ingreso"] or 0)
+        inicial = max(stock_dia, 0.0)
+        disponible = inicial
         conn.execute("""
             INSERT INTO inventario_detalle
                 (inventario_id, producto_id, categoria_id, categoria_nombre, producto_nombre,
@@ -375,7 +384,7 @@ def inventario_crear():
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0, %s, %s)
         """, (inv_id, f["id"], f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
               f["nombre"], f["codigo"], f["unidad"] or "unidad", stock_dia,
-              inicial, f["ingreso"] or 0, disponible, disponible,
+              inicial, 0, disponible, disponible,
               f["costo_promedio"] or 0, f["precio_venta"] or 0))
 
     conn.commit()
@@ -416,8 +425,9 @@ def inventario_detalle(inv_id):
 
     lineas = []
     for f in filas:
-        # El ingreso se muestra partido: lo del sistema (automático, sombreado)
-        # y lo manual (lo que anota el encargado). Se suman para el disponible.
+        # El ingreso manual es lo único que se anota a mano (lo que llegó sin
+        # pasar por el sistema). El inicial ya trae el stock actual del sistema,
+        # con los pedidos entregados incluidos.
         ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, f, abierto)
         # Disponible = inicial + SOLO lo manual. El ingreso automático (compras,
         # pedidos) ya no se suma: la planilla es 100% lo que anota el encargado.
@@ -538,13 +548,10 @@ def inventario_guardar(inv_id):
             inicial = _campo(item.get("inicial"), "El inventario inicial")
             if inicial is None:
                 inicial = fila["inicial"] or 0
-            # El INGRESO va partido en dos y cada parte se guarda de una vez:
-            #  - del sistema: se deduce de los movimientos, NO se acepta escrito.
-            #    Si el navegador manda algo distinto se avisa, porque casi siempre
-            #    es que el encargado está anotando de nuevo una entrega que el
-            #    sistema ya registró, y eso duplicaba la mercadería.
-            #  - manual: sí se acepta, es para la mercadería que llega por vías que
-            #    no pasan por el sistema (compra directa, devolución, de la casa).
+            # El inicial ya viene con el stock actual del sistema (incluye los
+            # pedidos entregados) y no se edita. Solo anota el ingreso MANUAL:
+            # lo que llega por vías que no pasan por el sistema (compra directa,
+            # devolución, de la casa).
             ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, fila, True)
             enviado_sis = item.get("ingreso_sistema")
             if enviado_sis not in (None, ""):

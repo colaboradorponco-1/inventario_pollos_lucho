@@ -444,7 +444,7 @@
 
                 <div class="toolbar small" id="inv-resumen" style="margin-bottom:10px"></div>
 
-                <p class="scan-hint inv-ayuda"><strong>Cómo se llena:</strong> escribe el <strong>inventario inicial</strong> y luego el <strong>inventario final</strong> con lo que contaste. El <strong>Ingreso manual</strong> (amarilla) es para lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa. <strong>Disp. día</strong> = inicial + ingreso del sistema + ingreso manual, y la <strong>cantidad utilizada</strong> = disponible − conteo final. <strong>Dif.</strong> = final − stock del sistema: en rojo falta y en verde sobra.</p>
+                <p class="scan-hint inv-ayuda"><strong>Cómo se llena:</strong> el <strong>inventario inicial</strong> ya viene con el stock actual del sistema (ya incluye los pedidos entregados). Anota en <strong>Ingreso manual</strong> (amarilla) SOLO lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa. Luego escribe el <strong>inventario final</strong> con lo que contaste. <strong>Disp. día</strong> = inicial + ingreso manual, y la <strong>cantidad utilizada</strong> = disponible − conteo final. <strong>Dif.</strong> = final − stock del sistema: en rojo falta y en verde sobra.</p>
 
                 <div class="table-scroll"><table class="data-table inv-tabla">
                     <thead>
@@ -452,8 +452,8 @@
                             <th rowspan="2">Producto</th>
                             <th rowspan="2">Unidad</th>
                             <th rowspan="2">Inv. inicial</th>
-                <th rowspan="2" style="background:#FEF3C7;color:#92400E">Ingreso manual<br><small>anótalo aquí</small></th>
-                <th rowspan="2" style="background:#0F3D2E;color:#fff">Disp. día<br><small>= inicial + ingresos</small></th>
+                <th rowspan="2" style="background:#FEF3C7;color:#92400E">Ingreso manual<br><small>solo lo que NO pasó por el sistema</small></th>
+                <th rowspan="2" style="background:#0F3D2E;color:#fff">Disp. día<br><small>= inicial + ingreso manual</small></th>
                             <th rowspan="2" style="background:#7C2D12;color:#fff">Inv. final<br><small>= tu conteo</small></th>
                             <th rowspan="2">Utilizada<br><small>= disp. − final</small></th>
                             <th rowspan="2">Sistema</th>
@@ -1345,7 +1345,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610022030"></script>
+    <script src="/static/app.js?v=202610022100"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
