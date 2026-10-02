@@ -122,6 +122,93 @@ def _detalle(conn, inv_id):
     """, (inv_id,)).fetchall()
 
 
+def _productos_planilla(conn, sid, fecha, cat_id):
+    """Productos que debería contener una planilla de esa sucursal/fecha.
+
+    Comparte la consulta entre crear y abrir, para que al abrir una planilla se
+    puedan agregar los productos que entraron a la categoría después de creada."""
+    return conn.execute("""
+        SELECT p.id, p.codigo, p.nombre, p.unidad, p.costo_promedio, p.precio_venta,
+               p.categoria_id, c.nombre AS categoria_nombre,
+               COALESCE(l.stock, 0) AS stock,
+               COALESCE(ent.ingreso, 0) AS ingreso,
+               COALESCE(sa.salida, 0) AS salida,
+               COALESCE(aj.ajuste, 0) AS ajuste,
+               COALESCE(po.post, 0) AS posterior
+        FROM productos p
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS stock FROM lotes
+                   WHERE sucursal_id = %s GROUP BY producto_id) l ON l.producto_id = p.id
+        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ingreso FROM movimientos
+                   WHERE sucursal_id = %s AND tipo = 'entrada' AND DATE(fecha) = %s
+                   GROUP BY producto_id) ent ON ent.producto_id = p.id
+        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS salida FROM movimientos
+                   WHERE sucursal_id = %s AND tipo = 'salida' AND DATE(fecha) = %s
+                   GROUP BY producto_id) sa ON sa.producto_id = p.id
+        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ajuste FROM movimientos
+                   WHERE sucursal_id = %s AND tipo = 'ajuste' AND DATE(fecha) = %s
+                   GROUP BY producto_id) aj ON aj.producto_id = p.id
+        LEFT JOIN (SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad
+                   ELSE cantidad END) AS post FROM movimientos
+                   WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste')
+                     AND DATE(fecha) > %s
+                   GROUP BY producto_id) po ON po.producto_id = p.id
+        WHERE p.activo = 1 AND (l.stock > 0 OR ent.ingreso > 0 OR sa.salida > 0
+                                OR p.sucursal_id = %s OR p.sucursal_id IS NULL)
+          AND (%s = 0 OR p.categoria_id = %s)
+        ORDER BY c.nombre, p.nombre
+    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid, cat_id, cat_id)).fetchall()
+
+
+def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
+    """Agrega a una planilla ABIERTA los productos que ahora pertenecen a su
+    categoría y actualiza sus nombres sin pisar conteos ya digitados.
+
+    Las líneas se congelaban al crear la planilla: si un producto cambiaba de
+    categoría (o se creaba) después, la planilla quedaba sin ese producto.
+    """
+    inv = conn.execute("SELECT estado FROM inventario_diario WHERE id = ?",
+                       (inv_id,)).fetchone()
+    if not inv or inv["estado"] == "cerrado":
+        return 0
+    filas = _productos_planilla(conn, sid, fecha, cat_id)
+    det = _detalle(conn, inv_id)
+    por_prod = {d["producto_id"]: d for d in det}
+    cambios = 0
+    for f in filas:
+        stock_dia = (f["stock"] or 0) - (f["posterior"] or 0)
+        inicial = (stock_dia - (f["ingreso"] or 0)
+                   + (f["salida"] or 0) - (f["ajuste"] or 0))
+        if inicial < 0:
+            inicial = 0.0
+        disponible = inicial + (f["ingreso"] or 0)
+        d = por_prod.get(f["id"])
+        if d is None:
+            conn.execute("""
+                INSERT INTO inventario_detalle
+                    (inventario_id, producto_id, categoria_id, categoria_nombre, producto_nombre,
+                     codigo, unidad, stock_sistema, inicial, ingreso_dia, disponible,
+                     final, utilizada, diferencia, costo_promedio, precio_venta)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 0, %s, %s)
+            """, (inv_id, f["id"], f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
+                  f["nombre"], f["codigo"], f["unidad"] or "unidad", stock_dia,
+                  inicial, f["ingreso"] or 0, disponible, disponible,
+                  f["costo_promedio"] or 0, f["precio_venta"] or 0))
+            cambios += 1
+        else:
+            conn.execute("""
+                UPDATE inventario_detalle
+                SET categoria_id = %s, categoria_nombre = %s,
+                    producto_nombre = %s, codigo = %s, unidad = %s
+                WHERE id = %s
+            """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
+                  f["nombre"], f["codigo"], f["unidad"] or "unidad", d["id"]))
+            cambios += 1
+    if cambios:
+        conn.commit()
+    return cambios
+
+
 def _stocks_actuales(conn, sucursal_id):
     """{producto_id: stock en lotes} de la sucursal, en una sola consulta."""
     return {r["producto_id"]: r["c"] or 0.0 for r in conn.execute(
@@ -264,37 +351,7 @@ def inventario_crear():
 
     # Inventario inicial = stock a las 00:00 = stock actual - ingresos del día
     # + salidas del día. Los ajustes también mueven stock, así que se restan.
-    filas = conn.execute("""
-        SELECT p.id, p.codigo, p.nombre, p.unidad, p.costo_promedio, p.precio_venta,
-               p.categoria_id, c.nombre AS categoria_nombre,
-               COALESCE(l.stock, 0) AS stock,
-               COALESCE(ent.ingreso, 0) AS ingreso,
-               COALESCE(sa.salida, 0) AS salida,
-               COALESCE(aj.ajuste, 0) AS ajuste,
-               COALESCE(po.post, 0) AS posterior
-        FROM productos p
-        LEFT JOIN categorias c ON c.id = p.categoria_id
-        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS stock FROM lotes
-                   WHERE sucursal_id = %s GROUP BY producto_id) l ON l.producto_id = p.id
-        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ingreso FROM movimientos
-                   WHERE sucursal_id = %s AND tipo = 'entrada' AND DATE(fecha) = %s
-                   GROUP BY producto_id) ent ON ent.producto_id = p.id
-        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS salida FROM movimientos
-                   WHERE sucursal_id = %s AND tipo = 'salida' AND DATE(fecha) = %s
-                   GROUP BY producto_id) sa ON sa.producto_id = p.id
-        LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ajuste FROM movimientos
-                   WHERE sucursal_id = %s AND tipo = 'ajuste' AND DATE(fecha) = %s
-                   GROUP BY producto_id) aj ON aj.producto_id = p.id
-        LEFT JOIN (SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad
-                   ELSE cantidad END) AS post FROM movimientos
-                   WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste')
-                     AND DATE(fecha) > %s
-                   GROUP BY producto_id) po ON po.producto_id = p.id
-        WHERE p.activo = 1 AND (l.stock > 0 OR ent.ingreso > 0 OR sa.salida > 0
-                                OR p.sucursal_id = %s OR p.sucursal_id IS NULL)
-          AND (%s = 0 OR p.categoria_id = %s)
-        ORDER BY c.nombre, p.nombre
-    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid, cat_id, cat_id)).fetchall()
+    filas = _productos_planilla(conn, sid, fecha, cat_id)
 
     for f in filas:
         # 'stock' es el stock de HOY. Si la planilla es de un día anterior, primero
@@ -341,6 +398,9 @@ def inventario_detalle(inv_id):
     if not permitido:
         conn.close()
         return err("Planilla no encontrada", 404)
+    if inv["estado"] != "cerrado":
+        _sincronizar_detalle(conn, inv_id, inv["sucursal_id"],
+                             _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
     filas = _detalle(conn, inv_id)
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
     posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
@@ -774,7 +834,7 @@ def inventario_imprimir(inv_id):
     inv, permitido = _sucursal_de_planilla(conn, inv_id)
     if not permitido:
         conn.close()
-        return redirect("/")
+        return err("Planilla no encontrada", 404)
     filas = _detalle(conn, inv_id)
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
