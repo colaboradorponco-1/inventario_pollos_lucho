@@ -435,7 +435,7 @@
                     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="var(--primary)" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
                     <div style="flex:1; min-width:0">
                         <h3 id="inv-titulo">Conteo del día</h3>
-                        <p id="inv-subtitulo">Llena a mano el inventario inicial y el inventario final. El ingreso del día lo pone el sistema y no se escribe.</p>
+                        <p id="inv-subtitulo">Llena a mano el inventario inicial y el conteo final. El ingreso del sistema ya viene puesto; anota en la columna amarilla solo lo que llegó sin pasar por el sistema.</p>
                     </div>
                     <button class="btn btn-icon" id="btn-inv-cerrar-panel" title="Cerrar la planilla (guarda antes de cerrar)" aria-label="Cerrar panel de conteo">&#10005;</button>
                 </div>
@@ -444,7 +444,7 @@
 
                 <div class="toolbar small" id="inv-resumen" style="margin-bottom:10px"></div>
 
-                <p class="scan-hint inv-ayuda"><strong>Cómo se llena:</strong> escribe el <strong>inventario inicial</strong> y luego el <strong>inventario final</strong> con lo que contaste. El <strong>ingreso del día</strong> <strong>no se escribe</strong>: ya va puesto porque el sistema suma las compras y los pedidos que te entregaron, y por eso va sombreado. Si también lo anotas, la mercadería queda contada doble (pides 30 papas, te las entregan, tu stock sube 30 y si anotas 30 la planilla dice 60). Si llegó algo que <em>no</em> está en el sistema, regístralo en <strong>Registrar movimiento</strong> como entrada y aparecerá solo acá. El <strong>Disp. día</strong> = inicial + ingreso, y la <strong>cantidad utilizada</strong> = disponible − final. <strong>Dif.</strong> = final − stock del sistema: en rojo falta (hay menos de lo que el sistema dice) y en verde sobra.</p>
+                <p class="scan-hint inv-ayuda"><strong>Cómo se llena:</strong> escribe el <strong>inventario inicial</strong> y luego el <strong>inventario final</strong> con lo que contaste. El ingreso va en <strong>dos columnas</strong>: <strong>Ingreso del sistema</strong> (sombreada) ya viene sola con las compras y los pedidos que te entregaron — no se toca; <strong>Ingreso manual</strong> (amarilla) es para lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa. Si anotas en la sombreada una entrega que ya está registrada, la misma mercadería se cuenta doble. <strong>Disp. día</strong> = inicial + ingreso del sistema + ingreso manual, y la <strong>cantidad utilizada</strong> = disponible − conteo final. <strong>Dif.</strong> = final − stock del sistema: en rojo falta y en verde sobra.</p>
 
                 <div class="table-scroll"><table class="data-table inv-tabla">
                     <thead>
@@ -452,8 +452,9 @@
                             <th rowspan="2">Producto</th>
                             <th rowspan="2">Unidad</th>
                             <th rowspan="2">Inv. inicial</th>
-                            <th rowspan="2" style="background:#F1F5F9;color:#475569">Ingreso del día<br><small>del sistema, no se escribe</small></th>
-                            <th rowspan="2" style="background:#0F3D2E;color:#fff">Disp. día<br><small>= inicial + ingreso</small></th>
+<th rowspan="2" style="background:#F1F5F9;color:#475569">Ingreso del sistema<br><small>se arma solo</small></th>
+                <th rowspan="2" style="background:#FEF3C7;color:#92400E">Ingreso manual<br><small>anótalo aquí</small></th>
+                <th rowspan="2" style="background:#0F3D2E;color:#fff">Disp. día<br><small>= inicial + ingresos</small></th>
                             <th rowspan="2" style="background:#7C2D12;color:#fff">Inv. final<br><small>= tu conteo</small></th>
                             <th rowspan="2">Utilizada<br><small>= disp. − final</small></th>
                             <th rowspan="2">Sistema</th>
@@ -1345,7 +1346,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610021100"></script>
+    <script src="/static/app.js?v=202610021530"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

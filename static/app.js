@@ -3224,7 +3224,7 @@ async function abrirInventario(invId) {
     $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
-        : 'Solo se llenan a mano el inventario inicial y el conteo final. El ingreso del día ya lo pone el sistema (suma las compras y los pedidos que te entregaron) y va sombreado: si también lo anotas, la mercadería queda contada doble. Disponible = inicial + ingreso, y utilizada = disponible − conteo final.';
+        : 'Llena a mano el inventario inicial y el conteo final. El ingreso del sistema ya va puesto (compras y pedidos entregados) y no se toca; anota en la columna amarilla el ingreso manual, que es lo que llega sin pasar por el sistema. Disponible = inicial + ingreso del sistema + ingreso manual, y utilizada = disponible − conteo final.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
 
@@ -3257,10 +3257,16 @@ async function abrirInventario(invId) {
                            style="text-align:right">
                 </td>
                 <td>
-                    <input type="number" step="any" class="inv-ingreso" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.ingreso_dia))}" readonly disabled
-                           title="El ingreso del día lo arma el sistema con las compras y los pedidos entregados. No se escribe a mano: si lo anotas acá, se cuenta dos veces."
+                    <input type="number" step="any" class="inv-ingreso-sis" data-id="${f.id}"
+                           value="${esc(fmtInvQ(f.ingreso_sistema))}" readonly disabled
+                           title="Lo que ya entró por el sistema: las compras y los pedidos que te entregaron. No se escribe a mano; se arma solo con los movimientos."
                            style="text-align:right;background:#f1f5f9;color:#475569;cursor:not-allowed">
+                </td>
+                <td>
+                    <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
+                           value="${esc(fmtInvQ(f.ingreso_manual))}" placeholder="—" ${bloq}
+                           title="Anota acá solo lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa. Lo de los pedidos ya va solo en la columna de al lado."
+                           style="text-align:right">
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
@@ -3278,7 +3284,7 @@ async function abrirInventario(invId) {
     });
     tb.innerHTML = html;
 
-    $$('.inv-conteo, .inv-inicial, .inv-ingreso')
+    $$('.inv-conteo, .inv-inicial, .inv-ingreso-man')
         .forEach((inp) => inp.addEventListener('input', recalcFilaInv));
 
     $('#btn-inv-guardar').style.display = INV_CERRADA ? 'none' : '';
@@ -3299,11 +3305,13 @@ function recalcFilaInv(e) {
     const f = INV_FILAS.find((x) => x.id === id);
     if (!f) return;
     // El encargado escribe a mano el inicial y el conteo final. El ingreso del día
-    // NO se escribe: viene del sistema, asi que se toma tal cual del servidor y no
-    // del input, que ademas es de solo lectura.
+    // va partido: el del sistema se toma del servidor (ya viene en los
+    // movimientos) y solo se escribe el manual, que se le suma encima.
     const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
+    const manIn = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
     const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
-    const ingreso = Number(f.ingreso_dia || 0);
+    const ingMan = manIn && manIn.value !== '' ? Number(manIn.value) : 0;
+    const ingreso = Number(f.ingreso_sistema || 0) + ingMan;
     const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
     const conteo = inp.value === '' ? null : Number(inp.value);
     const final = conteo === null || Number.isNaN(conteo) ? disponible : conteo;
@@ -3323,9 +3331,11 @@ function collectedInventario() {
         const id = Number(inp.dataset.id);
         const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
         const ini = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
+        const man = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
         return {
             id,
             inicial: ini && ini.value !== '' ? Number(ini.value) : null,
+            ingreso_manual: man && man.value !== '' ? Number(man.value) : null,
             conteo_fisico: inp.value === '' ? null : Number(inp.value),
             observaciones: obs ? obs.value : '',
         };

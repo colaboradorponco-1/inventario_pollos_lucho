@@ -315,6 +315,7 @@ def init_db():
                     "stock_sistema DOUBLE DEFAULT 0,"
                     "inicial DOUBLE DEFAULT 0,"
                     "ingreso_dia DOUBLE DEFAULT 0,"
+                    "ingreso_manual DOUBLE DEFAULT 0,"
                     "disponible DOUBLE DEFAULT 0,"
                     "conteo_fisico DOUBLE,"
                     "final DOUBLE DEFAULT 0,"
@@ -631,6 +632,13 @@ def migrar_esquema():
         # hace falta configurar el producto. 0 = no aplica.
         if not _col_existe(cur, "pedido_detalle", "tacho_unidad"):
             _add_columna(cur, "pedido_detalle", "tacho_unidad DOUBLE DEFAULT 0")
+        # El ingreso del día se separa en dos: lo que entra por el sistema (los
+        # movimientos 'entrada': compras y pedidos entregados) y lo que el
+        # encargado anota a mano (mercadería que llegó por una vía que no pasa por
+        # el sistema). Se guardan por separado para que volver a anotar una
+        # entrega ya registrada no duplique la mercadería.
+        if not _col_existe(cur, "inventario_detalle", "ingreso_manual"):
+            _add_columna(cur, "inventario_detalle", "ingreso_manual DOUBLE DEFAULT 0")
         # Que sucursales además de los almacenes principales pueden ser destino
         # de un pedido. Antes la interfaz leía `sucursales.provee` pero la
         # columna nunca se creó, así que daba `undefined` y America y Simón López

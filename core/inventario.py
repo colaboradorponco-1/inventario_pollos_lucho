@@ -130,20 +130,17 @@ def _stocks_actuales(conn, sucursal_id):
 
 
 def _ingresos_del_dia(conn, sucursal_id, fecha):
-    """{producto_id: total que ENTRÓ} a la sucursal en ese día.
+    """{producto_id: total que ENTRÓ} a la sucursal en ese día, según el SISTEMA.
 
-    Es la fuente real del "ingreso del día" de la planilla, y se calcula SIEMPRE
-    desde `movimientos`, nunca desde lo que escriba el encargado. Todo lo que
-    entra a un almacén se registra como movimiento 'entrada': los pedidos que
-    despacha otro almacén y también las compras o devoluciones que se cargan a
-    mano en "Registrar movimiento". Por eso el ingreso ya sale solo.
+    Es la parte automática del "ingreso del día": todo lo que se registró como
+    movimiento 'entrada', o sea las compras y los pedidos que otro almacén le
+    entregó a esta sucursal. No se escribe a mano, y por eso no se puede
+    duplicar: si el encargado lo anotara otra vez, una sucursal que pidió 30
+    papas y las recibió tendría 60 de ingreso con 30 en el depósito.
 
-    Es justamente lo que hace peligroso dejar el campo editable: si el despacho
-    de un pedido ya lo Inga como 'entrada' y el encargado además escribe la
-    misma cantidad en la planilla, el ingreso queda duplicado. Caso real: una
-    sucursal pide 30 papas, el almacén se las entrega, el stock sube 30 y la
-    planilla marca 60 de ingreso — cuando en el depósito solo hay 30.
-    """
+    Lo que sí llega por vías que no pasan por el sistema (compra directa en el
+    mercado, devolución, mercadería traída de la casa) se anota aparte, en el
+    campo de ingreso manual, y se SUMA a este."""
     return {r["producto_id"]: r["i"] or 0.0 for r in conn.execute(
         "SELECT producto_id, SUM(cantidad) AS i FROM movimientos "
         "WHERE sucursal_id = %s AND tipo = 'entrada' AND DATE(fecha) = %s "
@@ -151,16 +148,21 @@ def _ingresos_del_dia(conn, sucursal_id, fecha):
 
 
 def _ingresos_de_linea(ingresos, fila, abierto):
-    """Ingreso que se muestra y se guarda en una línea de la planilla.
+    """(ingreso_del_sistema, ingreso_manual, ingreso_total) de una línea.
 
-    Mientras la planilla está ABIERTA se toma el valor actual de los movimientos,
-    para que una mercadería que llegó después de abrirla igual sume (antes se
-    congelaba al crearla y el ingreso se perdía en silencio). Si la planilla ya
-    está CERRADA se respeta el valor con el que se cerró: es un registro
-    histórico y no debe cambiar solo por registrar un movimiento belatedado."""
+    Mientras la planilla está ABIERTA la parte del sistema se recalcula, para que
+    una mercadería que llegó después de abrir la planilla igual sume (antes se
+    congelaba al crearla y el ingreso se perdía en silencio). La parte manual es
+    siempre la que escribió el encargado. Si la planilla ya está CERRADA se
+    respeta lo que se usó al cerrarla: es un registro histórico y no debe cambiar
+    solo por registrar un movimiento belatedado."""
     if not abierto:
-        return fila["ingreso_dia"] or 0.0
-    return ingresos.get(fila["producto_id"], 0.0)
+        sistema = fila["ingreso_dia"] or 0.0
+        manual = fila["ingreso_manual"] or 0.0
+    else:
+        sistema = ingresos.get(fila["producto_id"], 0.0)
+        manual = fila["ingreso_manual"] or 0.0
+    return sistema, manual, sistema + manual
 
 
 def _movimientos_posteriores(conn, sucursal_id, fecha, hora_corte=None):
@@ -359,9 +361,9 @@ def inventario_detalle(inv_id):
 
     lineas = []
     for f in filas:
-        # El ingreso sale de los movimientos, no de lo que se escriba a mano: por
-        # eso es de solo lectura en pantalla y no se acepta en el guardado.
-        ingreso = _ingresos_de_linea(ingresos, f, abierto)
+        # El ingreso se muestra partido: lo del sistema (automático, sombreado)
+        # y lo manual (lo que anota el encargado). Se suman para el disponible.
+        ing_sis, ing_man, ingreso = _ingresos_de_linea(ingresos, f, abierto)
         disponible = (f["inicial"] or 0) + ingreso
         conteo = f["conteo_fisico"]
         # Stock del sistema tal como estaba al momento del conteo: el actual menos
@@ -381,6 +383,8 @@ def inventario_detalle(inv_id):
             "unidad": f["unidad"],
             "stock_sistema": round(stock_ref, 3),
             "inicial": round(f["inicial"] or 0, 3),
+            "ingreso_sistema": round(ing_sis, 3),
+            "ingreso_manual": round(ing_man, 3),
             "ingreso_dia": round(ingreso, 3),
             "disponible": round(disponible, 3),
             "conteo_fisico": conteo,
@@ -477,23 +481,28 @@ def inventario_guardar(inv_id):
             inicial = _campo(item.get("inicial"), "El inventario inicial")
             if inicial is None:
                 inicial = fila["inicial"] or 0
-            # El INGRESO NO se acepta desde el formulario: se deduce de los
-            # movimientos. Si el navegador manda un valor distinto al deducido se
-            # avisa en vez de guardarlo en silencio, porque casi siempre significa
-            # que el encargado esta anotando de nuevo una entrada que el sistema
-            # ya registro (el caso clasico: se pide X, el almacen lo entrega, y en
-            # la planilla se escribe X otra vez -> el ingreso queda duplicado).
-            ingreso = _ingresos_de_linea(ingresos, fila, True)
-            enviado = item.get("ingreso_dia")
-            if enviado not in (None, ""):
-                v_env = flotante(enviado, None)
-                if v_env is not None and abs(v_env - ingreso) > 1e-9:
+            # El INGRESO va partido en dos y cada parte se guarda de una vez:
+            #  - del sistema: se deduce de los movimientos, NO se acepta escrito.
+            #    Si el navegador manda algo distinto se avisa, porque casi siempre
+            #    es que el encargado está anotando de nuevo una entrega que el
+            #    sistema ya registró, y eso duplicaba la mercadería.
+            #  - manual: sí se acepta, es para la mercadería que llega por vías que
+            #    no pasan por el sistema (compra directa, devolución, de la casa).
+            ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, fila, True)
+            enviado_sis = item.get("ingreso_sistema")
+            if enviado_sis not in (None, ""):
+                v_env = flotante(enviado_sis, None)
+                if v_env is not None and abs(v_env - ing_sis) > 1e-9:
                     raise _DatoInvalido(
-                        f"{fila['producto_nombre']}: el ingreso del día no se escribe a mano, "
-                        f"el sistema ya tiene {round(ingreso, 3)} de entrada (suman las compras y los "
-                        f"pedidos entregados). Si llego mercadería que NO está registrada, registrala "
-                        f"en 'Registrar movimiento' como entrada y acá aparecerá sola."
+                        f"{fila['producto_nombre']}: el ingreso del sistema no se escribe a mano, ya "
+                        f"tiene {round(ing_sis, 3)} de entrada (compras y pedidos entregados). "
+                        f"Anótalo en la columna 'Ingreso manual' de al lado, que esa sí es para lo "
+                        f"que llega sin pasar por el sistema."
                     )
+            ing_man = _campo(item.get("ingreso_manual"), "El ingreso manual")
+            if ing_man is None:
+                ing_man = fila["ingreso_manual"] or 0
+            ingreso = ing_sis + ing_man
             disponible = inicial + ingreso
             final = conteo if conteo is not None else disponible
             utilizada = max(disponible - final, 0)
@@ -508,10 +517,11 @@ def inventario_guardar(inv_id):
                 diferencia = round(final - stock_ref, 3)
             conn.execute("""
                 UPDATE inventario_detalle
-                SET inicial = %s, ingreso_dia = %s, disponible = %s,
+                SET inicial = %s, ingreso_dia = %s, ingreso_manual = %s, disponible = %s,
                     conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s, observaciones = %s
                 WHERE id = %s
-            """, (inicial, ingreso, disponible, conteo, final, utilizada, diferencia,
+            """, (inicial, ingreso, ing_man, disponible,
+                  conteo, final, utilizada, diferencia,
                   (item.get("observaciones") or "")[:500] or None, lid))
     except _DatoInvalido as e:
         conn.close()
@@ -786,10 +796,10 @@ def inventario_imprimir(inv_id):
     lineas = []
     for f in filas:
         conteo = f["conteo_fisico"]
-        # Mismo criterio que en pantalla: el ingreso sale de los movimientos y la
-        # planilla abierta se recalcula, para que el Excel y la pantalla digan
-        # exactamente lo mismo.
-        ingreso = _ingresos_de_linea(ingresos, f, abierto)
+        # Mismo criterio que en pantalla: el ingreso se deduce de los movimientos
+        # y la planilla abierta se recalcula, para que el Excel y la pantalla
+        # digan exactamente lo mismo.
+        ing_sis, ing_man, ingreso = _ingresos_de_linea(ingresos, f, abierto)
         disponible = (f["inicial"] or 0) + ingreso
         if conteo is None:
             final = ""
@@ -850,20 +860,23 @@ def inventario_excel(inv_id):
             nombre_cat = c["nombre"]
     conn.close()
 
-    enc = ["Categoría", "Producto", "Unidad", "Inventario inicial", "Ingreso del día",
+    enc = ["Categoría", "Producto", "Unidad", "Inventario inicial",
+           "Ingreso del sistema", "Ingreso manual", "Ingreso del día",
            "Disponible del día", "Inventario final", "Cantidad utilizada",
            "Diferencia", "Observaciones"]
-    filas_xl = [(f["categoria_nombre"] or "Sin categoría", f["producto_nombre"],
-                 f["unidad"] or "", f["inicial"] or 0, _ingresos_de_linea(ingresos, f, abierto),
-                 (f["inicial"] or 0) + _ingresos_de_linea(ingresos, f, abierto),
-                 f["final"] or 0,
-                 f["utilizada"] or 0, f["diferencia"] or 0, f["observaciones"] or "")
-                for f in filas]
+    filas_xl = []
+    for f in filas:
+        ing_sis, ing_man, ingreso = _ingresos_de_linea(ingresos, f, abierto)
+        filas_xl.append((f["categoria_nombre"] or "Sin categoría", f["producto_nombre"],
+                         f["unidad"] or "", f["inicial"] or 0, ing_sis, ing_man, ingreso,
+                         (f["inicial"] or 0) + ingreso, f["final"] or 0,
+                         f["utilizada"] or 0, f["diferencia"] or 0,
+                         f["observaciones"] or ""))
 
     titulo = "PLANILLA DE INVENTARIO DIARIO DE ALMACÉN"
     return responder_excel(
         f"inventario_{inv['fecha']}.xlsx", enc, filas_xl,
-        [22, 32, 9, 17, 15, 18, 16, 18, 11, 40],
+        [22, 32, 9, 17, 16, 14, 14, 16, 16, 16, 11, 40],
         titulo=titulo,
         subtitulos=[sucursal["nombre"] if sucursal else "",
                     f"Categoría: {nombre_cat}",
