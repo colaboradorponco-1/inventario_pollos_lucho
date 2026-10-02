@@ -3243,7 +3243,7 @@ async function abrirInventario(invId) {
     INV_FILAS.forEach((f) => {
         if (f.categoria !== catActual) {
             catActual = f.categoria;
-            html += `<tr style="background:#F5F5F5"><td colspan="10"><strong>${esc(catActual)}</strong></td></tr>`;
+            html += `<tr style="background:#F5F5F5"><td colspan="9"><strong>${esc(catActual)}</strong></td></tr>`;
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
         const bloq = INV_CERRADA ? 'disabled' : '';
@@ -3257,15 +3257,9 @@ async function abrirInventario(invId) {
                            style="text-align:right">
                 </td>
                 <td>
-                    <input type="number" step="any" class="inv-ingreso-sis" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.ingreso_sistema))}" readonly disabled
-                           title="Lo que ya entró por el sistema: las compras y los pedidos que te entregaron. No se escribe a mano; se arma solo con los movimientos."
-                           style="text-align:right;background:#f1f5f9;color:#475569;cursor:not-allowed">
-                </td>
-                <td>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
                            value="${esc(fmtInvQ(f.ingreso_manual))}" placeholder="—" ${bloq}
-                           title="Anota acá solo lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa. Lo de los pedidos ya va solo en la columna de al lado."
+                           title="Anota acá solo lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa."
                            style="text-align:right">
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
