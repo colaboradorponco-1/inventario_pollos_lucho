@@ -234,21 +234,15 @@ def inventario_crear():
     # dos planillas y no se sabe dónde se contabilizó. Se impide mezclar.
     criterio_opuesto = ("> 0" if cat_id == 0 else "= 0")
     opuesta = conn.execute(
-        f"SELECT id, categoria_id, estado FROM inventario_diario "
+        f"SELECT id FROM inventario_diario "
         f"WHERE sucursal_id = %s AND fecha = %s AND categoria_id {criterio_opuesto}",
         (sid, fecha)).fetchone()
-    if opuesta:
+    if opuesta and cat_id == 0:
         conn.close()
-        if cat_id == 0:
-            return err(
-                "Ese día ya hay una planilla por categoría. Cierra o borra esas "
-                "planillas antes de crear una de todas las categorías, o el mismo "
-                "producto se contaría dos veces.", 400)
-        # Ya existe la planilla de "Todas las categorías" ese día: abrirla en
-        # vez de bloquear (así no parece que la categoría no se puede elegir).
-        return ok({"id": opuesta["id"], "estado": opuesta["estado"],
-                   "fecha": fecha, "sucursal_id": sid},
-                  message="Ya existe la planilla de 'Todas las categorías'; se abrió esa")
+        return err(
+            "Ese día ya hay una planilla por categoría. Cierra o borra esas "
+            "planillas antes de crear una de todas las categorías, o el mismo "
+            "producto se contaría dos veces.", 400)
 
     existente = conn.execute(
         "SELECT * FROM inventario_diario WHERE sucursal_id = %s AND categoria_id = %s AND fecha = %s",
