@@ -3243,39 +3243,26 @@ async function abrirInventario(invId) {
     INV_FILAS.forEach((f) => {
         if (f.categoria !== catActual) {
             catActual = f.categoria;
-            html += `<tr style="background:#F5F5F5"><td colspan="10"><strong>${esc(catActual)}</strong></td></tr>`;
+            html += `<tr style="background:#F5F5F5"><td colspan="6"><strong>${esc(catActual)}</strong></td></tr>`;
         }
-        const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
+        // El Inv. final se precarga con el stock del sistema: el encargado solo lo
+        // corrige si contó distinto. Si la planilla está cerrada, se muestra el conteo guardado.
+        const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined
+            ? (INV_CERRADA ? '' : fmtInvQ(f.stock_sistema))
+            : f.conteo_fisico;
         const bloq = INV_CERRADA ? 'disabled' : '';
         html += `
             <tr data-inv-fila="${f.id}">
                 <td class="inv-col-tit"><strong>${esc(f.producto)}</strong></td>
                 <td>${esc(f.unidad)}</td>
-                <td>
-                    <input type="number" step="any" min="0" class="inv-inicial" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.inicial))}" placeholder="—" ${bloq}
-                           style="text-align:right">
-                </td>
-                <td>
-                    <input type="number" step="any" class="inv-ingreso-sis" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.ingreso_sistema))}" readonly disabled
-                           title="Lo que ya entró por el sistema: las compras y los pedidos que te entregaron. No se escribe a mano; se arma solo con los movimientos."
-                           style="text-align:right;background:#f1f5f9;color:#475569;cursor:not-allowed">
-                </td>
-                <td>
-                    <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.ingreso_manual))}" placeholder="—" ${bloq}
-                           title="Anota acá solo lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa. Lo de los pedidos ya va solo en la columna de al lado."
-                           style="text-align:right">
-                </td>
-                <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
+                <td class="num">${esc(fmtInvQ(f.inicial))}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
-                           value="${conteo}" placeholder="—" ${bloq} style="text-align:right">
+                           value="${conteo}" placeholder="—" ${bloq}
+                           title="Stock que tiene el sistema. Si contaste distinto, escribe la cantidad real."
+                           style="text-align:right;background:#7C2D12;color:#fff">
                 </td>
-                <td class="num" data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
                 <td class="num" style="color:var(--muted)">${esc(fmtInvQ(f.stock_sistema))}</td>
-                <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia)}</td>
                 <td class="inv-col-obs">
                     <input type="text" class="inv-obs" data-id="${f.id}"
                            value="${esc(f.observaciones || '')}" placeholder="—" ${bloq}>
@@ -3284,7 +3271,7 @@ async function abrirInventario(invId) {
     });
     tb.innerHTML = html;
 
-    $$('.inv-conteo, .inv-inicial, .inv-ingreso-man')
+    $$('.inv-conteo, .inv-obs')
         .forEach((inp) => inp.addEventListener('input', recalcFilaInv));
 
     $('#btn-inv-guardar').style.display = INV_CERRADA ? 'none' : '';
@@ -3299,43 +3286,18 @@ async function abrirInventario(invId) {
     $('#inv-panel-conteo').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function recalcFilaInv(e) {
-    const inp = e.target;
-    const id = Number(inp.dataset.id);
-    const f = INV_FILAS.find((x) => x.id === id);
-    if (!f) return;
-    // El encargado escribe a mano el inicial y el conteo final. El ingreso del día
-    // va partido: el del sistema se toma del servidor (ya viene en los
-    // movimientos) y solo se escribe el manual, que se le suma encima.
-    const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
-    const manIn = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
-    const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
-    const ingMan = manIn && manIn.value !== '' ? Number(manIn.value) : 0;
-    const ingreso = Number(f.ingreso_sistema || 0) + ingMan;
-    const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
-    const conteo = inp.value === '' ? null : Number(inp.value);
-    const final = conteo === null || Number.isNaN(conteo) ? disponible : conteo;
-    const utilizada = Math.max(disponible - final, 0);
-    const dif = conteo === null || Number.isNaN(conteo) ? 0 : final - f.stock_sistema;
-    const dEl = $(`[data-inv-disp="${id}"]`);
-    if (dEl) dEl.textContent = fmtInvQ(disponible);
-    const uEl = $(`[data-inv-util="${id}"]`);
-    const difEl = $(`[data-inv-dif="${id}"]`);
-    if (uEl) uEl.textContent = fmtInvQ(utilizada);
-    if (difEl) difEl.innerHTML = diffInvBadge(dif);
+function recalcFilaInv() {
+    // La planilla ya no recalcula columnas en vivo: el conteo se guarda tal cual
+    // y el ajuste se calcula al cerrar. Se deja como handler de los inputs.
 }
 
 function collectedInventario() {
-    // $$(...) devuelve un NodeList: sin Array.from no tiene .map().
+    // Solo se envía el conteo y las observaciones; el resto lo conserva el backend.
     return Array.from($$('#inv-tbody .inv-conteo')).map((inp) => {
         const id = Number(inp.dataset.id);
         const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
-        const ini = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
-        const man = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
         return {
             id,
-            inicial: ini && ini.value !== '' ? Number(ini.value) : null,
-            ingreso_manual: man && man.value !== '' ? Number(man.value) : null,
             conteo_fisico: inp.value === '' ? null : Number(inp.value),
             observaciones: obs ? obs.value : '',
         };
