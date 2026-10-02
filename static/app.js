@@ -3217,7 +3217,7 @@ async function abrirInventario(invId) {
     $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
-        : 'Llena a mano el inventario inicial y el conteo final. El ingreso del sistema ya va puesto (compras y pedidos entregados) y no se toca; anota en la columna amarilla el ingreso manual, que es lo que llega sin pasar por el sistema. Disponible = inicial + ingreso del sistema + ingreso manual, y utilizada = disponible − conteo final.';
+        : 'Llena a mano el inventario inicial, el ingreso manual y el conteo final. Disponible = inicial + ingreso manual (el ingreso del sistema ya no se suma; la columna Sistema solo es de comparación). Utilizada = disponible − conteo final.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
     const h = $('#inv-hora');
