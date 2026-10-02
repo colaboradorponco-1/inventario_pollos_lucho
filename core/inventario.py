@@ -916,14 +916,14 @@ def inventario_excel(inv_id):
     conn.close()
 
     enc = ["Categoría", "Producto", "Unidad", "Inventario inicial",
-           "Ingreso del sistema", "Ingreso manual", "Ingreso del día",
+           "Ingreso manual", "Ingreso del día",
            "Disponible del día", "Inventario final", "Cantidad utilizada",
            "Diferencia", "Observaciones"]
     filas_xl = []
     for f in filas:
         ing_sis, ing_man, ingreso = _ingresos_de_linea(ingresos, f, abierto)
         filas_xl.append((f["categoria_nombre"] or "Sin categoría", f["producto_nombre"],
-                         f["unidad"] or "", f["inicial"] or 0, ing_sis, ing_man, ingreso,
+                         f["unidad"] or "", f["inicial"] or 0, ing_man, ingreso,
                          (f["inicial"] or 0) + ingreso, f["final"] or 0,
                          f["utilizada"] or 0, f["diferencia"] or 0,
                          f["observaciones"] or ""))
@@ -931,7 +931,7 @@ def inventario_excel(inv_id):
     titulo = "PLANILLA DE INVENTARIO DIARIO DE ALMACÉN"
     return responder_excel(
         f"inventario_{inv['fecha']}.xlsx", enc, filas_xl,
-        [22, 32, 9, 17, 16, 14, 14, 16, 16, 16, 11, 40],
+        [22, 32, 9, 17, 14, 14, 16, 16, 16, 11, 40],
         titulo=titulo,
         subtitulos=[sucursal["nombre"] if sucursal else "",
                     f"Categoría: {nombre_cat}",
