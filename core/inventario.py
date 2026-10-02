@@ -418,8 +418,10 @@ def inventario_detalle(inv_id):
     for f in filas:
         # El ingreso se muestra partido: lo del sistema (automático, sombreado)
         # y lo manual (lo que anota el encargado). Se suman para el disponible.
-        ing_sis, ing_man, ingreso = _ingresos_de_linea(ingresos, f, abierto)
-        disponible = (f["inicial"] or 0) + ingreso
+        ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, f, abierto)
+        # Disponible = inicial + SOLO lo manual. El ingreso automático (compras,
+        # pedidos) ya no se suma: la planilla es 100% lo que anota el encargado.
+        disponible = (f["inicial"] or 0) + ing_man
         conteo = f["conteo_fisico"]
         # Stock del sistema tal como estaba al momento del conteo: el actual menos
         # lo que se movió después de la fecha de la planilla.
@@ -557,7 +559,8 @@ def inventario_guardar(inv_id):
             ing_man = _campo(item.get("ingreso_manual"), "El ingreso manual")
             if ing_man is None:
                 ing_man = fila["ingreso_manual"] or 0
-            ingreso = ing_sis + ing_man
+            # Disponible = inicial + SOLO lo manual. El automático no cuenta en la planilla.
+            ingreso = ing_man
             disponible = inicial + ingreso
             final = conteo if conteo is not None else disponible
             utilizada = max(disponible - final, 0)
@@ -851,11 +854,9 @@ def inventario_imprimir(inv_id):
     lineas = []
     for f in filas:
         conteo = f["conteo_fisico"]
-        # Mismo criterio que en pantalla: el ingreso se deduce de los movimientos
-        # y la planilla abierta se recalcula, para que el Excel y la pantalla
-        # digan exactamente lo mismo.
-        ing_sis, ing_man, ingreso = _ingresos_de_linea(ingresos, f, abierto)
-        disponible = (f["inicial"] or 0) + ingreso
+        # Mismo criterio que en pantalla: disponible = inicial + solo lo manual.
+        ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, f, abierto)
+        disponible = (f["inicial"] or 0) + ing_man
         if conteo is None:
             final = ""
             utilizada = ""
@@ -867,7 +868,7 @@ def inventario_imprimir(inv_id):
             "producto": f["producto_nombre"],
             "unidad": f["unidad"] or "unidad",
             "inicial": round(f["inicial"] or 0, 3),
-            "ingreso_dia": round(ingreso, 3),
+            "ingreso_dia": round(ing_man, 3),
             "disponible": round(disponible, 3),
             "final": final,
             "utilizada": utilizada,
@@ -916,22 +917,22 @@ def inventario_excel(inv_id):
     conn.close()
 
     enc = ["Categoría", "Producto", "Unidad", "Inventario inicial",
-           "Ingreso manual", "Ingreso del día",
+           "Ingreso manual",
            "Disponible del día", "Inventario final", "Cantidad utilizada",
            "Diferencia", "Observaciones"]
     filas_xl = []
     for f in filas:
-        ing_sis, ing_man, ingreso = _ingresos_de_linea(ingresos, f, abierto)
+        ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, f, abierto)
         filas_xl.append((f["categoria_nombre"] or "Sin categoría", f["producto_nombre"],
-                         f["unidad"] or "", f["inicial"] or 0, ing_man, ingreso,
-                         (f["inicial"] or 0) + ingreso, f["final"] or 0,
+                         f["unidad"] or "", f["inicial"] or 0, ing_man,
+                         (f["inicial"] or 0) + ing_man, f["final"] or 0,
                          f["utilizada"] or 0, f["diferencia"] or 0,
                          f["observaciones"] or ""))
 
     titulo = "PLANILLA DE INVENTARIO DIARIO DE ALMACÉN"
     return responder_excel(
         f"inventario_{inv['fecha']}.xlsx", enc, filas_xl,
-        [22, 32, 9, 17, 14, 14, 16, 16, 16, 11, 40],
+        [22, 32, 9, 17, 14, 16, 16, 16, 11, 40],
         titulo=titulo,
         subtitulos=[sucursal["nombre"] if sucursal else "",
                     f"Categoría: {nombre_cat}",

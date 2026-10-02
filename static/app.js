@@ -3298,14 +3298,13 @@ function recalcFilaInv(e) {
     const id = Number(inp.dataset.id);
     const f = INV_FILAS.find((x) => x.id === id);
     if (!f) return;
-    // El encargado escribe a mano el inicial y el conteo final. El ingreso del día
-    // va partido: el del sistema se toma del servidor (ya viene en los
-    // movimientos) y solo se escribe el manual, que se le suma encima.
+    // El encargado escribe a mano el inicial, el ingreso manual y el conteo final.
+    // Disponible = inicial + solo lo manual (el automático no cuenta en la planilla).
     const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
     const manIn = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
     const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
     const ingMan = manIn && manIn.value !== '' ? Number(manIn.value) : 0;
-    const ingreso = Number(f.ingreso_sistema || 0) + ingMan;
+    const ingreso = ingMan;
     const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
     const conteo = inp.value === '' ? null : Number(inp.value);
     const final = conteo === null || Number.isNaN(conteo) ? disponible : conteo;
