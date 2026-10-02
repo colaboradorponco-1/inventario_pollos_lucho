@@ -433,13 +433,14 @@ def inventario_detalle(inv_id):
         # pedidos) ya no se suma: la planilla es 100% lo que anota el encargado.
         disponible = (f["inicial"] or 0) + ing_man
         conteo = f["conteo_fisico"]
-        # Stock del sistema tal como estaba al momento del conteo: el actual menos
-        # lo que se movió después de la fecha de la planilla.
-        stock_ref = stocks.get(f["producto_id"], 0.0) - posteriores.get(f["producto_id"], 0.0)
+        # Para una línea YA CONTADA se muestra la referencia congelada en el
+        # momento del primer conteo (así un pedido posterior no marca faltante).
+        # Para las que faltan se muestra el stock vivo, de comparación.
         if conteo is None:
-            # Sin conteo no hay diferencia que informar (se calcula al cerrar).
+            stock_ref = stocks.get(f["producto_id"], 0.0) - posteriores.get(f["producto_id"], 0.0)
             diferencia = 0.0
         else:
+            stock_ref = f["stock_sistema"] or 0.0
             diferencia = round((f["final"] or 0) - stock_ref, 3)
         lineas.append({
             "id": f["id"],
@@ -574,19 +575,28 @@ def inventario_guardar(inv_id):
             if conteo is None:
                 # Sin conteo no hay diferencia: se calcula recién al cerrar.
                 diferencia = 0.0
+                stock_sis = fila["stock_sistema"] or 0.0
             else:
                 # Diferencia = lo que hay de menos (-) o de más (+) respecto al sistema.
-                # Se compara contra el stock real de `lotes` (al momento del conteo),
-                # no contra `disponible` ni contra el stock de cuando se abrió la planilla.
-                stock_ref = stocks.get(fila["producto_id"], 0.0) - posteriores.get(fila["producto_id"], 0.0)
-                diferencia = round(final - stock_ref, 3)
+                # La referencia se CONGELA en el primer conteo de la línea: si el encargado
+                # contó antes de que llegue el pedido, el sistema guarda cuánto tenía en ESE
+                # momento. Un pedido entregado después NO marca faltante falso: ese +ya está
+                # registrado como movimiento y no debe duplicarse ni achacarse a la planilla.
+                ya_contado = fila["conteo_fisico"] is not None
+                if ya_contado:
+                    stock_sis = fila["stock_sistema"] or 0.0
+                else:
+                    stock_sis = (stocks.get(fila["producto_id"], 0.0)
+                                 - posteriores.get(fila["producto_id"], 0.0))
+                diferencia = round(final - stock_sis, 3)
             conn.execute("""
                 UPDATE inventario_detalle
                 SET inicial = %s, ingreso_dia = %s, ingreso_manual = %s, disponible = %s,
-                    conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s, observaciones = %s
+                    conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s,
+                    stock_sistema = %s, observaciones = %s
                 WHERE id = %s
             """, (inicial, ingreso, ing_man, disponible,
-                  conteo, final, utilizada, diferencia,
+                  conteo, final, utilizada, diferencia, stock_sis,
                   (item.get("observaciones") or "")[:500] or None, lid))
     except _DatoInvalido as e:
         conn.close()
@@ -644,18 +654,16 @@ def inventario_cerrar(inv_id):
     faltantes = 0
     sobrantes = 0
     valor_dif = 0.0
-    # El ajuste se calcula contra el stock REAL al momento del conteo (el de
-    # lotes menos lo que se movió después de la fecha de la planilla), no contra
-    # el stock de cuando se abrió: si hubo entradas/salidas mientras la planilla
-    # estuvo abierta, usar el valor viejo dejaba el stock descuadrado.
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
     dif_por_linea = {}
     for f in filas:
         final = f["final"]
         if final is None:
             continue
-        stock_actual = stock_lotes(conn, f["producto_id"], inv["sucursal_id"])
-        stock_ref = (stock_actual or 0.0) - posteriores.get(f["producto_id"], 0.0)
+        # La referencia se congeló en el primer conteo de la línea (guardar).
+        # Se ajusta contra ese valor, no contra el stock de AHORA: si un pedido
+        # se entregó después de contar, no se marca faltante por algo que ya
+        # quedó registrado como movimiento.
+        stock_ref = f["stock_sistema"] or 0.0
         dif = round((final or 0) - stock_ref, 3)
         dif_por_linea[f["id"]] = dif
         if abs(dif) < 1e-9:
