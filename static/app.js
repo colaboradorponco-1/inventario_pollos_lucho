@@ -3113,20 +3113,13 @@ function revisarHoraCorte() {
         box.dataset.riesgo = '';
         return true;
     }
-    const h = Math.floor(dif / 60), m = dif % 60;
-    const atraso = h ? `${h} h ${m} min` : `${m} min`;
-    const ahoraTxt = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
     box.dataset.riesgo = '1';
     box.innerHTML =
-        `<strong>Ojo con la hora de corte.</strong> Ponerla no cierra nada: solo marca ` +
-        `hasta qué momento se hizo el conteo.<br>` +
-        `Escribiste <strong>${$('#inv-hora').value}</strong> y ya son las ` +
-        `<strong>${ahoraTxt}</strong> (${atraso} después). Al cerrar, el sistema ` +
-        `descontará otra vez todo lo que se movió después de las ` +
-        `<strong>${$('#inv-hora').value}</strong>, aunque eso ya esté dentro de tu ` +
-        `conteo. Te puede marcar como faltante producto que sí tenías.<br>` +
-        `<strong>Escribe la hora en que terminaste de contar en el almacén</strong>, ` +
-        `no la hora en que vas a apretar el botón.`;
+        `<strong>Ojo con la hora de corte.</strong> Si ya pasó la hora que escribiste, ` +
+        `al cerrar se va a descontar lo que se movió después y puede marcar faltantes ` +
+        `que no existen.<br>` +
+        `Poné la hora en que terminaste de contar en el almacén, no la de cuando ` +
+        `vas a apretar el botón.`;
     box.style.display = '';
     return false;
 }
@@ -3227,6 +3220,13 @@ async function abrirInventario(invId) {
         : 'Llena a mano el inventario inicial y el conteo final. El ingreso del sistema ya va puesto (compras y pedidos entregados) y no se toca; anota en la columna amarilla el ingreso manual, que es lo que llega sin pasar por el sistema. Disponible = inicial + ingreso del sistema + ingreso manual, y utilizada = disponible − conteo final.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
+    const h = $('#inv-hora');
+    if (h && !INV_CERRADA) {
+        const dH = new Date();
+        h.value = d.hora_corte ||
+            String(dH.getHours()).padStart(2, '0') + ':' + String(dH.getMinutes()).padStart(2, '0');
+    }
+    revisarHoraCorte();
 
     const r = d.resumen || {};
     $('#inv-resumen').innerHTML =
@@ -3344,14 +3344,7 @@ function collectedInventario() {
 
 async function guardarInventario() {
     if (!INV_ID) return false;
-    // Última barrera: si la hora de corte quedó atrás, el cierre va a reportar
-    // como faltante lo que se movió después. Se pregunta antes de escribir.
-    if (!revisarHoraCorte()) {
-        if (!confirm('La hora de corte quedó en el pasado.\n\n' +
-            'Al cerrar se va a deshacer todo lo que entró o salió después de esa ' +
-            'hora, y eso puede marcar como faltante producto que sí contaste.\n\n' +
-            '¿Guardar de todos modos?')) return false;
-    }
+    revisarHoraCorte();
     const r = await request(API + '/inventario-diario/' + INV_ID, {
         method: 'PUT',
         body: JSON.stringify({
@@ -3373,13 +3366,6 @@ async function cerrarInventario() {
     if (sinContar > 0) {
         toast(`Faltan ${sinContar} productos por contar`, 'err');
         return;
-    }
-    if (!revisarHoraCorte()) {
-        if (!confirm('La hora de corte quedó en el pasado.\n\n' +
-            'Al cerrar se ajusta el stock deshaciendo todo lo que entró o salió ' +
-            'después de esa hora. Si pusiste una hora anterior a la real, vas a ' +
-            'tener diferencias falsas y el stock va a quedar mal.\n\n' +
-            '¿Estás seguro de que esa hora es correcta?')) return;
     }
     if (!confirm('Al cerrar la planilla se ajustará el stock de los productos con diferencia. ¿Continuar?')) return;
     // Primero se guarda el conteo digitado: si no, el cierre usaría valores viejos.
