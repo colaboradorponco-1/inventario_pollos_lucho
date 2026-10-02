@@ -442,7 +442,7 @@ def inventario_detalle(inv_id):
             "inicial": round(f["inicial"] or 0, 3),
             "ingreso_sistema": round(ing_sis, 3),
             "ingreso_manual": round(ing_man, 3),
-            "ingreso_dia": round(ingreso, 3),
+            "ingreso_dia": round(ing_sis + ing_man, 3),
             "disponible": round(disponible, 3),
             "conteo_fisico": conteo,
             "final": round(f["final"] or 0, 3),
