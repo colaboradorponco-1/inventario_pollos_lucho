@@ -352,9 +352,29 @@ def inventario_crear():
         return err(f"La planilla de '{cat_nombre}' de esa fecha ya está cerrada", 400)
     if existente:
         conn.close()
+        # Hay DOS encargados por sucursal y la planilla es UNA por sucursal,
+        # categoría y fecha: los dos cuentan sobre la misma. Decir solamente
+        # "ya existe" deja al segundo pensando que el sistema falló, así que se
+        # le dice QUIÉN la abrió y a qué hora. Si la abrió él mismo, se le
+        # recuerda que puede seguir completándola (no se pierde nada).
+        abierto_por = (existente.get("usuario") or "").strip()
+        mio = bool(abierto_por) and abierto_por == (session.get("usuario") or "")
+        hora = (existente.get("hora_corte") or "").strip()
+        cuando = f" a las {hora}" if hora else ""
+        if not abierto_por:
+            detalle = "ya estaba abierta y no tiene responsable registrado"
+        elif mio:
+            detalle = (f"la abriste vos{cuando} y sigue abierta. Podés seguir "
+                       f"cargando el conteo")
+        else:
+            detalle = f"la abrió {abierto_por}{cuando}"
         return ok({"id": existente["id"], "estado": existente["estado"],
-                   "fecha": existente["fecha"], "sucursal_id": sid},
-                  message=f"La planilla de '{cat_nombre}' ya existe")
+                   "fecha": existente["fecha"], "sucursal_id": sid,
+                   "usuario": abierto_por, "hora_corte": hora,
+                   "yo_la_abri": mio},
+                  message=f"La planilla de '{cat_nombre}' de esa fecha ya está "
+                          f"abierta: {detalle}. Los dos pueden contarla sobre la "
+                          f"misma planilla y lo que ya cargaste queda como está.")
 
     cur = conn.execute("""
         INSERT INTO inventario_diario (sucursal_id, categoria_id, fecha, hora_corte, usuario, estado)

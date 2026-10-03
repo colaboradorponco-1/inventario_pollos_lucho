@@ -37,16 +37,22 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from flask import Flask, session  # noqa: E402
 
 import database  # noqa: E402
+import core.util as utilmod  # noqa: E402
 import core.pedidos as ped  # noqa: E402
 from core.util import registrar_movimiento, stock_actual  # noqa: E402
 
 
 class ConexionTransactional:
-    """Conexion unica compartida con commit() no-op.
+    """Conexion unica compartida con commit() y rollback() no-op.
 
     Asi el endpoint escribe sobre la MISMA transaccion que lee la prueba, que es
-    la unica forma de medir el efecto. El commit real es el unico rollback del
-    final."""
+    la unica forma de medir el efecto.
+
+    OJO con el rollback() en no-op: `_despachar_stock()` llama a `conn.rollback()`
+    para descartar una lectura antes de mover el stock. Si eso fuera de verdad,
+    borraria TODO el setup de la prueba (los pedidos y el stock ficticio ya
+    insertados) y no habria nada que medir. Anulado, la unica llamada real a
+    rollback() es la del `finally` de main(), sobre CONN._conn."""
 
     def __init__(self, conn):
         self._conn = conn
@@ -56,6 +62,9 @@ class ConexionTransactional:
 
     def commit(self):
         pass  # no-op: sigue abierta
+
+    def rollback(self):
+        pass  # no-op: ver docstring. El real esta en main()
 
     def close(self):
         pass  # la transaccion es de esta prueba
@@ -71,6 +80,20 @@ def get_conn_virtual():
 
 
 ped.get_conn = get_conn_virtual
+
+# PROBLEMA 2: `registrar_auditoria()` abre su PROPIA conexion y le hace commit.
+# Escapa de la transaccion de la prueba, asi que sus filas se guardarian aunque
+# todo lo demas se deshaga. Se anula por los dos lados donde se puede estar
+# enlazada: el modulo que la define y el que la importa.
+AUDITORIAS_ANULADAS = []
+
+
+def _auditoria_anulada(accion, detalle=""):
+    AUDITORIAS_ANULADAS.append(accion)
+
+
+utilmod.registrar_auditoria = _auditoria_anulada
+ped.registrar_auditoria = _auditoria_anulada
 
 srv = Flask(__name__)
 srv.secret_key = "prueba-e2e"
@@ -106,10 +129,37 @@ def catalogo_sucursales():
 
 
 def producto_prueba():
-    """Un producto activo cualquiera: el stock lo crea la prueba."""
+    """Un producto REAL que tenga 1 sola unidad en todo el sistema.
+
+    Asi, si la prueba somehow dejara algo, el dano maximo posible es una unidad
+    y el dueño puede reponerla a mano. Se avisa de cual es antes de empezar."""
     return CONN.execute(
-        "SELECT id, nombre, IFNULL(costo_promedio, 0) AS costo FROM productos "
-        "WHERE activo = 1 ORDER BY id LIMIT 1").fetchone()
+        "SELECT p.id, p.nombre, IFNULL(p.costo_promedio, 0) AS costo, "
+        "       SUM(l.cantidad) AS stock_total "
+        "FROM productos p JOIN lotes l ON l.producto_id = p.id "
+        "WHERE p.activo = 1 "
+        "GROUP BY p.id, p.nombre, p.costo_promedio "
+        "HAVING SUM(l.cantidad) = 1 "
+        "ORDER BY p.id LIMIT 1").fetchone()
+
+
+def stock_ficticio(cantidad):
+    """Stock artificial MINIMO para que los deltas se puedan medir sin duenos.
+
+    Antes eran 100 unidades por caso. Con un producto real de 1 unidad, un
+    rollback fallido habria dejado +100 de basura. Con 10 alcanza igual: lo que
+    se mide es el delta exacto (2 y 3), no el stock total."""
+    return cantidad
+
+
+def lotos_de_prueba(prod_id):
+    """Foto de los lotes del producto, para poder reponerlos a mano si algo queda."""
+    return [{
+        "id": r["id"], "sucursal_id": r["sucursal_id"], "cantidad": r["cantidad"],
+        "vence": str(r["vence"]), "costo": r["costo"],
+    } for r in CONN.execute(
+        "SELECT id, sucursal_id, cantidad, vence, IFNULL(costo, 0) AS costo "
+        "FROM lotes WHERE producto_id = %s ORDER BY id", (prod_id,)).fetchall()]
 
 
 def crear_pedido(proveedor_id, sucursal_id, prod, cantidad):
@@ -280,6 +330,11 @@ def correr_casos():
     print("PRUEBA E2E POR ETAPA (una transaccion, rollback al final)")
     print("=" * 74)
     print(f"  Producto de prueba:         {prod['nombre']} (id {prod['id']})")
+    print(f"  Stock REAL en todo el sistema: {prod['stock_total']}")
+    print()
+    print("  AVISO: se eligio un producto que tiene 1 sola unidad para que, si algo")
+    print("  quedara, el dano sea de UNA unidad y se pueda reponer a mano. Todo lo")
+    print("  que hace la prueba va dentro de una transaccion que se deshace al final.")
     print()
 
     suc = catalogo_sucursales()
@@ -301,13 +356,19 @@ def correr_casos():
     # Stock real de TODAS las sucursales antes de tocar nada: al final tiene que
     # volver exactamente igual. Es la prueba de que el rollback no dejo nada.
     stock_inicial = {sid: stock_actual(CONN, prod["id"], sid) for sid in suc}
+    lotes_inicial = lotos_de_prueba(prod["id"])
+    print("  Lotes ANTES (para reponer a mano si algo queda):")
+    for l in lotes_inicial:
+        print(f"    lote {l['id']}: sucursal {l['sucursal_id']}, "
+              f"{l['cantidad']} unidades, costo {l['costo']}")
+    print()
 
     # ---- Caso A: almacen principal -> sucursal (el flujo de todas) ----
     print("-" * 74)
     print(f"CASO A: {ap['nombre']} -> {dist['nombre']}  (almacen principal)")
     print("-" * 74)
     cantidad = 2.0
-    dar_stock(prod["id"], ap["id"], 100)
+    dar_stock(prod["id"], ap["id"], 10)
     pid = crear_pedido(ap["id"], dist["id"], prod, cantidad)
     correr_flujo(pid, ap["id"], ap["id"], dist["id"], prod, cantidad, sucursal_que_pidio=dist["id"])
     print()
@@ -317,7 +378,7 @@ def correr_casos():
     print(f"CASO B: {dist['nombre']} -> {no_dist['nombre']}  (sucursal que DISTRIBUYE)")
     print("-" * 74)
     cantidad_b = 3.0
-    dar_stock(prod["id"], dist["id"], 100)
+    dar_stock(prod["id"], dist["id"], 10)
     pid_b = crear_pedido(dist["id"], no_dist["id"], prod, cantidad_b)
     total_b = correr_flujo(pid_b, dist["id"], dist["id"], no_dist["id"], prod, cantidad_b, sucursal_que_pidio=no_dist["id"])
     print()
@@ -343,7 +404,7 @@ def correr_casos():
     # 3 x 3.333 = 9.999 exacto: con round(...,2) el total quedaba en 10.0
     costo = 3.333
     CONN.execute("UPDATE productos SET costo_promedio = ? WHERE id = ?", (costo, prod["id"]))
-    dar_stock(prod["id"], ap["id"], 100)
+    dar_stock(prod["id"], ap["id"], 10)
     pid_d = crear_pedido(ap["id"], no_dist["id"], prod, 3.0)
     total_d = correr_flujo(pid_d, ap["id"], ap["id"], no_dist["id"], prod, 3.0, sucursal_que_pidio=no_dist["id"])
     esperado = 3.0 * costo
@@ -359,7 +420,9 @@ def correr_casos():
     print("CASO E: solo el almacen (proveedor) cambia el estado del pedido")
     print("-" * 74)
     # Pedido de una sucursal, despachado por el almacen principal.
-    dar_stock(prod["id"], ap["id"], 100)
+    stock_antes = stock_actual(CONN, prod["id"], ap["id"])
+    stock_suc_antes = stock_actual(CONN, prod["id"], no_dist["id"])
+    dar_stock(prod["id"], ap["id"], 10)
     pid_e = crear_pedido(ap["id"], no_dist["id"], prod, 2.0)
 
     r = llamar_estado(pid_e, "encargado", no_dist["id"], "despachado")
@@ -372,13 +435,23 @@ def correr_casos():
           not es_error(r), mensaje(r))
     check("el estado quedo en despachado", etapa_estado(pid_e)[1] == "despachado",
           f"estado={etapa_estado(pid_e)[1]}")
-    # Al despachar, el stock sale del almacen y entra a quien pidio.
-    check("el despacho movio el stock del almacen a la sucursal",
-          abs((stock_actual(CONN, prod["id"], ap["id"]) - 98.0)) < 1e-9,
-          f"almacen={stock_actual(CONN, prod['id'], ap['id'])} (100 - 2)")
+    # Al despachar, el stock sale del almacen y entra a quien pidio. Se mide el
+    # DELTA contra el instante anterior y no contra un numero fijo: el stock de
+    # este producto viene acumulado de los casos A-D, asi que un 98.0 fijo
+    # comparaba contra la nada y fallaba siempre.
+    stock_despues = stock_actual(CONN, prod["id"], ap["id"])
+    stock_suc_despues = stock_actual(CONN, prod["id"], no_dist["id"])
+    check("el despacho SACO 2 unidades del almacen",
+          abs((stock_antes - stock_despues) - 2.0) < 1e-9,
+          f"antes={stock_antes}, ahora={stock_despues}, delta={stock_antes - stock_despues}")
+    check("el despacho ENTRO 2 unidades en la sucursal que pidio",
+          abs((stock_suc_despues - stock_suc_antes) - 2.0) < 1e-9,
+          f"antes={stock_suc_antes}, ahora={stock_suc_despues}, "
+          f"delta={stock_suc_despues - stock_suc_antes}")
     print()
 
-    return {"prod": prod, "suc": suc, "stock_inicial": stock_inicial}
+    return {"prod": prod, "suc": suc, "stock_inicial": stock_inicial,
+            "lotes_inicial": lotes_inicial}
 
 
 def verificar_rollback(contexto):
@@ -392,6 +465,9 @@ def verificar_rollback(contexto):
     check("no queda ningun movimiento de la prueba", mov == 0, f"encontrados={mov}")
     rep = o.execute("SELECT COUNT(*) c FROM repartos WHERE usuario = 'prueba_e2e'").fetchone()["c"]
     check("no queda ningun reparto de la prueba", rep == 0, f"encontrados={rep}")
+    aud = o.execute(
+        "SELECT COUNT(*) c FROM auditoria WHERE usuario = 'prueba_e2e'").fetchone()["c"]
+    check("no queda ninguna fila de AUDITORIA de la prueba", aud == 0, f"encontradas={aud}")
     for sid, snap in stock_inicial.items():
         ahora = stock_actual(o, prod["id"], sid)
         if abs(ahora - snap) > 1e-9:
@@ -400,12 +476,39 @@ def verificar_rollback(contexto):
             break
     else:
         check(f"el stock quedo intacto en las {len(stock_inicial)} sucursales", True)
+
+    # Los LOTES son lo que hay que reponer a mano si algo quedo: ni cantidad, ni
+    # vencimiento, ni costo. Se comparan enteras, no solo el total.
+    lotes_ahora = lotos_de_prueba_con(o, prod["id"])
+    antes = {l["id"]: l for l in contexto["lotes_inicial"]}
+    ahora = {l["id"]: l for l in lotes_ahora}
+    if set(antes) != set(ahora):
+        check("no se creo ningun lote nuevo", False,
+              f"antes={sorted(antes)}, ahora={sorted(ahora)}")
+    else:
+        iguales = all(
+            antes[i]["cantidad"] == ahora[i]["cantidad"]
+            and antes[i]["sucursal_id"] == ahora[i]["sucursal_id"]
+            and antes[i]["costo"] == ahora[i]["costo"]
+            for i in antes)
+        check(f"los {len(antes)} lotes del producto quedaron igual (cantidad, "
+              f"sucursal y costo)", iguales)
+
     costo_restaurado = o.execute(
         "SELECT IFNULL(costo_promedio, 0) c FROM productos WHERE id = ?", (prod["id"],)).fetchone()["c"]
     check("el costo_promedio del producto quedo como estaba",
           abs(costo_restaurado - prod["costo"]) < 1e-9,
           f"ahora={costo_restaurado}, antes={prod['costo']}")
     o.close()
+
+
+def lotos_de_prueba_con(conn, prod_id):
+    return [{
+        "id": r["id"], "sucursal_id": r["sucursal_id"], "cantidad": r["cantidad"],
+        "vence": str(r["vence"]), "costo": r["costo"],
+    } for r in conn.execute(
+        "SELECT id, sucursal_id, cantidad, vence, IFNULL(costo, 0) AS costo "
+        "FROM lotes WHERE producto_id = %s ORDER BY id", (prod_id,)).fetchall()]
 
 
 def main():
