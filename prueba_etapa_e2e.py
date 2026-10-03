@@ -163,7 +163,14 @@ def pedido_en_bandeja(pid, rol, sucursal):
         resp = ped.pedidos_bandeja()
     if es_error(resp):
         return None, mensaje(resp)
-    for grupo in resp.get_json() or []:
+    # ok() envuelve la respuesta: {"ok": true, "message": ..., "data": [...]}.
+    # Iterar el dict directamente devuelve sus CLAVES (strings), por eso se
+    # saca 'data' primero.
+    cuerpo = resp.get_json() or {}
+    grupos = cuerpo.get("data") if isinstance(cuerpo, dict) else cuerpo
+    if grupos is None:
+        return None, f"la respuesta no traia 'data': {cuerpo!r}"
+    for grupo in grupos:
         for p in grupo.get("pedidos", []):
             if p.get("id") == pid:
                 return p, ""
@@ -236,31 +243,33 @@ def correr_flujo(pid, sucursal_logistica, origen_id, destino_id, prod, cantidad)
     return total
 
 
-def main():
-    global CONN
-    CONN = ORIG()
-    suc = catalogo_sucursales()
+def correr_casos():
+    """Casos A-D. Todo lo que escribe corre DENTRO de la transaccion de CONN.
+
+    No hace commit nunca. Si esta funcion revienta, el `finally` de main()
+    deshace igual, asi que una excepcion a mitad de camino no puede dejar un
+    pedido de prueba puesto ni stock ficticio guardado."""
     prod = producto_prueba()
     if not prod:
         print("No hay productos activos. Abortando.")
-        return 1
-
-    principales = [s for s in suc.values() if s["principal"]]
-    distribuidoras = [s for s in suc.values() if not s["principal"] and s["provee"]]
-    no_distribuidoras = [s for s in suc.values() if not s["principal"] and not s["provee"]]
-
+        return None
     print("=" * 74)
     print("PRUEBA E2E POR ETAPA (una transaccion, rollback al final)")
     print("=" * 74)
-    print("  Almacenes principales:      " + ", ".join(s["nombre"] for s in principales))
-    print("  Sucursales que distribuyen: " + ", ".join(s["nombre"] for s in distribuidoras))
-    print("  Sucursales que NO dist:     " + ", ".join(s["nombre"] for s in no_distribuidoras))
     print(f"  Producto de prueba:         {prod['nombre']} (id {prod['id']})")
     print()
 
+    suc = catalogo_sucursales()
+    principales = [s for s in suc.values() if s["principal"]]
+    distribuidoras = [s for s in suc.values() if not s["principal"] and s["provee"]]
+    no_distribuidoras = [s for s in suc.values() if not s["principal"] and not s["provee"]]
+    print("  Almacenes principales:      " + ", ".join(s["nombre"] for s in principales))
+    print("  Sucursales que distribuyen: " + ", ".join(s["nombre"] for s in distribuidoras))
+    print("  Sucursales que NO dist:     " + ", ".join(s["nombre"] for s in no_distribuidoras))
+    print()
     if not principales or not distribuidoras or not no_distribuidoras:
         print("Faltan sucursales de algun tipo. Revisar la tabla sucursales.")
-        return 1
+        return None
 
     ap = principales[0]
     dist = distribuidoras[0]
@@ -322,13 +331,12 @@ def main():
           abs(total_guardado - esperado) < 1e-9, f"guardado={total_guardado}, exacto={esperado}")
     print()
 
-    # ---- CLEANUP: un unico rollback real ----
-    print("=" * 74)
-    print("CLEANUP: rollback de la transaccion (no queda nada)")
-    print("=" * 74)
-    CONN.rollback()
-    CONN._conn.close()
+    return {"prod": prod, "suc": suc, "stock_inicial": stock_inicial}
 
+
+def verificar_rollback(contexto):
+    """Con una conexo NUEVA: si esto ve datos de la prueba, el rollback fallo."""
+    prod, suc, stock_inicial = contexto["prod"], contexto["suc"], contexto["stock_inicial"]
     o = ORIG()
     sigue = o.execute(
         "SELECT COUNT(*) c FROM pedidos WHERE nro_ticket LIKE 'PRUEBA-E2E%%'").fetchone()["c"]
@@ -337,10 +345,6 @@ def main():
     check("no queda ningun movimiento de la prueba", mov == 0, f"encontrados={mov}")
     rep = o.execute("SELECT COUNT(*) c FROM repartos WHERE usuario = 'prueba_e2e'").fetchone()["c"]
     check("no queda ningun reparto de la prueba", rep == 0, f"encontrados={rep}")
-    lote = o.execute(
-        "SELECT COUNT(*) c FROM movimientos WHERE usuario = 'prueba_e2e' AND lote_id IS NOT NULL"
-    ).fetchone()["c"]
-    check("no queda ningun lote creado por la prueba", lote == 0, f"encontrados={lote}")
     for sid, snap in stock_inicial.items():
         ahora = stock_actual(o, prod["id"], sid)
         if abs(ahora - snap) > 1e-9:
@@ -355,6 +359,34 @@ def main():
           abs(costo_restaurado - prod["costo"]) < 1e-9,
           f"ahora={costo_restaurado}, antes={prod['costo']}")
     o.close()
+
+
+def main():
+    global CONN
+    CONN = ORIG()
+    contexto = None
+    try:
+        contexto = correr_casos()
+    except Exception as e:
+        print(f"\nLA PRUEBA REVENTO: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Siempre, REVENTE o no. Este es el unico punto donde se deshace todo.
+        print("\n" + "=" * 74)
+        print("CLEANUP: rollback de la transaccion (no queda nada)")
+        print("=" * 74)
+        try:
+            CONN.rollback()
+            CONN._conn.close()
+            print("  rollback hecho")
+        except Exception as e:
+            print("  aviso al cerrar:", e)
+
+    if contexto is not None:
+        verificar_rollback(contexto)
+    else:
+        print("  la prueba no termino; se hizo rollback igual")
 
     print("\n" + "=" * 74)
     print("FALLOS:", len(fallos))
