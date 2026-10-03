@@ -1,10 +1,15 @@
 name: Prueba E2E de pedidos (manual)
 
 # La prueba toca la base de datos de produccion (dentro de una transaccion que
-# se deshace al final, pero igual). SOLO se dispara a mano desde la pestaña
-# Actions: nunca en cada despliegue.
+# se deshace al final, pero igual).
+#
+# TEMPORAL: el trigger `push` esta activo solo para poder ejecutarla desde la
+# CLI, que no tiene token de GitHub para disparar workflow_dispatch. Se saca
+# apenas se lee el resultado.
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
 
 permissions:
   contents: write
