@@ -4193,16 +4193,35 @@ async function cargarBandeja() {
                 ${g.pedidos.map((p) => {
                     // Permiso: el usuario solo puede cambiar estado/despachar pedidos
                     // que llegan a SU propia sucursal (destino = su sucursal).
-                    const esDestinoMio = p.items.some((it) => String(it.destino_id || '') === miSuc);
-                    const editControl = esDestinoMio
-                        ? (puedeDespachar
-                            ? `<button class="btn btn-sm" onclick="despacharPedido(${p.id})">Entregar</button>`
-                            : `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
-                                <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Pidiendo</option>
-                                <option value="despachado" ${p.estado === 'despachado' ? 'selected' : ''}>En camino</option>
-                                <option value="cumplido" ${p.estado === 'cumplido' ? 'selected' : ''}>Entregado</option>
-                              </select>`)
-                        : '';
+                    // Permiso por rol especifico
+                    let editControl = '';
+                    const r = window.ROL || '';
+                    if (r === 'preparador') {
+                        if (p.estado === 'pendiente') {
+                            editControl = `<button class="btn btn-sm btn-primary" onclick="cambiarEstadoPedido(${p.id}, 'en_preparacion')">En preparación</button>`;
+                        } else {
+                            editControl = `<span class="respaldo-txt">En preparación</span>`;
+                        }
+                    } else if (r === 'repartidor') {
+                        if (p.estado === 'pendiente' || p.estado === 'en_preparacion') {
+                            editControl = `<button class="btn btn-sm btn-primary" onclick="cambiarEstadoPedido(${p.id}, 'en_camino')">En camino</button>`;
+                        } else if (p.estado === 'en_camino' || p.estado === 'despachado') {
+                            editControl = `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="cambiarEstadoPedido(${p.id}, 'entregado')">Entregado</button>`;
+                        } else {
+                            editControl = `<span class="respaldo-txt">Completado</span>`;
+                        }
+                    } else {
+                        const esDestinoMio = p.items.some((it) => String(it.destino_id || '') === miSuc);
+                        editControl = esDestinoMio
+                            ? (puedeDespachar
+                                ? `<button class="btn btn-sm" onclick="despacharPedido(${p.id})">Entregar</button>`
+                                : `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
+                                    <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Pidiendo</option>
+                                    <option value="despachado" ${p.estado === 'despachado' ? 'selected' : ''}>En camino</option>
+                                    <option value="cumplido" ${p.estado === 'cumplido' ? 'selected' : ''}>Entregado</option>
+                                  </select>`)
+                            : '';
+                    }
                     return `
                     <div class="bandeja-pedido">
                         <div class="bandeja-cab">
