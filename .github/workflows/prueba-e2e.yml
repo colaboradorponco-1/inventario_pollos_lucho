@@ -46,9 +46,13 @@ jobs:
           DROPLET_KEY: ${{ secrets.DROPLET_SSH_KEY }}
         run: |
           mkdir -p resultados
-          printf '%s\n' "$DROPLET_KEY" > /tmp/llave
+          # La clave guardada en el secreto suele venir con CRLF de Windows y ssh
+          # la rechaza con "bad permissions or bad format". Por eso va con tr.
+          printf '%s' "$DROPLET_KEY" | tr -d '\r' > /tmp/llave
+          echo "" >> /tmp/llave
           chmod 600 /tmp/llave
-          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          scp -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o IdentitiesOnly=yes -o ConnectTimeout=20 \
             -i /tmp/llave "$DROPLET_USER@$DROPLET_HOST:/tmp/e2e.log" \
             resultados/e2e-ultimo.log
           rm -f /tmp/llave
