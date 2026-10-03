@@ -5,7 +5,7 @@ name: Prueba E2E de pedidos (manual)
 #
 # TEMPORAL: el trigger `push` esta activo solo para poder ejecutarla desde la
 # CLI, que no tiene token de GitHub para disparar workflow_dispatch. Se saca
-# apenas se lee el resultado.
+# apenas se lea el resultado.
 on:
   workflow_dispatch:
   push:
@@ -26,24 +26,33 @@ jobs:
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           command_timeout: "15m"
-          # Sin abortar: aunque la prueba falle queremos la salida completa.
+          # Sin abortar y con exit 0: ssh-action corta el paso en el primer
+          # comando que falla, y si la prueba falla (que es justo cuando hay
+          # que leer el log) no se podria descargar nada.
           script: |
             cd /opt/pollos-lucho
             ./venv/bin/python prueba_etapa_e2e.py > /tmp/e2e.log 2>&1
             echo "codigo de salida de la prueba: $?" >> /tmp/e2e.log
             ./venv/bin/python prueba_resumen.py >> /tmp/e2e.log 2>&1
             cat /tmp/e2e.log
-            # exit 0 SIEMPRE: ssh-action corta el paso en el primer comando que
-            # falla, y si la prueba falla (que es justo cuando hay que leer el
-            # log) el paso de publicar el resultado nunca correria.
             exit 0
+
+      # El log quedo en el DROPLET, no en la maquina de GitHub: hay que
+      # descargarlo con scp antes de poder publicarlo.
+      - name: Descargar el resultado del droplet
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USER }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          source: /tmp/e2e.log
+          target: resultados/e2e-ultimo.log
 
       - name: Publicar el resultado en el repo
         run: |
           git config user.name  "ci-e2e"
           git config user.email "ci-e2e@local"
-          mkdir -p resultados
-          cp /tmp/e2e.log "resultados/e2e-ultimo.log"
+          cat resultados/e2e-ultimo.log
           # [skip ci]: este push NO vuelve a disparar ni el deploy ni esta prueba.
           git add resultados/e2e-ultimo.log
           git commit -m "chore: resultado de la prueba E2E [skip ci]" || echo "sin cambios"
