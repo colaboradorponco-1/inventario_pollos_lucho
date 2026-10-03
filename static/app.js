@@ -4309,7 +4309,7 @@ async function cargarBandeja() {
                                     <td class="td-unidad">${esc(it.unidad || 'unidad')}</td>
                                     <td class="td-cant">${it.cantidad}</td>
                                     <td class="td-medida">${tachoEtiqueta(it) || '—'}</td>
-                                    <td class="td-prov">→ ${esc(it.destino_nombre || '—')}</td>
+                                    <td class="td-prov" title="Proveedor que despacha esta línea">${it.destino_nombre ? 'de ' + esc(it.destino_nombre) : '—'}</td>
                                 </tr>`).join('') || '<tr><td class="empty">Sin líneas</td></tr>'}
                             </tbody>
                         </table>
@@ -4561,7 +4561,7 @@ async function syncPedidosNuevos() {
                 .filter((p) => (p.id || 0) > _lastTicketId && p.usuario !== window.USUARIO)
                 .sort((a, b) => a.id - b.id);
             nuevos.forEach((p) => {
-                const dest = p.destino_nombre ? ' -> ' + p.destino_nombre : '';
+                const dest = p.destino_nombre ? ' (de ' + p.destino_nombre + ')' : '';
                 toast('Nuevo ticket ' + p.nro_ticket + ' de ' + p.sucursal_nombre + dest, 'ok');
             });
             if (nuevos.length) {
