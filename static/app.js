@@ -4370,7 +4370,8 @@ async function pintarBadgePedidos() {
     // Una sucursal filial solo cuenta los pendientes que le llegan como destino;
     // admin/superadmin y almacén principal cuentan todos los pendientes.
     const qs = new URLSearchParams({ estado: 'pendiente', pagina: 1, por_pagina: 1 });
-    if (window.ROL === 'encargado' && !esCentralBadge() && window.SUCURSAL_ID) {
+    const esLogistica = window.ROL === 'preparador' || window.ROL === 'repartidor';
+    if (window.SUCURSAL_ID && (esLogistica || (window.ROL === 'encargado' && !esCentralBadge()))) {
         qs.set('destino_id', window.SUCURSAL_ID);
     }
     const pend = await request(API + '/pedidos?' + qs.toString());

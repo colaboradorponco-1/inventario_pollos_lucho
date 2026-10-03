@@ -252,7 +252,16 @@ def pedidos():
         f = conn.execute("SELECT principal FROM sucursales WHERE id = ?", (sid,)).fetchone()
         es_central = bool(f and f["principal"])
     if not es_superadmin() and sid:
-        if session.get("rol") == "encargado" and not es_central:
+        if es_logistica():
+            # Preparador / repartidor: SOLO los pedidos que les llegan, es decir
+            # los que tienen su sucursal como DESTINO (en la cabecera o en
+            # alguna linea). Antes NO se aplicaba ningun filtro a estos roles y
+            # veian los pedidos de todas las sucursales, mezclados con los del
+            # almacen principal.
+            q += (" AND (p.destino_id = ? OR EXISTS "
+                  "(SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
+            params += [sid, sid]
+        elif session.get("rol") == "encargado" and not es_central:
             # Sucursal filial: ve sus pedidos (los que pide y los que le piden)
             q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
                   "EXISTS (SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
