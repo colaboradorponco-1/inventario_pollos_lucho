@@ -3317,10 +3317,18 @@ async function abrirInventario(invId) {
             html += `<tr style="background:#F5F5F5"><td colspan="9"><strong>${esc(catActual)}</strong></td></tr>`;
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
+        // Quien conto esta linea. Los dos encargados cuentan sobre la MISMA
+        // planilla, asi que cada celda muestra su autor: si es el otro, se
+        // detalla en el title del casillero para saber que se puede corregir.
+        const quien = (f.contado_por || '').trim();
+        const marcaQuien = quien
+            ? `<div style="font-size:10px;color:${f.es_de_otro ? '#B45309' : '#6B7280'};margin-top:1px">
+                   ${f.es_de_otro ? 'Lo contó' : 'Contó'}: ${esc(quien)}</div>`
+            : '';
         const bloq = INV_CERRADA ? 'disabled' : '';
         html += `
             <tr data-inv-fila="${f.id}">
-                <td class="inv-col-tit"><strong>${esc(f.producto)}</strong></td>
+                <td class="inv-col-tit"><strong>${esc(f.producto)}</strong>${marcaQuien}</td>
                 <td>${esc(f.unidad)}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-inicial" data-id="${f.id}"
@@ -3337,7 +3345,8 @@ async function abrirInventario(invId) {
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
-                           value="${conteo}" placeholder="—" ${bloq} style="text-align:right">
+                           value="${conteo}" placeholder="—" ${bloq} style="text-align:right"
+                           ${quien ? `title="${f.es_de_otro ? 'Lo contó' : 'Contaste'} ${esc(quien)}. Podés corregirlo si está mal: al guardar te va a avisar que ya estaba contado."` : ''}>
                 </td>
                 <td class="num" data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
                 <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia, f)}</td>
@@ -3425,6 +3434,16 @@ async function guardarInventario() {
         }),
     });
     toast(r.message || 'Conteo guardado', 'ok');
+    // Avisos de "el otro encargado ya contó esto". El guardado YA se hizo (no se
+    // bloquea a nadie), asi que esto es solo para que se entere y no cierre la
+    // planilla creyendo que conto el solo. Queda tambien la marca "Lo contó: X"
+    // en cada fila, que es lo que sobrevive al cerrar la pantalla.
+    const avisos = (r.data && r.data.avisos) || [];
+    if (avisos.length) {
+        const lista = avisos.slice(0, 3).join(' | ');
+        const resto = avisos.length > 3 ? ` (+${avisos.length - 3} más)` : '';
+        toast(`Ojo: ${avisos.length} producto(s) ya los había contado otro encargado. ${lista}${resto}`, 'err');
+    }
     await abrirInventario(INV_ID);
     await listarInventario();
     return true;
@@ -4288,19 +4307,20 @@ async function cargarBandeja() {
                                   </select>`)
                             : '';
                     }
-                    // La etapa se muestra siempre, para que el encargado vea en
-                    // qué punto va el pedido sin importar quién lo marcó.
-                    const chipEtapa = etapa !== 'pendiente'
-                        ? `<span class="ciudad-tag" title="Etapa logística">${esc(ETAPA_LAB[etapa] || etapa)}</span>`
-                        : '';
+                    // Un solo tag, no dos iguales. Antes se veian 'Pidiendo'
+                    // (estado) y 'En camino' (etapa) juntos en el mismo pedido y
+                    // parecia contradictorio. Ahora el tag dice la etapa si avanzo,
+                    // y si no, el estado. El dato crudo queda en el tooltip.
+                    const chipEstado = etapa !== 'pendiente'
+                        ? `<span class="ciudad-tag" title="Etapa logística: ${esc(ETAPA_LAB[etapa] || etapa)} · Estado: ${esc(p.estado || '')}">${esc(ETAPA_LAB[etapa] || etapa)}</span>`
+                        : `<span class="${({ pendiente: 'badge-pendiente', despachado: 'badge-despachado', cumplido: 'badge-cumplido' })[p.estado] || 'badge-pendiente'}">${esc(ESTADO_LAB[p.estado] || p.estado)}</span>`;
                     return `
                     <div class="bandeja-pedido">
                         <div class="bandeja-cab">
                             <strong>${esc(p.nro_ticket)}</strong>
                             <span>${fmtDate(p.fecha)}</span>
                             <span>${esc(p.usuario || '—')}</span>
-                            <span class="${({ pendiente: 'badge-pendiente', despachado: 'badge-despachado', cumplido: 'badge-cumplido' })[p.estado] || 'badge-pendiente'}">${esc(ESTADO_LAB[p.estado] || p.estado)}</span>
-                            ${chipEtapa}
+                            ${chipEstado}
                             ${p.nota ? '<span class="respaldo-txt">' + esc(p.nota) + '</span>' : ''}
                             <span class="flex-grow"></span>
                             ${editControl}
