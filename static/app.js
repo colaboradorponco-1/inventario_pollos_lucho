@@ -3055,11 +3055,29 @@ function fmtInvQ(v) {
     return Number.isInteger(n) ? String(n) : n.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+// La diferencia se escribe con palabras, no con un numero con signo. Un "-1"
+// en rojo no le dice nada a nadie: nadie sabe si se perdio algo, si esta mal el
+// conteo, o que significa. "Falto 1" si se entiende de una.
 function diffInvBadge(d) {
     const n = Number(d || 0);
-    if (Math.abs(n) < 1e-9) return '<span style="color:var(--muted)">0</span>';
-    if (n < 0) return `<strong style="color:#dc2626">${esc(fmtInvQ(n))}</strong>`;
-    return `<strong style="color:#0F3D2E">+${esc(fmtInvQ(n))}</strong>`;
+    if (Math.abs(n) < 1e-9) {
+        return '<span style="color:var(--muted)">Cuadra</span>';
+    }
+    const q = fmtInvQ(Math.abs(n));
+    // El singular depende de la MAGNITUD, no del signo: -1 es "Faltó 1", no
+    // "Faltaron 1". Comparar n contra 1 daba 2 en el negativo y salía en plural.
+    const uno = Math.abs(Math.abs(n) - 1) < 1e-9;
+    if (n < 0) {
+        return `<strong style="color:#dc2626" ` +
+            `title="En el estante hay ${q} menos de lo que el sistema tiene. ` +
+            `Si no hubo una entrega ni una venta sin anotar, algo se perdio o el ` +
+            `conteo esta equivocado. Al cerrar la planilla se descuenta del stock.">` +
+            `Falt${uno ? 'ó' : 'aron'} ${q}</strong>`;
+    }
+    return `<strong style="color:#0F3D2E" ` +
+        `title="En el estante hay ${q} mas de lo que el sistema tiene. ` +
+        `Al cerrar la planilla se suma al stock.">` +
+        `Sobr${uno ? 'ó' : 'aron'} ${q}</strong>`;
 }
 
 async function loadInventario() {
