@@ -1,8 +1,8 @@
 name: Prueba E2E de pedidos (manual)
 
-# NO corre en cada despliegue a proposito: la prueba toca la base de datos de
-# produccion (dentro de una transaccion que se deshace, pero igual). Se dispara
-# a mano desde la pestaña Actions.
+# La prueba toca la base de datos de produccion (dentro de una transaccion que
+# se deshace al final, pero igual). Por defecto SOLO se dispara a mano desde la
+# pestaña Actions.
 #
 # TEMPORAL: el trigger `push` esta activo solo para poder ejecutarla desde la
 # CLI, que no tiene token de GitHub. Hay que volver a dejar SOLO
@@ -11,6 +11,9 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+
+permissions:
+  contents: write
 
 jobs:
   prueba:
@@ -24,34 +27,21 @@ jobs:
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           command_timeout: "15m"
-          # Sin `set -e`: si la prueba falla igual queremos ver TODA la salida.
+          # Sin abortar: aunque la prueba falle queremos la salida completa.
           script: |
             cd /opt/pollos-lucho
-            echo "--- stock antes de empezar ---"
-            ./venv/bin/python - <<'PY'
-            from database import get_conn
-            c = get_conn()
-            for r in c.execute("""
-                SELECT p.id, p.nombre, SUM(l.cantidad) s
-                FROM productos p JOIN lotes l ON l.producto_id = p.id
-                WHERE p.activo = 1 GROUP BY p.id, p.nombre
-                HAVING SUM(l.cantidad) = 1 ORDER BY p.id LIMIT 3""").fetchall():
-                print(f"  candidato: id {r['id']} {r['nombre']} -> {r['s']} unidad(es)")
-            c.close()
-            PY
-            echo "--- corriendo prueba ---"
-            ./venv/bin/python prueba_etapa_e2e.py || echo "LA PRUEBA TERMINO CON ERROR"
-            echo "--- verificacion post-prueba (conexion nueva) ---"
-            ./venv/bin/python - <<'PY'
-            from database import get_conn
-            c = get_conn()
-            print("  pedidos PRUEBA-E2E:", c.execute(
-                "SELECT COUNT(*) n FROM pedidos WHERE nro_ticket LIKE 'PRUEBA-E2E%%'").fetchone()["n"])
-            print("  movimientos prueba_e2e:", c.execute(
-                "SELECT COUNT(*) n FROM movimientos WHERE usuario='prueba_e2e'").fetchone()["n"])
-            print("  repartos prueba_e2e:", c.execute(
-                "SELECT COUNT(*) n FROM repartos WHERE usuario='prueba_e2e'").fetchone()["n"])
-            print("  auditoria prueba_e2e:", c.execute(
-                "SELECT COUNT(*) n FROM auditoria WHERE usuario='prueba_e2e'").fetchone()["n"])
-            c.close()
-            PY
+            ./venv/bin/python prueba_etapa_e2e.py > /tmp/e2e.log 2>&1
+            echo "codigo de salida de la prueba: $?" >> /tmp/e2e.log
+            ./venv/bin/python prueba_resumen.py >> /tmp/e2e.log 2>&1
+            cat /tmp/e2e.log
+
+      - name: Publicar el resultado en el repo
+        run: |
+          git config user.name  "ci-e2e"
+          git config user.email "ci-e2e@local"
+          mkdir -p resultados
+          cp /tmp/e2e.log "resultados/e2e-ultimo.log"
+          # [skip ci]: este push NO vuelve a disparar ni el deploy ni esta prueba.
+          git add resultados/e2e-ultimo.log
+          git commit -m "chore: resultado de la prueba E2E [skip ci]" || echo "sin cambios"
+          git push origin HEAD:main || true
