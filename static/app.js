@@ -3060,35 +3060,32 @@ function fmtInvQ(v) {
 // conteo, o que significa. "Faltan 5" si se entiende de una.
 // f es la fila, solo para el texto que sale al pasar el mouse: muestra de donde
 // sale el numero ("el sistema tiene 31 y vos contaste 26").
+// La columna ya no muestra "Faltan 5" ni números fríos que confunden,
+// sino una alerta visual clara ("Todo en orden" o "Revisar / Faltan X").
+// Por debajo el número de diferencia sigue existiendo en la base para el
+// cierre y la regla de explicar, pero el usuario ve un estado amigable.
 function diffInvBadge(d, f) {
     f = f || {};
     const n = Number(d || 0);
-    // Para el texto del tooltip. Si viniera null desde la base, se veria la
-    // palabra "undefined" arriba, que es peor que no mostrarlo.
     const sys = f.stock_sistema === null || f.stock_sistema === undefined
         ? 0 : fmtInvQ(f.stock_sistema);
     const fin = f.final === null || f.final === undefined ? '?' : fmtInvQ(f.final);
+    
     if (Math.abs(n) < 1e-9) {
-        return '<span style="color:var(--muted)">Cuadra</span>';
+        return '<span style="color:#0F3D2E;font-weight:600" title="El conteo coincide exactamente con el sistema.">✔ Todo en orden</span>';
     }
     const q = fmtInvQ(Math.abs(n));
-    // El singular depende de la MAGNITUD, no del signo: -1 es "Falta 1", no
-    // "Faltan 1". Comparar n contra 1 daba 2 en el negativo y salia en plural.
     const uno = Math.abs(Math.abs(n) - 1) < 1e-9;
-    // En PRESENTE, no en pasado. "Faltaron 5" se lee como algo que ya paso y
-    // quedo atras; lo que el encargado necesita es saber cuantas faltan AHORA.
+    
     if (n < 0) {
-        return `<strong style="color:#dc2626" ` +
-            `title="El sistema tiene ${sys} y vos contaste ${fin}. ` +
-            `Faltan ${q}. Si hubo una entrega o una venta que no se anotaron, la ` +
-            `diferencia se va sola: no es una merma. Al cerrar la planilla lo que ` +
-            `falte se descuenta del stock.">` +
-            `Falta${uno ? '' : 'n'} ${q}</strong>`;
+        return `<strong style="color:#dc2626;background:#FEF2F2;padding:2px 6px;border-radius:4px;display:inline-block" ` +
+            `title="El sistema registra ${sys} y contaste ${fin}. Faltan ${q}. ` +
+            `Escribí en Observaciones qué pasó para poder cerrar.">` +
+            `⚠️ Revisar (Falta${uno ? '' : 'n'} ${q})</strong>`;
     }
-    return `<strong style="color:#0F3D2E" ` +
-        `title="Vos contaste ${fin} y el sistema tiene ${sys}. ` +
-        `Sobran ${q}. Al cerrar la planilla lo que sobre se suma al stock.">` +
-        `Sobra${uno ? '' : 'n'} ${q}</strong>`;
+    return `<strong style="color:#0F3D2E;background:#ECFDF5;padding:2px 6px;border-radius:4px;display:inline-block" ` +
+        `title="El sistema registra ${sys} y contaste ${fin}. Sobran ${q}.">` +
+        `ℹ️ Sobra${uno ? '' : 'n'} ${q}</strong>`;
 }
 
 async function loadInventario() {
