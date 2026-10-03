@@ -1,4 +1,4 @@
-﻿"""Aislamiento por sucursal del INVENTARIO DIARIO.
+"""Aislamiento por sucursal del INVENTARIO DIARIO.
 
 Cada sucursal es una caja cerrada: el encargado de America no puede abrir, ver,
 contar ni cerrar la planilla de Siglo XX. Con dos encargados por sucursal esto
@@ -310,6 +310,39 @@ def prueba_se_pueden_abrir_las_dos_tipos_de_planilla():
     _check("no devuelve 409 al mezclar", "409" not in crear)
 
 
+def prueba_columnas_inventario_diario():
+    """`inventario_diario` NO tiene columna `categoria_nombre` (esa vive en
+    inventario_detalle, junto al producto).
+
+    Esto produjo un 500 en produccion: un SELECT pedia `categoria_nombre` a
+    `inventario_diario`, MySQL respondio 1054 y 'Iniciar inventario' fallo.
+    El arreglo fue traer el nombre con un JOIN a categorias.
+
+    Chequeo acotado y a proposito: si un SELECT sin alias pide esa columna, el
+    endpoint va a fallar en MySQL aunque compile y pase todo lo otro.
+    """
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "core", "inventario.py"), encoding="utf-8") as fh:
+        inv = fh.read()
+
+    malos = []
+    for m in re.finditer(r"SELECT\s+(.{0,200}?)\s+FROM\s+inventario_diario(?![\s\S]{0,120}JOIN)",
+                         inv, re.S | re.I):
+        frag = m.group(1)
+        if re.search(r"\b[a-zA-Z]\s*\.", frag):
+            continue                      # hay alias: no se puede verificar
+        if "categoria_nombre" in frag:
+            malos.append(" ".join(frag.split())[:70])
+    _check("ningun SELECT sin alias pide categoria_nombre a inventario_diario",
+           not malos, "; ".join(malos[:3]))
+
+    # Y el nombre tiene que llegar por el JOIN, no por una columna inventada.
+    m = re.search(r"def inventario_crear\(.*?\n(?=@|\Z)", inv, re.S)
+    crear = m.group(0) if m else ""
+    _check("el nombre de la categoría se trae con JOIN a categorias",
+           "LEFT JOIN categorias" in crear and "AS categoria_nombre" in crear)
+
+
 def prueba_candados_en_el_codigo():
     """Ningun endpoint que escribe planillas puede quedarse sin candado."""
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -343,6 +376,7 @@ def main():
     prueba_se_sabe_quien_conto()
     prueba_iniciar_planilla_no_falla_en_silencio()
     prueba_se_pueden_abrir_las_dos_tipos_de_planilla()
+    prueba_columnas_inventario_diario()
     prueba_candados_en_el_codigo()
     print("=" * 70)
     print(f"FALLOS: {len(FALLOS)}")

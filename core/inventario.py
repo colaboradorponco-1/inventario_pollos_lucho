@@ -365,10 +365,18 @@ def inventario_crear():
     # coexistir, para que al cerrar sepa que el producto puede quedar contado en
     # las dos.
     criterio_opuesto = ("> 0" if cat_id == 0 else "= 0")
+    # OJO: `inventario_diario` NO tiene columna `categoria_nombre` (esa vive en
+    # inventario_detalle). El nombre de la categoría se trae con un JOIN a
+    # categorias. Pedirla directo acá daba error 1054 de MySQL y el endpoint
+    # devolvía 500 al iniciar el inventario.
     opuestas = conn.execute(
-        f"SELECT id, categoria_nombre, estado FROM inventario_diario "
-        f"WHERE sucursal_id = %s AND fecha = %s AND categoria_id {criterio_opuesto} "
-        f"ORDER BY categoria_nombre",
+        f"SELECT d.id, CASE WHEN d.categoria_id = 0 THEN 'Todas las categorías' "
+        f"ELSE COALESCE(c.nombre, 'Sin categoría') END AS categoria_nombre, "
+        f"d.estado FROM inventario_diario d "
+        f"LEFT JOIN categorias c ON c.id = d.categoria_id "
+        f"WHERE d.sucursal_id = %s AND d.fecha = %s "
+        f"AND d.categoria_id {criterio_opuesto} "
+        f"ORDER BY c.nombre",
         (sid, fecha)).fetchall()
     avisos_planilla = []
     if opuestas:
