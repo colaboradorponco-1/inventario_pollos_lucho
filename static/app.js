@@ -3255,7 +3255,7 @@ async function abrirInventario(invId) {
     $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
-        : 'El inicial ya viene con el stock actual del sistema (ya incluye los pedidos entregados). Anota en ingreso manual SOLO lo que llegó sin pasar por el sistema (compra directa, devolución, de la casa), y el conteo final. Disponible = inicial + ingreso manual. La columna Sistema es solo de comparación.';
+        : 'El inicial ya viene con el stock actual del sistema (ya incluye los pedidos entregados). Anota en ingreso manual SOLO lo que llegó sin pasar por el sistema (compra directa, devolución, de la casa), y el conteo final. Disponible = inicial + ingreso manual. Si tu conteo no da igual al sistema, la columna Diferencia te dice cuántas faltan o sobran.';
     $('#inv-observaciones').value = d.observaciones || '';
     $('#inv-observaciones').disabled = INV_CERRADA;
     const h = $('#inv-hora');
@@ -3281,6 +3281,12 @@ async function abrirInventario(invId) {
     INV_FILAS.forEach((f) => {
         if (f.categoria !== catActual) {
             catActual = f.categoria;
+            // 9 columnas: producto, unidad, inicial, ingreso manual, disponible,
+            // final, utilizada, diferencia, observaciones. La de "Sistema" se
+            // saco de la pantalla; el dato sigue en la base y se usa al cerrar.
+            // El colspan tiene que coincidir con la cantidad real de columnas
+            // (antes estaba en 9 con 10 columnas y por eso la fila de categoria
+            // no cubria la ultima).
             html += `<tr style="background:#F5F5F5"><td colspan="9"><strong>${esc(catActual)}</strong></td></tr>`;
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
@@ -3307,7 +3313,6 @@ async function abrirInventario(invId) {
                            value="${conteo}" placeholder="—" ${bloq} style="text-align:right">
                 </td>
                 <td class="num" data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
-                <td class="num" style="color:var(--muted)">${esc(fmtInvQ(f.stock_sistema))}</td>
                 <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia, f)}</td>
                 <td class="inv-col-obs">
                     <input type="text" class="inv-obs" data-id="${f.id}"
