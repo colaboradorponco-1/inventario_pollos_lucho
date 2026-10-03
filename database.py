@@ -653,6 +653,14 @@ def migrar_esquema():
         # en_camino -> entregado. Al llegar a 'entregado' se mueve el stock.
         if not _col_existe(cur, "pedidos", "etapa"):
             _add_columna(cur, "pedidos", "etapa VARCHAR(20) NOT NULL DEFAULT 'pendiente'")
+        # Quien conto cada linea del inventario diario. Hay DOS encargados por
+        # sucursal y los dos cuentan sobre la MISMA planilla: sin esto, el ultimo
+        # que guardaba una linea pisaba en silencio el conteo del otro y no habia
+        # forma de saber despues quien habia contado cada cosa.
+        # Nullable a proposito: las planillas ya contadas quedan con NULL (se
+        # cuentan antes de esta columna) y no generan avisos falsos ni se rompen.
+        if not _col_existe(cur, "inventario_detalle", "contado_por"):
+            _add_columna(cur, "inventario_detalle", "contado_por VARCHAR(255)")
         if _col_existe(cur, "pedidos", "etapa") and \
                 not _indice_existe(cur, "pedidos", "idx_pedidos_etapa"):
             try:

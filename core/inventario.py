@@ -476,6 +476,8 @@ def inventario_detalle(inv_id):
             "ingreso_dia": round(ing_sis + ing_man, 3),
             "disponible": round(disponible, 3),
             "conteo_fisico": conteo,
+            "contado_por": f.get("contado_por") or "",
+            "es_de_otro": bool(f.get("contado_por") and f["contado_por"] != (session.get("usuario") or "")),
             "final": round(f["final"] or 0, 3),
             "utilizada": round(f["utilizada"] or 0, 3),
             "diferencia": diferencia,
@@ -565,6 +567,12 @@ def inventario_guardar(inv_id):
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
     ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
+    usuario_actual = session.get("usuario", "") or ""
+    # Avisos de "otro ya conto esto". NO bloquean el guardado: se entra igual y
+    # se avisa despues. Bloquear seria perjudicar al segundo encargado, que a
+    # veces esta corrigiendo un numero que el primero cargo mal. Se guarda igual
+    # y el aviso queda en la respuesta para que la pantalla lo muestre.
+    avisos = []
     # La hora de corte se resuelve ANTES de buscar los movimientos posteriores. Se
     # usaba la que ya estaba guardada y la nueva se actualizaba al final, así que
     # si el encargado corregía la hora y guardaba, la diferencia que se le mostraba
@@ -626,15 +634,29 @@ def inventario_guardar(inv_id):
                     stock_sis = (stocks.get(fila["producto_id"], 0.0)
                                  - posteriores.get(fila["producto_id"], 0.0))
                 diferencia = round(final - stock_sis, 3)
+            # Quien conto esta linea. Si la linea ya tenia conteo de OTRO
+            # encargado, se avisa (no se bloquea) para que ninguno cierre a ciegas
+            # lo que conto el otro. Si viene vacio, no se pisa el `contado_por`
+            # anterior: borrar el numero para volverse a contar es normal y no
+            # tiene que perder la firma de quien lo habia contado antes.
+            previo = (fila.get("contado_por") or "").strip()
+            contado_por = previo or None
+            if conteo is not None:
+                ya_contado_por_otro = (fila["conteo_fisico"] is not None
+                                       and previo and previo != usuario_actual)
+                if ya_contado_por_otro:
+                    avisos.append(f"{nom}: ya lo contó {previo} (anotó "
+                                  f"{fila['conteo_fisico']}) y vos pusiste {conteo}")
+                contado_por = usuario_actual or previo
             conn.execute("""
                 UPDATE inventario_detalle
                 SET inicial = %s, ingreso_dia = %s, ingreso_manual = %s, disponible = %s,
                     conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s,
-                    stock_sistema = %s, observaciones = %s
+                    stock_sistema = %s, observaciones = %s, contado_por = %s
                 WHERE id = %s
             """, (inicial, ingreso, ing_man, disponible,
                   conteo, final, utilizada, diferencia, stock_sis,
-                  (item.get("observaciones") or "")[:500] or None, lid))
+                  (item.get("observaciones") or "")[:500] or None, contado_por, lid))
     except _DatoInvalido as e:
         conn.close()
         return err(str(e), 400)
@@ -645,6 +667,14 @@ def inventario_guardar(inv_id):
                   hora_nueva or inv["hora_corte"] or None, inv_id))
     conn.commit()
     conn.close()
+    if avisos:
+        # Se guardó igual. El mensaje dice cuántos productos ya estaban contados
+        # por el otro encargado para que la persona lo vea al toque y no cierre
+        # la planilla creyendo que contó ella sola.
+        return ok({"avisos": avisos},
+                  message=f"Conteo guardado, pero {len(avisos)} producto(s) ya los "
+                          f"había contado otro encargado. Revisá los avisos: tu "
+                          f"número quedó guardado.")
     return ok(message="Conteo guardado")
 
 

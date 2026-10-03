@@ -205,6 +205,52 @@ def prueba_mensaje_dice_quien_abrio():
     _check("el que la abrio se la reconoce como propia", "la abriste vos" in msg2, msg2)
 
 
+def prueba_se_sabe_quien_conto():
+    """Los dos encargados cuentan sobre la misma planilla: tiene que quedar
+    registrado quien conto cada linea, y avisar SIN bloquear al otro.
+
+    Requisito del usuario: que nadie salga perjudicado. Por eso el caso de
+    'el otro ya conto esto' se AVISA, no se rechaza: el segundo encargado a
+    veces esta corrigiendo un numero que el primero cargo mal, y si se le
+    bloquea el guardado pierde el trabajo de toda la planilla.
+    """
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "database.py"), encoding="utf-8") as fh:
+        db = fh.read()
+    with open(os.path.join(raiz, "core", "inventario.py"), encoding="utf-8") as fh:
+        inv = fh.read()
+
+    _check("la base tiene la columna contado_por", "contado_por" in db)
+    # Nullable: las planillas ya contadas quedan en NULL y no dan avisos falsos.
+    _check("contado_por es nullable (no rompe planillas ya contadas)",
+           "contado_por VARCHAR(255)" in db and "NOT NULL" not in
+           db.split("contado_por VARCHAR(255)")[0].rsplit("_add_columna", 1)[-1])
+    _check("solo se crea la columna si no existe todavia",
+           'if not _col_existe(cur, "inventario_detalle", "contado_por"):' in db)
+
+    m = re.search(r"def inventario_guardar\(.*?\n(?=@|\Z)", inv, re.S)
+    guardar = m.group(0) if m else ""
+    _check("inventario_guardar guarda QUIEN conto", "contado_por = %s" in guardar)
+    _check("inventario_guardar compara contra el usuario de la sesion",
+           'session.get("usuario"' in guardar)
+    _check("detecta cuando la linea ya la conto OTRO encargado",
+           "ya_contado_por_otro" in guardar)
+    _check("AVISA en vez de bloquear (no devuelve 409 ni 403)",
+           "409" not in guardar and "avisos" in guardar)
+    _check("el aviso menciona al otro encargado y los dos numeros",
+           'ya lo contó' in guardar and "fila['conteo_fisico']" in guardar)
+    # No se pisa la firma previa cuando la linea se manda vacia para recounts.
+    _check("borrar el numero para recountar NO borra el contado_por anterior",
+           "contado_por = previo or None" in guardar)
+
+    m = re.search(r"def inventario_detalle\(.*?\n(?=@|\Z)", inv, re.S)
+    detalle = m.group(0) if m else ""
+    _check("el detalle expone counted_por para la pantalla",
+           '"contado_por"' in detalle)
+    _check("el detalle marca si la linea es de otro encargado",
+           '"es_de_otro"' in detalle)
+
+
 def prueba_candados_en_el_codigo():
     """Ningun endpoint que escribe planillas puede quedarse sin candado."""
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -235,6 +281,7 @@ def main():
     print("=" * 70)
     prueba_no_puede_abrir_otra_sucursal()
     prueba_mensaje_dice_quien_abrio()
+    prueba_se_sabe_quien_conto()
     prueba_candados_en_el_codigo()
     print("=" * 70)
     print(f"FALLOS: {len(FALLOS)}")
