@@ -376,7 +376,10 @@ def _ticket_data(conn, pedido_id):
             "tacho_texto": d.get("tacho_texto") or "",
             "tacho_unidad": d.get("tacho_unidad") or 0,
             "costo": d["costo_unitario"] or 0,
-            "subtotal": round((d["costo_unitario"] or 0) * d["cantidad"], 2),
+            # Sin round(): el subtotal tiene que sumar EXACTAMENTE lo mismo que
+            # el total del pedido y que el total del reparto. Con
+            # costo 3,333 x 3 esta linea mostraba 10.0 y el total daba 9.999.
+            "subtotal": (d["costo_unitario"] or 0) * d["cantidad"],
         })
     ped = dict(pedido)
     ped["fecha"] = _normalizar_fecha(ped.get("fecha"))
@@ -483,7 +486,7 @@ def pedido_estado(pedido_id):
             conn.close()
             return err(movido[1])
         conn.execute("UPDATE pedidos SET estado = ?, total = ? WHERE id = ?",
-                     (estado, round(movido[0], 2), pedido_id))
+                     (estado, movido[0], pedido_id))
         conn.commit()
         conn.close()
         registrar_auditoria("Pedido actualizado", f"{pedido['nro_ticket']} -> {estado}")
@@ -637,14 +640,18 @@ def pedido_despachar(pedido_id):
         conn.close()
         return err(movido[1])
     total, reparto_ids = movido
+    # SIN round(): las columnas son DOUBLE. Con round(total, 2) el mismo pedido
+    # guardaba un total si lo despachaba el almacen con el desplegable de estado
+    # y otro distinto si lo entregaba la logistica con las etapas. Con costo
+    # 3,333 x 3 uno guardaba 10.0 y el otro 9.999, y las cuentas no cuadraban.
     conn.execute("UPDATE pedidos SET estado = 'despachado', total = ? WHERE id = ?",
-                 (round(total, 2), pedido_id))
+                 (total, pedido_id))
     conn.commit()
     conn.close()
     registrar_auditoria("Pedido despachado",
-                        f"{pedido['nro_ticket']} -> repartos #{','.join(map(str, reparto_ids))} (Bs {round(total, 2)})")
+                        f"{pedido['nro_ticket']} -> repartos #{','.join(map(str, reparto_ids))} (Bs {total})")
     return ok({"reparto_ids": reparto_ids, "reparto_id": reparto_ids[0] if reparto_ids else None,
-               "total": round(total, 2)},
+               "total": total},
               message=f"Pedido {pedido['nro_ticket']} despachado como repartos #{','.join(map(str, reparto_ids))}")
 
 
