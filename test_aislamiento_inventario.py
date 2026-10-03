@@ -367,6 +367,128 @@ def prueba_candados_en_el_codigo():
            "i.sucursal_id = %s" in lista and "es_gestion() or es_encargado_almacen" in lista)
 
 
+class CierreCursor:
+    def __init__(self, filas):
+        self._filas = filas
+
+    def fetchall(self):
+        return self._filas
+
+    def fetchone(self):
+        return self._filas[0] if self._filas else None
+
+
+class CierreConn:
+    """Fake que responde solo a las tres consultas de _avisos_conteo_cruzado."""
+
+    def __init__(self, otras=(), mios=(), ajenos=()):
+        self.otras = list(otras)
+        self.mios = list(mios)
+        self.ajenos = list(ajenos)
+        self.sqls = []
+
+    def execute(self, sql, params=None):
+        s = " ".join(str(sql).split())
+        self.sqls.append((s, list(params or [])))
+        if "SELECT id FROM inventario_diario" in s:
+            return CierreCursor([Fila(id=i) for i in self.otras])
+        if "GROUP BY producto_id" in s:
+            return CierreCursor(self.ajenos)
+        if "conteo_fisico IS NOT NULL" in s:
+            return CierreCursor(self.mios)
+        return CierreCursor([])
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def _linea(pid, nombre, conteo):
+    return Fila(producto_id=pid, producto_nombre=nombre, conteo_fisico=conteo)
+
+
+def prueba_dos_encargados_no_disparan_el_aviso():
+    """Lo que preguntaste: dos encargados de la misma sucursal comparten planilla.
+
+    Con una sola planilla abierta no hay nada que cruzar, asi que el aviso de
+    doble conteo jamas aparece. El caso 'los dos contaron lo mismo' lo cubre el
+    aviso de atribucion al guardar, que es otro codigo.
+    """
+    inv = Fila(id=7, sucursal_id=35, fecha="2026-10-03", categoria_id=0)
+    conn = CierreConn(otras=[],                      # <- no hay otra planilla
+                      mios=[_linea(1, "Pollo", 10)],
+                      ajenos=[])
+    avisos = invmod._avisos_conteo_cruzado.__wrapped__(conn, inv)
+    _check("dos encargados sobre la MISMA planilla no generan aviso",
+           avisos == [], f"avisos={avisos}")
+
+    # Y la consulta tiene que excluir la planilla que se esta cerrando, para que
+    # contar de a dos sobre la misma nunca se confunda con planillas distintas.
+    sql = conn.sqls[0][0]
+    _check("la consulta excluye la planilla que se cierra (id <> %s)",
+           "id <> %s" in sql)
+    _check("la consulta filtra por la misma sucursal y el mismo dia",
+           "sucursal_id = %s" in sql and "fecha = %s" in sql)
+
+
+def prueba_avisa_si_ya_esta_contado_en_otra_planilla():
+    inv = Fila(id=7, sucursal_id=35, fecha="2026-10-03", categoria_id=0)
+    conn = CierreConn(otras=[9],
+                      mios=[_linea(1, "Pollo entero", 10)],
+                      ajenos=[Fila(producto_id=1, producto_nombre="Pollo entero",
+                                   conteo_fisico=8)])
+    avisos = invmod._avisos_conteo_cruzado.__wrapped__(conn, inv)
+    _check("avisa cuando el producto ya esta contado en otra planilla",
+           len(avisos) == 1, f"avisos={avisos}")
+    if avisos:
+        a = avisos[0]
+        _check("el aviso dice cuantos productos se adjusts dos veces",
+               "1 producto(s)" in a, a[:80])
+        _check("el aviso nombra el producto", "Pollo entero" in a)
+        _check("el aviso muestra los DOS conteos", "10" in a and "8" in a)
+
+
+def prueba_no_avisa_si_no_se_pisan_productos():
+    inv = Fila(id=7, sucursal_id=35, fecha="2026-10-03", categoria_id=0)
+    conn = CierreConn(otras=[9],
+                      mios=[_linea(1, "Pollo", 10)],
+                      ajenos=[Fila(producto_id=2, producto_nombre="Papas",
+                                   conteo_fisico=5)])
+    avisos = invmod._avisos_conteo_cruzado.__wrapped__(conn, inv)
+    _check("no avisa si las planillas no comparten productos",
+           avisos == [], f"avisos={avisos}")
+
+
+def prueba_el_cierre_avisa_pero_no_bloquea():
+    """El aviso es informativo: el cierre se aplica igual."""
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "core", "inventario.py"), encoding="utf-8") as fh:
+        inv = fh.read()
+    m = re.search(r"def inventario_cerrar\(.*?\n(?=@|\Z)", inv, re.S)
+    cerrar = m.group(0) if m else ""
+    _check("el cierre calcula el aviso de conteo cruzado",
+           "_avisos_conteo_cruzado" in cerrar)
+    _check("el cierre NO devuelve 409 por conteo cruzado",
+           "409" not in cerrar.split("_avisos_conteo_cruzado")[1][:1200]
+           or "Planilla se cerró mientras" in cerrar)
+    _check("el aviso viaja en la respuesta del cierre",
+           '"avisos": avisos_cierre' in cerrar)
+
+
+def prueba_el_aviso_del_cierre_se_ve_en_pantalla():
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "static", "app.js"), encoding="utf-8") as fh:
+        js = fh.read()
+    m = re.search(r"async function cerrarInventario\(\).*?\n\}", js, re.S)
+    fn = m.group(0) if m else ""
+    _check("cerrarInventario lee los avisos del cierre",
+           "avisosCierre" in fn and "r.data.avisos" in fn)
+    _check("el aviso del cierre dura mas de 3s",
+           re.search(r"toast\(a,\s*'err',\s*20000\)", fn) is not None)
+
+
 def main():
     print("=" * 70)
     print("AISLAMIENTO POR SUCURSAL DEL INVENTARIO DIARIO")
@@ -377,6 +499,11 @@ def main():
     prueba_iniciar_planilla_no_falla_en_silencio()
     prueba_se_pueden_abrir_las_dos_tipos_de_planilla()
     prueba_columnas_inventario_diario()
+    prueba_dos_encargados_no_disparan_el_aviso()
+    prueba_avisa_si_ya_esta_contado_en_otra_planilla()
+    prueba_no_avisa_si_no_se_pisan_productos()
+    prueba_el_cierre_avisa_pero_no_bloquea()
+    prueba_el_aviso_del_cierre_se_ve_en_pantalla()
     prueba_candados_en_el_codigo()
     print("=" * 70)
     print(f"FALLOS: {len(FALLOS)}")

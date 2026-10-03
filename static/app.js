@@ -3590,6 +3590,12 @@ async function cerrarInventario() {
     }
     const r = await request(API + '/inventario-diario/' + INV_ID + '/cerrar', { method: 'POST' });
     toast(r.message || 'Planilla cerrada', 'ok');
+    // El cierre se hizo igual (el usuario pidió que las dos planillas se puedan
+    // cerrar), pero si un producto ya estaba contado en otra planilla del mismo
+    // día el stock se acaba de ajustar DOS veces. Va con toast largo porque el
+    // aviso es largo y 3 segundos no alcanzan.
+    const avisosCierre = (r.data && r.data.avisos) || [];
+    for (const a of avisosCierre) toast(a, 'err', 20000);
     await abrirInventario(INV_ID);
     await listarInventario();
 }

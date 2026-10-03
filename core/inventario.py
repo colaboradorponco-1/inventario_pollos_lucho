@@ -752,6 +752,68 @@ def inventario_guardar(inv_id):
 # --------------------------------------------------------------------------
 @inventario_bp.route("/api/inventario-diario/<int:inv_id>/cerrar", methods=["POST"])
 @login_requerido
+def _avisos_conteo_cruzado(conn, inv):
+    """Productos contados en OTRA planilla de la misma sucursal y fecha.
+
+    Si ese día hay una planilla de 'todas' y otra por categoría, un mismo
+    producto puede quedar contado en las dos. Cada planilla ajusta el stock por
+    SU diferencia, así que al cerrar la segunda el stock se mueve dos veces.
+
+    OJO con el alcance: mira planillas DISTINTAS (`inv_id <> %s`). Los dos
+    encargados de una sucursal comparten la MISMA planilla, así que contar los
+    dos sobre la misma planilla nunca entra acá; ese caso ya lo cubre el aviso
+    de atribución al guardar. Solo dispara con la mezcla de tipos de planilla.
+
+    No bloquea: devuelve avisos y el cierre sigue. El usuario pidió que las dos
+    se puedan abrir y cerrar; avisar es lo que se pidió, no impedir.
+    """
+    otros = conn.execute(
+        "SELECT id FROM inventario_diario "
+        "WHERE sucursal_id = %s AND fecha = %s AND id <> %s "
+        "AND categoria_id <> %s",
+        (inv["sucursal_id"], inv["fecha"], inv["id"], inv["categoria_id"])
+    ).fetchall()
+    if not otros:
+        return []
+    ids = [o["id"] for o in otros]
+    marcas = ",".join(["%s"] * len(ids))
+
+    # Productos contados en la planilla que se está cerrando.
+    mios = {r["producto_id"]: r for r in conn.execute(
+        "SELECT producto_id, producto_nombre, conteo_fisico "
+        "FROM inventario_detalle "
+        f"WHERE inventario_id = %s AND conteo_fisico IS NOT NULL", (inv["id"],)
+    ).fetchall()}
+    if not mios:
+        return []
+
+    # ...y los mismos productos ya contados en las otras planillas del día.
+    ajenos = conn.execute(
+        "SELECT producto_id, MIN(producto_nombre) AS producto_nombre, "
+        "MIN(conteo_fisico) AS conteo_fisico "
+        "FROM inventario_detalle "
+        f"WHERE inventario_id IN ({marcas}) AND conteo_fisico IS NOT NULL "
+        "GROUP BY producto_id",
+        ids).fetchall()
+
+    chocan = [a for a in ajenos if a["producto_id"] in mios]
+    if not chocan:
+        return []
+
+    detalle = ", ".join(
+        f"{mios[a['producto_id']]['producto_nombre'] or 'producto'} "
+        f"(acá {mios[a['producto_id']]['conteo_fisico']}, "
+        f"en la otra {a['conteo_fisico']})"
+        for a in chocan[:4])
+    resto = f" y {len(chocan) - 4} más" if len(chocan) > 4 else ""
+    return [
+        f"Ojo: {len(chocan)} producto(s) ya están contados en otra planilla de "
+        f"este mismo día: {detalle}{resto}. Si cerrás las dos, el stock de esos "
+        f"productos se ajusta DOS veces. Si la otra planilla ya la cerró, este "
+        f"cierre vuelve a moverlo."
+    ]
+
+
 def inventario_cerrar(inv_id):
     """Cierra la planilla. Por cada línea con diferencia genera un movimiento tipo
     'ajuste' para que el stock del sistema coincida con el conteo físico. La operación
@@ -784,6 +846,11 @@ def inventario_cerrar(inv_id):
     # Ya no se bloquea el cierre si hay diferencias sin explicar. El usuario
     # pedía que no se confundan ni se traben con bloqueos operativos.
     # El ajuste de stock se aplica directo y el resumen ya lleva la cuenta.
+    #
+    # Esto tampoco bloquea: si el mismo producto está contado en otra planilla
+    # del día, se avisa. El ajuste se aplica igual porque el usuario pidió que
+    # las dos planillas se puedan cerrar.
+    avisos_cierre = _avisos_conteo_cruzado(conn, inv)
 
     fecha_cierre = datetime.now().isoformat(timespec="seconds")
     total_items = len(filas)
@@ -857,7 +924,8 @@ def inventario_cerrar(inv_id):
                         f"dif. Bs {round(valor_dif, 2)}")
     return ok({"ajustes": ajustes, "total_items": total_items,
                "total_faltantes": faltantes, "total_sobrantes": sobrantes,
-               "valor_diferencia": round(valor_dif, 2)},
+               "valor_diferencia": round(valor_dif, 2),
+               "avisos": avisos_cierre},
               message=f"Planilla cerrada con {ajustes} ajuste(s) de stock")
 
 
