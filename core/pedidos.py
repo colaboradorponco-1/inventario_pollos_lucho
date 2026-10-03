@@ -572,16 +572,20 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
             subtotal = d["cantidad"] * costo
             subtotal_reparto += subtotal
             total += subtotal
+            # Sin round() en ningun total del despacho: las columnas son DOUBLE.
+            # Con 3 x 3.333 el subtotal real es 9.999; redondear a 2 dejaba
+            # pedido.total, reparto.total y reparto_detalle.subtotal con tres
+            # valores distintos del mismo delivery.
             conn.execute("""
                 INSERT INTO reparto_detalle (reparto_id, producto_id, producto_nombre, cantidad, costo_unitario, subtotal)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (reparto_id, d["producto_id"], d["producto_nombre"], d["cantidad"], costo, round(subtotal, 2)))
+            """, (reparto_id, d["producto_id"], d["producto_nombre"], d["cantidad"], costo, subtotal))
             registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, fecha_mov,
                                   f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
             registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, fecha_mov,
                                   f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
                                   pedido["sucursal_id"])
-        conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (round(subtotal_reparto, 2), reparto_id))
+        conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (subtotal_reparto, reparto_id))
     return total, reparto_ids
 
 
@@ -851,8 +855,11 @@ def pedido_etapa(pedido_id):
             conn.rollback()
             conn.close()
             return err(movido[1])
+        # Sin round(): las columnas son DOUBLE y el movimiento ya viene
+        # valuado con la precision del lote. Redondear a 2 decimales alteraba el
+        # total real del pedido (3 x 3.333 = 9.999 se guardaba como 10.0).
         conn.execute("UPDATE pedidos SET etapa = ?, estado = 'cumplido', total = ? WHERE id = ?",
-                     (destino_etapa, round(movido[0], 2), pedido_id))
+                     (destino_etapa, movido[0], pedido_id))
         conn.commit()
         conn.close()
         registrar_auditoria("Pedido entregado",
