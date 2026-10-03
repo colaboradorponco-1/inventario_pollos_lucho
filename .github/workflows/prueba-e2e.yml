@@ -33,6 +33,10 @@ jobs:
             echo "codigo de salida de la prueba: $?" >> /tmp/e2e.log
             ./venv/bin/python prueba_resumen.py >> /tmp/e2e.log 2>&1
             cat /tmp/e2e.log
+            # exit 0 SIEMPRE: ssh-action corta el paso en el primer comando que
+            # falla, y si la prueba falla (que es justo cuando hay que leer el
+            # log) el paso de publicar el resultado nunca correria.
+            exit 0
 
       - name: Publicar el resultado en el repo
         run: |
