@@ -568,10 +568,19 @@ def pedido_despachar(pedido_id):
     """Convierte un pedido pendiente en repartos reales: uno por cada proveedor.
     Puede despachar un admin/superadmin o un encargado de almacén principal."""
     conn = get_conn()
-    pedido = conn.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone()
+    # FOR UPDATE: bloquea la fila del pedido. Si dos usuarios dan clic en
+    # "Despachar" al mismo tiempo (o hay un doble clic rápido), el segundo
+    # intento frena acá y no duplica el descuento de stock ni los repartos.
+    try:
+        pedido = conn.execute("SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
+    except Exception:
+        pedido = conn.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone()
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
+    if pedido["estado"] != "pendiente":
+        conn.close()
+        return err(f"Este pedido ya no está pendiente (estado actual: {pedido['estado']})", 400)
     if not (es_gestion() or es_encargado_almacen(conn)):
         conn.close()
         return err("No tienes permisos para despachar pedidos", 403)
