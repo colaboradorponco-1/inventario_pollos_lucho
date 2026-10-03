@@ -436,7 +436,13 @@ def pedido_estado(pedido_id):
         det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
                            (pedido_id,)).fetchall()
         es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in det)
-        puede = pedido["sucursal_id"] == sid or es_proveedor
+        # Solo el PROVEEDOR cambia el estado. Antes tambien entraba quien hizo el
+        # pedido (`pedido["sucursal_id"] == sid`), y eso dejaba que el encargado
+        # de America advancedor el estado de un pedido que le hizo a Almacen
+        # Principal 1: la mercaderia la despacha el almacen, no la sucursal que
+        # la pidio. La sucursal que pidio avanza su ETAPA (preparador/repartidor)
+        # y al entregar el backend pone 'cumplido' solo.
+        puede = es_proveedor
     if not puede:
         conn.close()
         return err("No tienes permisos para esta acción", 403)

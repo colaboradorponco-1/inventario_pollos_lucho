@@ -243,6 +243,17 @@ def correr_flujo(pid, sucursal_logistica, origen_id, destino_id, prod, cantidad)
     return total
 
 
+def llamar_estado(pid, rol, sucursal, estado):
+    """El endpoint que cambia el `estado` (el que usa el desplegable del almacen)."""
+    with srv.test_request_context(f"/api/pedidos/{pid}/estado",
+                                  method="PUT", json={"estado": estado}):
+        session["user_id"] = 1
+        session["rol"] = rol
+        session["sucursal_id"] = sucursal
+        session["usuario"] = "prueba_e2e"
+        return ped.pedido_estado(pid)
+
+
 def correr_casos():
     """Casos A-D. Todo lo que escribe corre DENTRO de la transaccion de CONN.
 
@@ -329,6 +340,30 @@ def correr_casos():
     _, _, total_guardado = etapa_estado(pid_d)
     check("lo guardado en pedidos.total tambien es exacto",
           abs(total_guardado - esperado) < 1e-9, f"guardado={total_guardado}, exacto={esperado}")
+    print()
+
+    # ---- Caso E: solo el PROVEEDOR cambia el estado ----
+    print("-" * 74)
+    print("CASO E: solo el almacen (proveedor) cambia el estado del pedido")
+    print("-" * 74)
+    # Pedido de una sucursal, despachado por el almacen principal.
+    dar_stock(prod["id"], ap["id"], 100)
+    pid_e = crear_pedido(ap["id"], no_dist["id"], prod, 2.0)
+
+    r = llamar_estado(pid_e, "encargado", no_dist["id"], "despachado")
+    check(f"el encargado de {no_dist['nombre']} NO cambia el estado de un pedido "
+          f"que le hizo a {ap['nombre']}", es_error(r) and r[1] == 403, mensaje(r))
+    check("el pedido sigue pendiente", etapa_estado(pid_e)[1] == "pendiente")
+
+    r = llamar_estado(pid_e, "encargado", ap["id"], "despachado")
+    check(f"el encargado de {ap['nombre']} SI cambia el estado",
+          not es_error(r), mensaje(r))
+    check("el estado quedo en despachado", etapa_estado(pid_e)[1] == "despachado",
+          f"estado={etapa_estado(pid_e)[1]}")
+    # Al despachar, el stock sale del almacen y entra a quien pidio.
+    check("el despacho movio el stock del almacen a la sucursal",
+          abs((stock_actual(CONN, prod["id"], ap["id"]) - 98.0)) < 1e-9,
+          f"almacen={stock_actual(CONN, prod['id'], ap['id'])} (100 - 2)")
     print()
 
     return {"prod": prod, "suc": suc, "stock_inicial": stock_inicial}
