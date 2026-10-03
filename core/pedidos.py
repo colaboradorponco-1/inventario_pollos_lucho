@@ -426,9 +426,14 @@ def pedido_estado(pedido_id):
         return err("No tienes permisos para esta acción", 403)
     data = request.get_json() or {}
     estado = data.get("estado", "")
+    actual = pedido["estado"]
     if estado not in _ESTADOS:
         conn.close()
         return err("Estado inválido")
+    # Transición válida: no se puede volver atrás (el stock ya salió del almacén).
+    if estado not in _TRANSICIONES.get(actual, {actual}):
+        conn.close()
+        return err(f"No se puede pasar de '{actual}' a '{estado}'")
 
     # Control de permisos por rol especifico
     rol = session.get("rol")
@@ -442,11 +447,6 @@ def pedido_estado(pedido_id):
         if estado not in ("en_camino", "entregado"):
             conn.close()
             return err("El repartidor solo puede marcar el pedido como 'en_camino' o 'entregado'", 403)
-    elif rol == "encargado":
-        # Los encargados de sucursal ven pero no editan estados directamente aca (o segun logica anterior)
-        # Segun regla del usuario: encargados ven pero no cambian estados de reparto directamente, o si?
-        # "los encargados de estas dos sucursales no pueden editar pero si pueden ver"
-        pass
 
     # Salir de 'pendiente' a 'despachado' o 'cumplido' mueve el stock de verdad:
     # descuenta del almacén que lo despacha y lo suma a la sucursal que lo pidió.

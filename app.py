@@ -23,6 +23,7 @@ from core.pedidos import pedidos_bp
 from core.reportes import reportes_bp
 from core.sucursales import sucursales_bp
 from core.usuarios import usuarios_bp
+from core.util import ruta_bloqueada_logistica
 from core.ventas import ventas_bp
 
 # Duración de la sesión: expire tras 8 horas de inactividad (se refresca en
@@ -77,6 +78,19 @@ def create_app():
                movimientos_bp, ventas_bp, sucursales_bp, usuarios_bp, reportes_bp,
                pedidos_bp, inventario_bp):
         app.register_blueprint(bp)
+
+    @app.before_request
+    def bloquear_logistica():
+        """Preparador/repartidor: solo su cola de pedidos. Todo lo demás, bloqueado."""
+        if "user_id" not in session:
+            return None
+        if ruta_bloqueada_logistica(flask_request.path):
+            if flask_request.path.startswith("/api/"):
+                return jsonify({"ok": False,
+                                "message": "Tu rol solo permite trabajar con los "
+                                           "pedidos de tu sucursal"}), 403
+            return redirect("/login")
+        return None
 
     @app.before_request
     def sesion_por_inactividad():

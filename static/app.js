@@ -4520,11 +4520,20 @@ async function init() {
             const btn = document.querySelector(`.menu-btn[data-view="${v}"]`);
             if (btn) btn.style.display = 'none';
         };
-        // Admin y encargado no gestionan administración global
+        // Admin y encargado no gestionan administración global.
+        // Preparador y repartidor SOLO ven pedidos operativos, se oculta todo lo demas.
         if (s.rol === 'encargado') {
             ['usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
         } else if (s.rol === 'admin') {
             ['usuarios', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
+        } else if (s.rol === 'preparador' || s.rol === 'repartidor') {
+            // Ocultar absolutamente todo menos pedidos
+            ['dashboard', 'inventario', 'productos', 'ventas', 'repartos', 'gastos', 'reportes', 'usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias', 'movimientos', 'compras', 'proveedores', 'lotes'].forEach(ocultar);
+            // Abrir siempre su cola de pedidos, sin passar por el dashboard
+            const btnPedidos = $('.menu-btn[data-view="pedidos"]');
+            if (btnPedidos) {
+                btnPedidos.click();
+            }
         }
         // Encargado: operación de su sucursal, pero ve SUS propios reportes
         if (s.rol === 'encargado') {

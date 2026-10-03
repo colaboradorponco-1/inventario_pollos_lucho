@@ -28,7 +28,7 @@ def usuarios():
         rol = data.get("rol", "encargado")
         password = data.get("password") or ""
         sucursal_id = data.get("sucursal_id")
-        if rol not in ("encargado", "admin", "superadmin"):
+        if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor"):
             rol = "encargado"
         if not es_superadmin() and rol != "encargado":
             conn.close()
@@ -101,7 +101,7 @@ def usuario(user_id):
     rol = data.get("rol", "encargado")
     activo = 1 if data.get("activo", 1) else 0
     sucursal_id = data.get("sucursal_id")
-    if rol not in ("encargado", "admin", "superadmin"):
+    if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor"):
         rol = "encargado"
     target = conn.execute("SELECT rol FROM usuarios WHERE id = ?", (user_id,)).fetchone()
     if not target:

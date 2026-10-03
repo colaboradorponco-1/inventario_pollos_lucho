@@ -92,6 +92,38 @@ def es_gestion():
     return session.get("rol") in ("admin", "superadmin")
 
 
+def es_logistica():
+    """True si el rol es operativo de despacho (preparador/repartidor).
+
+    Estos roles SOLO existen para marcar el avance de los pedidos de su
+    sucursal. No participan de la gestión: ni dashboard, ni finanzas,
+    ni inventario, ni productos, ni catalogos."""
+    return session.get("rol") in ("preparador", "repartidor")
+
+
+# Endpoints que un preparador/repartidorJamás debe tocar: Todo lo que no sea
+# su cola de pedidos. Los pedidos (bandeja + cambio de estado) quedan fuera.
+RUTAS_BLOQUEADAS_LOGISTICA = (
+    "/api/dashboard", "/api/productos", "/api/categorias", "/api/movimientos",
+    "/api/ventas", "/api/ventas/", "/api/gastos", "/api/gastos/",
+    "/api/reportes", "/api/inventario", "/api/inventario/",
+    "/api/usuarios", "/api/auditoria", "/api/almacenes",
+    "/api/proveedores", "/api/repartos", "/api/lotes", "/api/backup",
+    "/api/config",
+)
+
+
+def ruta_bloqueada_logistica(path):
+    """True si `path` es un endpoint prohibido para preparador/repartidor."""
+    if not es_logistica():
+        return False
+    for bloqueada in RUTAS_BLOQUEADAS_LOGISTICA:
+        if path == bloqueada or path.startswith(bloqueada + "/"):
+            return True
+    return False
+
+
+
 def es_encargado_almacen(conn):
     """True si el rol es encargado y su sucursal es un almacén principal.
     Estos encargados coordinan el inventario: ven todo, como el admin."""
