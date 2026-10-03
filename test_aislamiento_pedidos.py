@@ -86,7 +86,8 @@ CASOS = [
     ("preparador America", "preparador", 35, "America", "p.sucursal_id = ?"),
     ("repartidor Simon", "repartidor", 33, "Simon Lopez", "p.sucursal_id = ?"),
     ("encargado filial", "encargado", 42, "La Paz", "p.sucursal_id = ?"),
-    ("encargado principal", "encargado", 30, "Almacen Principal 1", None),
+    ("encargado AP1", "encargado", 30, "Almacen Principal 1", "p.sucursal_id = ?"),
+    ("encargado AP2", "encargado", 36, "Almacen Principal 2", "p.sucursal_id = ?"),
     ("admin", "admin", 30, "Almacen Principal 1", None),
     ("superadmin", "superadmin", None, "todas", None),
 ]

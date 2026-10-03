@@ -247,10 +247,6 @@ def pedidos():
     """
     params = []
     sid = sucursal_actual()
-    es_central = False
-    if sid:
-        f = conn.execute("SELECT principal FROM sucursales WHERE id = ?", (sid,)).fetchone()
-        es_central = bool(f and f["principal"])
     if not es_superadmin() and sid:
         if es_logistica():
             # Preparador / repartidor: SOLO los pedidos que PLACO su sucursal
@@ -264,12 +260,19 @@ def pedidos():
             # son su trabajo, y no veia los pedidos que America si pidio.
             q += " AND p.sucursal_id = ?"
             params.append(sid)
-        elif session.get("rol") == "encargado" and not es_central:
-            # Sucursal filial: ve sus pedidos (los que pide y los que le piden)
+        elif session.get("rol") == "encargado":
+            # Encargado (de filial O de almacen principal): ve lo que PIDE su
+            # sucursal y lo que le PIDEN a ella como proveedor.
+            #
+            # Antes el almacen principal se quedaba SIN filtro y veia todos los
+            # pedidos del negocio, incluidos los que otras sucursales le hacen
+            # entre si. No corresponde: los almacenes principales no piden, solo
+            # despachan, asi que su bandeja es la cola de pedidos que les
+            # llegan y cambian de estado.
             q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
                   "EXISTS (SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
             params += [sid, sid, sid]
-        # Administradores y encargados de almacén principal ven todos los pedidos
+        # Los admin de sucursal y los superadmin ven todos los pedidos
     if estado in _ESTADOS:
         q += " AND p.estado = ?"
         params.append(estado)
