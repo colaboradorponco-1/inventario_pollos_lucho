@@ -4375,7 +4375,17 @@ async function listarPedidos() {
     const pagina = resp.pagina || 1;
     const porPagina = resp.por_pagina || 50;
     const badges = { pendiente: 'badge-pendiente', despachado: 'badge-despachado', cumplido: 'badge-cumplido' };
-    $('#pedidos-tbody').innerHTML = pedidos.map((p) => `
+    $('#pedidos-tbody').innerHTML = pedidos.map((p) => {
+        // La ETAPA manda sobre el `estado` en esta columna. El `estado` sigue en
+        // 'pendiente' hasta que se entrega (a proposito, para los reportes), asi
+        // que mostrarlo solo hacia que un pedido que la preparadora ya marco
+        // 'En preparacion' seguia mostrando 'Pidiendo'. Ahora, si la etapa
+        // avanzo, la columna dice la etapa; el estado real queda en el tooltip.
+        const etapa = p.etapa || 'pendiente';
+        const celdaEstado = etapa !== 'pendiente'
+            ? `<span class="ciudad-tag" title="Etapa logística: ${esc(ETAPA_LAB[etapa] || etapa)} · Estado: ${esc(p.estado || '')}">${esc(ETAPA_LAB[etapa] || etapa)}</span>`
+            : `<span class="${badges[p.estado] || 'badge-pendiente'}">${esc(ESTADO_LAB[p.estado] || p.estado)}</span>`;
+        return `
         <tr>
             <td><strong>${esc(p.nro_ticket)}</strong></td>
             <td>${fmtDate(p.fecha)}</td>
@@ -4386,12 +4396,12 @@ async function listarPedidos() {
                 ? `<span class="badge badge-entrada" title="${p.num_repartos} reparto(s) por Bs ${fmtNum(p.total_repartos)}"
                    style="cursor:pointer" onclick="verPedido(${p.id}, false)">#${p.num_repartos} · Bs ${fmtNum(p.total_repartos)}</span>`
                 : '—'}</td>
-            <td><span class="${badges[p.estado] || 'badge-pendiente'}">${esc(ESTADO_LAB[p.estado] || p.estado)}</span></td>
+            <td>${celdaEstado}</td>
             <td>${esc(p.nota) || '—'}</td>
             <td>
                 <button class="btn btn-icon" onclick="verPedido(${p.id}, false)" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             </td>
-        </tr>`).join('') || '<tr><td colspan="9" class="empty">Sin pedidos registrados</td></tr>';
+        </tr>`; }).join('') || '<tr><td colspan="9" class="empty">Sin pedidos registrados</td></tr>';
     renderPagination('#pedidos-paginacion', total, pagina, porPagina, listarPedidos);
     // contador de pendientes en el menú
     try {
@@ -4455,7 +4465,17 @@ window.verPedido = async (id, accionables = true) => {
             ? 'Varios (' + destIds.length + ')'
             : (p.destino_nombre || p.destino_id || '—');
         $('#det-pedido-usuario').textContent = p.usuario || '—';
-        $('#det-pedido-estado').textContent = ESTADO_LAB[p.estado] || p.estado || '—';
+        // Igual que en la tabla: si la etapa logistica avanzo, se muestra la
+        // etapa. El `estado` queda 'pendiente' hasta la entrega y mostrarlo solo
+        // hacia que un pedido en preparacion pareciera seguir 'Pidiendo'.
+        const etapaDet = p.etapa || 'pendiente';
+        const celdaEstadoDet = $('#det-pedido-estado');
+        celdaEstadoDet.textContent = etapaDet !== 'pendiente'
+            ? ETAPA_LAB[etapaDet] || etapaDet
+            : (ESTADO_LAB[p.estado] || p.estado || '—');
+        celdaEstadoDet.title = etapaDet !== 'pendiente'
+            ? `Etapa logística: ${ETAPA_LAB[etapaDet] || etapaDet} · Estado: ${p.estado || ''}`
+            : '';
         $('#det-pedido-total').textContent = p.total != null ? fmtNum(p.total) : '—';
         $('#det-pedido-nota').textContent = p.nota || 'Sin nota';
         const sucMap = {}; (catalogos.sucursales || []).forEach((s) => { sucMap[s.id] = s.nombre; });
