@@ -3330,16 +3330,23 @@ function recalcFilaInv(e) {
 
 function collectedInventario() {
     // $$(...) devuelve un NodeList: sin Array.from no tiene .map().
+    // Se manda el TEXTO CRUDO, no Number(...). Con Number, una casilla con
+    // "abc" o un guion a medio escribir daba NaN, y JSON.stringify(NaN) sale
+    // como null: el servidor lo tomaba como "no contado" y guardaba la fila en
+    // blanco sin avisar nada. El encargado perdia lo que habia tipeado y la
+    // pantalla no decia por que. Que valide el servidor, que ya responde con un
+    // mensaje que nombra el producto.
     return Array.from($$('#inv-tbody .inv-conteo')).map((inp) => {
         const id = Number(inp.dataset.id);
         const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
         const ini = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
         const man = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
+        const enBlanco = (el) => !el || el.value === '' || el.value === null;
         return {
             id,
-            inicial: ini && ini.value !== '' ? Number(ini.value) : null,
-            ingreso_manual: man && man.value !== '' ? Number(man.value) : null,
-            conteo_fisico: inp.value === '' ? null : Number(inp.value),
+            inicial: enBlanco(ini) ? null : ini.value,
+            ingreso_manual: enBlanco(man) ? null : man.value,
+            conteo_fisico: enBlanco(inp) ? null : inp.value,
             observaciones: obs ? obs.value : '',
         };
     });

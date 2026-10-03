@@ -533,12 +533,12 @@ def inventario_guardar(inv_id):
         v = flotante(bruto, None)
         if v is None:
             raise _DatoInvalido(
-                f"El {donde} no es un número. Borra lo que escribiste en esa casilla o "
+                f"{donde} no es un número. Borra lo que escribiste en esa casilla o "
                 f"déjala vacía. No se guardó nada: revisá esa casilla y volvé a guardar, "
                 f"el resto sigue cargado en la pantalla.")
         if v < 0:
             raise _DatoInvalido(
-                f"El {donde} no puede ser negativo. No se guardó nada: revisá esa "
+                f"{donde} no puede ser negativo. No se guardó nada: revisá esa "
                 f"casilla y volvé a guardar, el resto sigue cargado en la pantalla.")
         return v
 
@@ -619,10 +619,7 @@ def inventario_guardar(inv_id):
         conn.close()
         return err(str(e), 400)
 
-    hora_nueva = _validar_hora(data.get("hora_corte"))
-    if hora_nueva is None:
-        conn.close()
-        return err("La hora de corte no tiene un formato válido (debe ser HH:MM)", 400)
+    # La hora ya se valido arriba, antes de buscar los movimientos posteriores.
     conn.execute("UPDATE inventario_diario SET observaciones = %s, hora_corte = %s WHERE id = %s",
                  ((data.get("observaciones") or inv["observaciones"] or "")[:2000] or None,
                   hora_nueva or inv["hora_corte"] or None, inv_id))
