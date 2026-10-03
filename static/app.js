@@ -3114,12 +3114,21 @@ function revisarHoraCorte() {
         return true;
     }
     box.dataset.riesgo = '1';
+    const ahoraTxt = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
+    const hs = Math.floor(dif / 60), ms = dif % 60;
+    const atraso = hs ? `${hs} h ${ms} min` : `${ms} min`;
     box.innerHTML =
-        `<strong>Ojo con la hora de corte.</strong> Si ya pasó la hora que escribiste, ` +
-        `al cerrar se va a descontar lo que se movió después y puede marcar faltantes ` +
-        `que no existen.<br>` +
-        `Poné la hora en que terminaste de contar en el almacén, no la de cuando ` +
-        `vas a apretar el botón.`;
+        `<strong>La hora de corte es hasta qué hora contaste, no cuándo apretás guardar.</strong><br>` +
+        `Contaste hasta las <strong>${$('#inv-hora').value}</strong> y ahora son las ` +
+        `<strong>${ahoraTxt}</strong>. En este rato (${atraso}) el almacén puede haber seguido ` +
+        `vendiendo.<br>` +
+        `Al cerrar, el sistema compara tu conteo contra el stock que había a las ` +
+        `<strong>${$('#inv-hora').value}</strong>, así que devuelve esas ventas a los dos lados ` +
+        `y no te las marca como faltantes. Si la hora que pusiste es anterior a cuando ` +
+        `terminaste de contar, esas ventas se descuentan dos veces y ahí sí te salen ` +
+        `faltantes que no existen.<br>` +
+        `<strong>Ejemplo:</strong> contaste de 8 a 11 y a las 11:30 apretaste guardar. ` +
+        `Poné 11:00, no 11:30.`;
     box.style.display = '';
     return false;
 }

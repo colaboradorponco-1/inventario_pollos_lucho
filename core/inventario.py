@@ -520,21 +520,41 @@ def inventario_guardar(inv_id):
         conn.close()
         return err("Envía las líneas a actualizar", 400)
 
-    def _campo(bruto, etiqueta):
-        """Número >= 0 escrito por el encargado. None si lo dejó vacío."""
+    def _campo(bruto, etiqueta, producto=None):
+        """Número >= 0 escrito por el encargado. None si lo dejó vacío.
+
+        El nombre del producto va en el mensaje a propósito: una sola celda mal
+        escrita tumba el guardado de toda la planilla, y con más de cien filas no
+        había forma de saber cuál era la culpable. Ahora dice cuál tocar.
+        """
+        donde = f"{etiqueta} de '{producto}'" if producto else etiqueta
         if bruto in (None, ""):
             return None
         v = flotante(bruto, None)
         if v is None:
-            raise _DatoInvalido(f"{etiqueta} debe ser un número (déjalo vacío si no aplica)")
+            raise _DatoInvalido(
+                f"El {donde} no es un número. Borra lo que escribiste en esa casilla o "
+                f"déjala vacía. No se guardó nada: revisá esa casilla y volvé a guardar, "
+                f"el resto sigue cargado en la pantalla.")
         if v < 0:
-            raise _DatoInvalido(f"{etiqueta} no puede ser negativo")
+            raise _DatoInvalido(
+                f"El {donde} no puede ser negativo. No se guardó nada: revisá esa "
+                f"casilla y volvé a guardar, el resto sigue cargado en la pantalla.")
         return v
 
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
     ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
+    # La hora de corte se resuelve ANTES de buscar los movimientos posteriores. Se
+    # usaba la que ya estaba guardada y la nueva se actualizaba al final, así que
+    # si el encargado corregía la hora y guardaba, la diferencia que se le mostraba
+    # se calculaba contra la hora vieja: le salían faltantes que no existían.
+    hora_nueva = _validar_hora(data.get("hora_corte"))
+    if hora_nueva is None:
+        conn.close()
+        return err("La hora de corte no tiene un formato válido (debe ser HH:MM)", 400)
+    hora_corte = hora_nueva or inv["hora_corte"] or None
+    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], hora_corte)
     try:
         for item in lineas:
             if not isinstance(item, dict):
@@ -543,10 +563,11 @@ def inventario_guardar(inv_id):
             fila = validas.get(lid)
             if not fila:
                 continue
-            conteo = _campo(item.get("conteo_fisico"), "El inventario final")
+            nom = fila["producto_nombre"]
+            conteo = _campo(item.get("conteo_fisico"), "El inventario final", nom)
             # El encargado puede corregir el INICIAL a mano (el stock con el que
             # arrancó el día no siempre cuadra con el que tiene el sistema).
-            inicial = _campo(item.get("inicial"), "El inventario inicial")
+            inicial = _campo(item.get("inicial"), "El inventario inicial", nom)
             if inicial is None:
                 inicial = fila["inicial"] or 0
             # El inicial ya viene con el stock actual del sistema (incluye los
@@ -554,17 +575,13 @@ def inventario_guardar(inv_id):
             # lo que llega por vías que no pasan por el sistema (compra directa,
             # devolución, de la casa).
             ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, fila, True)
-            enviado_sis = item.get("ingreso_sistema")
-            if enviado_sis not in (None, ""):
-                v_env = flotante(enviado_sis, None)
-                if v_env is not None and abs(v_env - ing_sis) > 1e-9:
-                    raise _DatoInvalido(
-                        f"{fila['producto_nombre']}: el ingreso del sistema no se escribe a mano, ya "
-                        f"tiene {round(ing_sis, 3)} de entrada (compras y pedidos entregados). "
-                        f"Anótalo en la columna 'Ingreso manual' de al lado, que esa sí es para lo "
-                        f"que llega sin pasar por el sistema."
-                    )
-            ing_man = _campo(item.get("ingreso_manual"), "El ingreso manual")
+            # Lo que venga en 'ingreso_sistema' se IGNORA a propósito. Este campo
+            # ya no existe en la pantalla, pero el navegador de quien lo tenía
+            # cacheado de una versión anterior todavía lo manda, y si se comparaba
+            # contra el valor recién deducido no coincidía: devolvía 400 y el
+            # encargado perdía TODO lo que había contado. Ese 400 fue lo que
+            # reportaron como "se les borra todo lo que hacen".
+            ing_man = _campo(item.get("ingreso_manual"), "El ingreso manual", nom)
             if ing_man is None:
                 ing_man = fila["ingreso_manual"] or 0
             # Disponible = inicial + SOLO lo manual. El automático no cuenta en la planilla.
