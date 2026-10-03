@@ -11,7 +11,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pollos Lucho">
-    <link rel="stylesheet" href="/static/style.css?v=24">
+    <link rel="stylesheet" href="/static/style.css?v=202610031130">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
@@ -75,6 +75,10 @@
 
             <h2 class="menu-grupo">Operaciones</h2>
             <div class="menu-group">
+                <button class="menu-btn" data-view="logistica" style="display:none">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
+                    Mi trabajo
+                </button>
                 <button class="menu-btn" data-view="pedidos">
                     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                     <span class="badge-alerta" id="badge-pedidos" style="display:none"></span>
@@ -136,6 +140,33 @@
     </aside>
 
     <main id="app">
+
+
+        <!-- PANEL LOGISTICA (solo preparador / repartidor) -->
+        <section id="view-logistica" class="view">
+            <div class="dash-head">
+                <div>
+                    <h1>Mi trabajo</h1>
+                    <p class="dash-welcome" id="logistica-sucursal">Cargando...</p>
+                </div>
+            </div>
+            <div class="kpi-grid" id="logistica-kpis">
+                <div class="kpi">
+                    <span class="kpi-label">Por preparar</span>
+                    <strong class="kpi-valor" id="log-por-preparar">0</strong>
+                </div>
+                <div class="kpi">
+                    <span class="kpi-label">Por entregar</span>
+                    <strong class="kpi-valor" id="log-por-entregar">0</strong>
+                </div>
+                <div class="kpi">
+                    <span class="kpi-label">Total pendientes</span>
+                    <strong class="kpi-valor" id="log-total">0</strong>
+                </div>
+            </div>
+            <p class="logistica-aviso" id="logistica-aviso"></p>
+            <button class="btn" id="btn-ir-pedidos" type="button">Ver mis pedidos</button>
+        </section>
 
         <!-- DASHBOARD -->
         <section id="view-dashboard" class="view active">
@@ -1341,7 +1372,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610031100"></script>
+    <script src="/static/app.js?v=202610031130"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

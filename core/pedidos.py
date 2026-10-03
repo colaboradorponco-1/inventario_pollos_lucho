@@ -17,7 +17,8 @@ from flask import Blueprint, redirect, render_template, request, session
 from database import get_conn
 from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
                    paginar_params, sucursal_actual, sucursal_operativa, stock_actual,
-                   es_gestion, es_superadmin, es_encargado_almacen, registrar_movimiento)
+                   es_gestion, es_superadmin, es_encargado_almacen, registrar_movimiento,
+                   es_logistica)
 
 pedidos_bp = Blueprint("pedidos", __name__)
 
@@ -706,3 +707,39 @@ def pedidos_bandeja():
         pedido["items"] = det_map.get(r["id"], [])
         grupos[key]["pedidos"].append(pedido)
     return ok(list(grupos.values()))
+
+
+@pedidos_bp.route("/api/logistica/resumen")
+@login_requerido
+def logistica_resumen():
+    """Panel minimo del preparador/repartidor: SOLO su cola de trabajo.
+
+    No devuelve ventas, gastos, ganancias, valor de inventario ni alertas:
+    el rol logistico no gestiona nada de eso, asi que no debe verlo.
+    Cuenta unicamente los pedidos dirigidos a la sucursal del usuario."""
+    conn = get_conn()
+    sid = sucursal_actual()
+    if not es_logistica() or sid is None:
+        conn.close()
+        return err("Solo disponible para preparador/repartidor", 403)
+
+    def _contar(estados):
+        marcas = ",".join(["%s"] * len(estados))
+        f = conn.execute(
+            f"""SELECT COUNT(DISTINCT p.id) AS n FROM pedidos p
+                JOIN pedido_detalle dd ON dd.pedido_id = p.id
+                WHERE dd.destino_id = %s AND p.estado IN ({marcas})""",
+            [sid] + list(estados)).fetchone()
+        return int((f or {}).get("n") or 0)
+
+    nombre = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
+                          (sid,)).fetchone()
+    resumen = {
+        "sucursal": (nombre or {}).get("nombre") or "",
+        "rol": session.get("rol"),
+        "por_preparar": _contar(("pendiente",)),
+        "por_entregar": _contar(("despachado",)),
+        "total": _contar(("pendiente", "despachado")),
+    }
+    conn.close()
+    return ok(resumen)

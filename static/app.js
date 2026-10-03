@@ -222,6 +222,7 @@ $$('.menu-btn').forEach((btn) => {
 });
 
 function loadView(name) {
+    if (name === 'logistica') loadLogistica();
     if (name === 'dashboard') loadDashboard();
     if (name === 'productos') { pintarProdScope(); loadProductos(); enfocarEscanorSiEscritorio('#prod-escaneo'); }
     if (name === 'movimientos') { window.__MODO_COMPRA = false; loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
@@ -528,6 +529,35 @@ async function loadCatalogos() {
     const selUserSuc = $('#user-sucursal');
     if (selUserSuc) selUserSuc.innerHTML = '<option value="">— Asignar después —</option>' + opcionesSucursales(catalogos.sucursales, '');
 }
+
+// ---------------- Panel logistica (preparador / repartidor) ----------------
+async function loadLogistica() {
+    const nombreRol = window.ROL === 'preparador' ? 'Preparador' : 'Repartidor';
+    try {
+        const r = await request(API + '/logistica/resumen');
+        const d = (r && r.data) || {};
+        const suc = $('#logistica-sucursal');
+        if (suc) suc.textContent = nombreRol + ' · ' + (d.sucursal || '');
+        const set = (id, v) => { const e = $(id); if (e) e.textContent = v; };
+        set('#log-por-preparar', d.por_preparar ?? 0);
+        set('#log-por-entregar', d.por_entregar ?? 0);
+        set('#log-total', d.total ?? 0);
+        const av = $('#logistica-aviso');
+        if (av) {
+            av.textContent = window.ROL === 'preparador'
+                ? 'Marcá los pedidos como «En preparación» cuando empieces a prepararlos.'
+                : 'Pasá los pedidos a «En camino» y luego a «Entregado».';
+        }
+    } catch (e) {
+        const av = $('#logistica-aviso');
+        if (av) av.textContent = 'No se pudo cargar tu cola de trabajo.';
+    }
+}
+
+$('#btn-ir-pedidos')?.addEventListener('click', () => {
+    const b = $('.menu-btn[data-view="pedidos"]');
+    if (b) b.click();
+});
 
 // ---------------- Dashboard ----------------
 async function loadDashboard() {
@@ -4527,13 +4557,12 @@ async function init() {
         } else if (s.rol === 'admin') {
             ['usuarios', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
         } else if (s.rol === 'preparador' || s.rol === 'repartidor') {
-            // Ocultar absolutamente todo menos pedidos
-            ['dashboard', 'inventario', 'productos', 'ventas', 'repartos', 'gastos', 'reportes', 'usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias', 'movimientos', 'compras', 'proveedores', 'lotes'].forEach(ocultar);
-            // Abrir siempre su cola de pedidos, sin passar por el dashboard
+            // Panel propio minimo + pedidos. Todo lo demas desaparece.
+            ['dashboard', 'inventario', 'productos', 'ventas', 'repartos', 'gastos', 'reportes', 'usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias', 'movimientos', 'compras', 'proveedores'].forEach(ocultar);
+            const btnLog = document.querySelector('.menu-btn[data-view="logistica"]');
+            if (btnLog) btnLog.style.display = '';
             const btnPedidos = $('.menu-btn[data-view="pedidos"]');
-            if (btnPedidos) {
-                btnPedidos.click();
-            }
+            if (btnPedidos) btnPedidos.click();
         }
         // Encargado: operación de su sucursal, pero ve SUS propios reportes
         if (s.rol === 'encargado') {

@@ -1195,3 +1195,8 @@ body.rol-encargado .panel-finance {
     gap: 8px;
     flex-wrap: wrap;
 }
+
+/* ---- Panel minimal del preparador / repartidor ---- */
+#view-logistica .kpi { flex-direction: column; align-items: flex-start; gap: 6px; }
+#view-logistica .kpi-valor { font-size: 30px; line-height: 1.1; }
+.logistica-aviso { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
