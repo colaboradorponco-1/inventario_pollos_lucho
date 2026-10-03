@@ -45,11 +45,12 @@ fi
 # con PermissionError y set -e aborta TODO el despliegue aunque la app este bien.
 # Por eso los permisos se aseguran ANTES de respaldar, no solo despues del rsync.
 echo "==> Script de despliegue $SCRIPT_VERSION ($(date '+%F %T'))"
-echo "==> Asegurando permisos del directorio de la app"
+echo "==> Asegurando permisos del directorio de la app y respaldos"
 mkdir -p "$APP_DIR"
-chown pollos:pollos "$APP_DIR"
-chmod u+rwx "$APP_DIR"
-ls -ld "$APP_DIR" || true
+mkdir -p "$APP_DIR/respaldos"
+chown -R pollos:pollos "$APP_DIR"
+chmod u+rwx "$APP_DIR" "$APP_DIR/respaldos"
+ls -ld "$APP_DIR" "$APP_DIR/respaldos" || true
 
 # Respaldo previo: garantiza un punto de restauracion del estado exacto de la
 # base justo antes del cambio. Si falla, no se toca la app (set -e).
