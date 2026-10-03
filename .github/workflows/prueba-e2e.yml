@@ -37,16 +37,22 @@ jobs:
             cat /tmp/e2e.log
             exit 0
 
-      # El log quedo en el DROPLET, no en la maquina de GitHub: hay que
-      # descargarlo con scp antes de poder publicarlo.
+      # El log quedo en el DROPLET, no en la maquina de GitHub. scp directo con
+      # la misma clave: la action de scp fallaba y hacia perder el resultado.
       - name: Descargar el resultado del droplet
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DROPLET_HOST }}
-          username: ${{ secrets.DROPLET_USER }}
-          key: ${{ secrets.DROPLET_SSH_KEY }}
-          source: /tmp/e2e.log
-          target: resultados/e2e-ultimo.log
+        env:
+          DROPLET_HOST: ${{ secrets.DROPLET_HOST }}
+          DROPLET_USER: ${{ secrets.DROPLET_USER }}
+          DROPLET_KEY: ${{ secrets.DROPLET_SSH_KEY }}
+        run: |
+          mkdir -p resultados
+          printf '%s\n' "$DROPLET_KEY" > /tmp/llave
+          chmod 600 /tmp/llave
+          scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -i /tmp/llave "$DROPLET_USER@$DROPLET_HOST:/tmp/e2e.log" \
+            resultados/e2e-ultimo.log
+          rm -f /tmp/llave
+          wc -l resultados/e2e-ultimo.log
 
       - name: Publicar el resultado en el repo
         run: |
