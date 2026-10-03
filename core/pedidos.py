@@ -249,17 +249,17 @@ def pedidos():
     sid = sucursal_actual()
     if not es_superadmin() and sid:
         if es_logistica():
-            # Preparador / repartidor: SOLO los pedidos que PLACO su sucursal
-            # (`p.sucursal_id`), que son los que prepare y entrega.
+            # El rol logistico VE dos cosas: los pedidos que su sucursal le hizo
+            # a un almacen (para saber que esta esperando) y los pedidos que
+            # OTRAS sucursales le hicieron a ella, que son los que realmente
+            # puede preparar y despachar.
             #
-            # OJO, esto es lo que se corrigio: `destino_id` NO es quien recibe,
-            # es el PROVEEDOR que despacha la linea (ver _despachar_stock, que
-            # hace `origen_id = d["destino_id"]`). Filtrar por `destino_id`
-            # invertido la cola: el preparador de America veia los pedidos que
-            # OTRAS sucursales le hacen a America para que la abastezca, que no
-            # son su trabajo, y no veia los pedidos que America si pidio.
-            q += " AND p.sucursal_id = ?"
-            params.append(sid)
+            # OJO, `destino_id` NO es quien recibe: es el PROVEEDOR que despacha
+            # la linea (ver _despachar_stock, que hace `origen_id =
+            # d["destino_id"]`). `p.sucursal_id` es quien pidio.
+            q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
+                  "EXISTS (SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
+            params += [sid, sid, sid]
         elif session.get("rol") == "encargado":
             # Encargado (de filial O de almacen principal): ve lo que PIDE su
             # sucursal y lo que le PIDEN a ella como proveedor.
@@ -653,12 +653,13 @@ def pedido_despachar(pedido_id):
 def pedidos_bandeja():
     """Cola de trabajo agrupada por sucursal.
 
-    Hay dos colas distintas y NO son la misma:
-      - Encargado / almacen: los pedidos que le PIDIERON a su sucursal, o sea
-        los que tiene que despachar (`dd.destino_id = su sucursal`, porque
-        `destino_id` es el proveedor).
-      - Preparador / repartidor: los pedidos que su sucursal PLACO
-        (`p.sucursal_id`), que son los que tienen que preparar y entregar.
+    La cola son los pedidos que tu sucursal DESPACHA (las lineas que le piden a
+    ella, `dd.destino_id = su sucursal`, porque `destino_id` es el proveedor).
+
+    El rol logistico (preparador/repartidor) ve ademas los pedidos que su
+    sucursal le hizo a un almacen: los puede mirar para saber que esta
+    esperando, pero NO puede avanzarlos, porque la mercaderia la prepara y
+    despacha el almacen. Eso lo aplica pedido_etapa, no el listado.
 
     Un admin/superadmin sin sucursal asignada consolida todos los pendientes."""
     conn = get_conn()
@@ -666,14 +667,23 @@ def pedidos_bandeja():
     where = "WHERE 1=1"
     params = []
     if sid:
+        # La cola de trabajo son los pedidos que tu sucursal DESPACHA (las lineas
+        # que le piden a ella).
+        #
+        # El rol logistico ve ademas los pedidos que su sucursal le hizo a un
+        # almacen: los necesita para saber que esta esperando, aunque no puede
+        # tocarlos (eso lo decide pedido_etapa, que solo deja avanzar a quien
+        # despacha). De ahi el paréntesis: es O una cosa O la otra.
         if es_logistica():
-            # El rol logistico no abastece a otras sucursales: su trabajo son
-            # los pedidos que hizo su propia sucursal.
-            where += " AND p.sucursal_id = ?"
+            where += (" AND (EXISTS (SELECT 1 FROM pedido_detalle dd "
+                      "WHERE dd.pedido_id = p.id AND dd.destino_id = ?) "
+                      "OR (p.sucursal_id = ? AND EXISTS (SELECT 1 FROM pedido_detalle dd2 "
+                      "WHERE dd2.pedido_id = p.id)))")
+            params += [sid, sid]
         else:
             where += (" AND EXISTS (SELECT 1 FROM pedido_detalle dd "
                       "WHERE dd.pedido_id = p.id AND dd.destino_id = ?)")
-        params.append(sid)
+            params.append(sid)
     elif not es_gestion():
         conn.close()
         return ok([])
@@ -703,7 +713,8 @@ def pedidos_bandeja():
         where += " AND date(p.fecha) <= date(?)"
         params.append(hasta[:10])
     rows = conn.execute("""
-        SELECT p.id, p.nro_ticket, p.fecha, p.estado, p.etapa, p.nota, p.usuario, p.sucursal_id,
+        SELECT p.id, p.nro_ticket, p.fecha, p.estado, p.etapa, p.nota, p.usuario,
+               p.sucursal_id, p.destino_id,
                s.nombre AS sucursal_nombre
         FROM pedidos p JOIN sucursales s ON s.id = p.sucursal_id
         """ + where + """
@@ -755,9 +766,13 @@ def logistica_resumen():
     def _contar(etapas, abierto=True):
         marcas = ",".join(["%s"] * len(etapas))
         extra = " AND p.etapa <> 'entregado'" if abierto else ""
+        # Cuenta la cola accionable: pedidos donde ESTA sucursal es el proveedor
+        # (`dd.destino_id = sid`). Los que la sucursal le hizo a un almacen se
+        # pueden ver pero no avanzar, asi que no cuentan como trabajo.
         f = conn.execute(
-            f"SELECT COUNT(*) AS n FROM pedidos p "
-            f"WHERE p.sucursal_id = %s AND p.etapa IN ({marcas}){extra}",
+            f"SELECT COUNT(DISTINCT p.id) AS n FROM pedidos p "
+            f"JOIN pedido_detalle dd ON dd.pedido_id = p.id "
+            f"WHERE dd.destino_id = %s AND p.etapa IN ({marcas}){extra}",
             [sid] + list(etapas)).fetchone()
         return int((f or {}).get("n") or 0)
 
@@ -823,11 +838,17 @@ def pedido_etapa(pedido_id):
         conn.close()
         return err("No tenes sucursal asignada", 403)
 
-    # Solo se toca un pedido que PLACO su sucursal: cada quien trabaja su cola.
-    # `sucursal_id` es quien pidio; `destino_id` es el proveedor que despacha.
-    if rol in ("preparador", "repartidor") and pedido["sucursal_id"] != sid:
-        conn.close()
-        return err("Ese pedido no es de tu sucursal", 403)
+    # Solo se avanza un pedido que DESPACHA tu sucursal. Verlo es otra cosa: el
+    # rol logistico puede ver los pedidos que su sucursal le hizo al almacen
+    # (para saber que esta esperando), pero no puede tocarlos, porque la
+    # mercaderia la prepara y despacha el almacen, no la sucursal que pidio.
+    if rol in ("preparador", "repartidor"):
+        det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
+                           (pedido_id,)).fetchall()
+        es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in det)
+        if not es_proveedor:
+            conn.close()
+            return err("Ese pedido no lo despacha tu sucursal", 403)
 
     actual_etapa = pedido["etapa"] or "pendiente"
     if destino_etapa == actual_etapa:

@@ -4251,20 +4251,26 @@ async function cargarBandeja() {
             <div class="bandeja-sucursal">
                 <h3>${esc(g.nombre)} <span class="ciudad-tag">${ciudadSucursal(g.nombre)}</span> <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
                 ${g.pedidos.map((p) => {
-                    // Permiso: el usuario solo puede cambiar estado/despachar pedidos
-                    // que llegan a SU propia sucursal (destino = su sucursal).
-                    // La logística avanza la ETAPA del pedido, no el `estado`:
-                    // pendiente -> en_preparacion -> en_camino -> entregado.
-                    // Al entregar, el backend mueve el stock y cierra el pedido.
+                    // `destino_id` de una linea es el PROVEEDOR que despacha, no
+                    // quien recibe. `esProveedorMio` dice si ESTA sucursal es la
+                    // que tiene que despachar este pedido.
+                    const esProveedorMio = p.items.some((it) => String(it.destino_id || '') === miSuc)
+                        || (p.destino_id != null && String(p.destino_id) === miSuc);
                     let editControl = '';
                     const r = window.ROL || '';
                     const etapa = p.etapa || 'pendiente';
-                    if (r === 'preparador') {
-                        editControl = etapa === 'pendiente'
-                            ? `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_preparacion')">En preparación</button>`
-                            : `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
-                    } else if (r === 'repartidor') {
-                        if (etapa === 'en_preparacion') {
+                    if (r === 'preparador' || r === 'repartidor') {
+                        // El rol logistico solo avanza pedidos que DESPACHA su
+                        // sucursal. Los que su sucursal le hizo a un almacen los
+                        // puede ver (para saber que espera) pero no tocar: la
+                        // mercaderia la prepara y despacha el almacen.
+                        if (!esProveedorMio) {
+                            editControl = '<span class="respaldo-txt">Lo despacha otra sucursal</span>';
+                        } else if (r === 'preparador') {
+                            editControl = etapa === 'pendiente'
+                                ? `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_preparacion')">En preparación</button>`
+                                : `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
+                        } else if (etapa === 'en_preparacion') {
                             editControl = `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_camino')">En camino</button>`;
                         } else if (etapa === 'en_camino') {
                             editControl = `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="avanzarEtapa(${p.id}, 'entregado')">Entregado</button>`;
@@ -4272,8 +4278,7 @@ async function cargarBandeja() {
                             editControl = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
                         }
                     } else {
-                        const esDestinoMio = p.items.some((it) => String(it.destino_id || '') === miSuc);
-                        editControl = esDestinoMio
+                        editControl = esProveedorMio
                             ? (puedeDespachar
                                 ? `<button class="btn btn-sm" onclick="despacharPedido(${p.id})">Entregar</button>`
                                 : `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
@@ -4404,10 +4409,11 @@ async function pintarBadgePedidos() {
     // admin/superadmin y almacén principal cuentan todos los pendientes.
     const qs = new URLSearchParams({ estado: 'pendiente', pagina: 1, por_pagina: 1 });
     const esLogistica = window.ROL === 'preparador' || window.ROL === 'repartidor';
-    if (esLogistica && window.SUCURSAL_ID) {
-        // El rol logistico trabaja los pedidos que PLACO su sucursal, no los que
-        // le pidieron a ella comoproveedor: por eso va sucursal_id y no destino_id.
-        qs.set('sucursal_id', window.SUCURSAL_ID);
+    if (esLogistica) {
+        // El rol logistico avanza lo que DESPACHA su sucursal, asi que el punto
+        // rojo cuenta los pedidos que le hicieron a ella (destino_id = su
+        // sucursal), no los que ella le hizo al almacen.
+        if (window.SUCURSAL_ID) qs.set('destino_id', window.SUCURSAL_ID);
     } else if (window.SUCURSAL_ID && window.ROL === 'encargado' && !esCentralBadge()) {
         qs.set('destino_id', window.SUCURSAL_ID);
     }

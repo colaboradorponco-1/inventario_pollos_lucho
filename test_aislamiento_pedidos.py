@@ -110,11 +110,12 @@ for etiqueta, rol, sid, nombre, filtro_esperado in CASOS:
         ok = (filtro_esperado in sql)
         detalle = f"filtro por {filtro_esperado}"
 
-    # El rol logistico jamas debe filtrar por destino_id: eso lo muestra como
-    # proveedor, o sea los pedidos que OTRAS sucursales le hacen a America.
-    if rol in ("preparador", "repartidor") and lleva_destino:
+    # El rol logistico ve las dos colas: los pedidos que le hicieron a su
+    # sucursal (los que despacha) y los que su sucursal le hizo a un almacen
+    # (los que solo puede mirar). Lo que NO puede es desaparecerlos.
+    if rol in ("preparador", "repartidor") and not lleva_sucursal:
         ok = False
-        detalle = "USA destino_id (proveedor): cola invertida"
+        detalle = "no ve ni los pedidos que su sucursal pidio (deberia verlos)"
 
     sids = [p for p in params if isinstance(p, int)]
     veredicto = "OK" if ok else "FALLA"

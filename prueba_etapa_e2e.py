@@ -177,10 +177,22 @@ def pedido_en_bandeja(pid, rol, sucursal):
     return None, "el pedido no aparece en la bandeja"
 
 
-def correr_flujo(pid, sucursal_logistica, origen_id, destino_id, prod, cantidad):
-    """El flujo completo del caso, con las aserciones comunes."""
+def correr_flujo(pid, sucursal_logistica, origen_id, destino_id, prod, cantidad,
+                  sucursal_que_pidio=None):
+    """El flujo completo del caso, con las aserciones comunes.
+
+    `sucursal_logistica` es el PROVEEDOR (la sucursal whose preparador/repartidor
+    despacha). `sucursal_que_pidio` es la que solo hizo el pedido: no puede
+    avanzar la etapa, solo mirarlo."""
     stock_o = stock_actual(CONN, prod["id"], origen_id)
     stock_d = stock_actual(CONN, prod["id"], destino_id)
+
+    # 0) La sucursal que PIDIO el pedido no puede tocarlo: lo despacha el almacen.
+    if sucursal_que_pidio and sucursal_que_pidio != sucursal_logistica:
+        r = llamar(pid, "preparador", "en_preparacion", sucursal_que_pidio)
+        check("la sucursal que PIDIO el pedido NO puede marcar 'En preparacion'",
+              es_error(r) and r[1] == 403, mensaje(r))
+        check("el pedido sigue en pendiente para ella", etapa_estado(pid)[0] == "pendiente")
 
     # 1) El repartidor no arranca solo
     r = llamar(pid, "repartidor", "en_camino", sucursal_logistica)
@@ -297,7 +309,7 @@ def correr_casos():
     cantidad = 2.0
     dar_stock(prod["id"], ap["id"], 100)
     pid = crear_pedido(ap["id"], dist["id"], prod, cantidad)
-    correr_flujo(pid, dist["id"], ap["id"], dist["id"], prod, cantidad)
+    correr_flujo(pid, ap["id"], ap["id"], dist["id"], prod, cantidad, sucursal_que_pidio=dist["id"])
     print()
 
     # ---- Caso B: sucursal distribuidora -> sucursal (el caso complicado) ----
@@ -307,7 +319,7 @@ def correr_casos():
     cantidad_b = 3.0
     dar_stock(prod["id"], dist["id"], 100)
     pid_b = crear_pedido(dist["id"], no_dist["id"], prod, cantidad_b)
-    total_b = correr_flujo(pid_b, no_dist["id"], dist["id"], no_dist["id"], prod, cantidad_b)
+    total_b = correr_flujo(pid_b, dist["id"], dist["id"], no_dist["id"], prod, cantidad_b, sucursal_que_pidio=no_dist["id"])
     print()
 
     # ---- Caso C: una sucursal que no distribuye no puede ser proveedor ----
@@ -333,7 +345,7 @@ def correr_casos():
     CONN.execute("UPDATE productos SET costo_promedio = ? WHERE id = ?", (costo, prod["id"]))
     dar_stock(prod["id"], ap["id"], 100)
     pid_d = crear_pedido(ap["id"], no_dist["id"], prod, 3.0)
-    total_d = correr_flujo(pid_d, no_dist["id"], ap["id"], no_dist["id"], prod, 3.0)
+    total_d = correr_flujo(pid_d, ap["id"], ap["id"], no_dist["id"], prod, 3.0, sucursal_que_pidio=no_dist["id"])
     esperado = 3.0 * costo
     check("el total del pedido NO esta redondeado a 2 decimales",
           abs(total_d - esperado) < 1e-9, f"total={total_d}, exacto={esperado}")
