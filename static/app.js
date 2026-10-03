@@ -3567,6 +3567,32 @@ let bandejaSucF = '';          // filtrar la bandeja por sucursal ('' = todas)
 const esEncargadoPed = () => window.ROL === 'encargado';
 const ESTADO_LAB = { pendiente: 'Pidiendo', despachado: 'En camino', cumplido: 'Entregado' };
 
+// Etapa logistica (columna `etapa` del pedido). Es SEPARADA del `estado`:
+// el estado sigue siendo pendiente/despachado/cumplido para los reportes.
+const ETAPA_LAB = {
+    pendiente: 'Sin empezar',
+    en_preparacion: 'En preparación',
+    en_camino: 'En camino',
+    entregado: 'Entregado',
+};
+
+window.avanzarEtapa = async (id, etapa) => {
+    if (etapa === 'entregado' && !confirm('¿Confirmar que el pedido fue entregado?\n\nAl confirmar, el stock sale del almacén y suma a tu sucursal.')) return;
+    try {
+        const r = await request(API + '/pedidos/' + id + '/etapa', {
+            method: 'PUT',
+            body: JSON.stringify({ etapa }),
+        });
+        toast((r && r.message) || 'Etapa actualizada', 'ok');
+        await cargarBandeja();
+        try { await pintarBadgePedidos(); } catch (_) { }
+        const vista = nombreVistaActiva();
+        if (vista === 'logistica') loadLogistica();
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+};
+
 // Medidas por tacho que se pueden pedir (fracción del tacho).
 const FRACCIONES_TACHO = [
     { v: 0.25, t: '¼ tacho' },
@@ -4227,22 +4253,23 @@ async function cargarBandeja() {
                 ${g.pedidos.map((p) => {
                     // Permiso: el usuario solo puede cambiar estado/despachar pedidos
                     // que llegan a SU propia sucursal (destino = su sucursal).
-                    // Permiso por rol especifico
+                    // La logística avanza la ETAPA del pedido, no el `estado`:
+                    // pendiente -> en_preparacion -> en_camino -> entregado.
+                    // Al entregar, el backend mueve el stock y cierra el pedido.
                     let editControl = '';
                     const r = window.ROL || '';
+                    const etapa = p.etapa || 'pendiente';
                     if (r === 'preparador') {
-                        if (p.estado === 'pendiente') {
-                            editControl = `<button class="btn btn-sm btn-primary" onclick="cambiarEstadoPedido(${p.id}, 'en_preparacion')">En preparación</button>`;
-                        } else {
-                            editControl = `<span class="respaldo-txt">En preparación</span>`;
-                        }
+                        editControl = etapa === 'pendiente'
+                            ? `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_preparacion')">En preparación</button>`
+                            : `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
                     } else if (r === 'repartidor') {
-                        if (p.estado === 'pendiente' || p.estado === 'en_preparacion') {
-                            editControl = `<button class="btn btn-sm btn-primary" onclick="cambiarEstadoPedido(${p.id}, 'en_camino')">En camino</button>`;
-                        } else if (p.estado === 'en_camino' || p.estado === 'despachado') {
-                            editControl = `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="cambiarEstadoPedido(${p.id}, 'entregado')">Entregado</button>`;
+                        if (etapa === 'en_preparacion') {
+                            editControl = `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_camino')">En camino</button>`;
+                        } else if (etapa === 'en_camino') {
+                            editControl = `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="avanzarEtapa(${p.id}, 'entregado')">Entregado</button>`;
                         } else {
-                            editControl = `<span class="respaldo-txt">Completado</span>`;
+                            editControl = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
                         }
                     } else {
                         const esDestinoMio = p.items.some((it) => String(it.destino_id || '') === miSuc);
@@ -4256,6 +4283,11 @@ async function cargarBandeja() {
                                   </select>`)
                             : '';
                     }
+                    // La etapa se muestra siempre, para que el encargado vea en
+                    // qué punto va el pedido sin importar quién lo marcó.
+                    const chipEtapa = etapa !== 'pendiente'
+                        ? `<span class="ciudad-tag" title="Etapa logística">${esc(ETAPA_LAB[etapa] || etapa)}</span>`
+                        : '';
                     return `
                     <div class="bandeja-pedido">
                         <div class="bandeja-cab">
@@ -4263,6 +4295,7 @@ async function cargarBandeja() {
                             <span>${fmtDate(p.fecha)}</span>
                             <span>${esc(p.usuario || '—')}</span>
                             <span class="${({ pendiente: 'badge-pendiente', despachado: 'badge-despachado', cumplido: 'badge-cumplido' })[p.estado] || 'badge-pendiente'}">${esc(ESTADO_LAB[p.estado] || p.estado)}</span>
+                            ${chipEtapa}
                             ${p.nota ? '<span class="respaldo-txt">' + esc(p.nota) + '</span>' : ''}
                             <span class="flex-grow"></span>
                             ${editControl}

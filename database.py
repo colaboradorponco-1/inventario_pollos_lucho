@@ -646,6 +646,19 @@ def migrar_esquema():
         # pedir. La columna se crea ahora; 0 = no provee, que es lo seguro.
         if not _col_existe(cur, "sucursales", "provee"):
             _add_columna(cur, "sucursales", "provee TINYINT NOT NULL DEFAULT 0")
+        # Etapa logística del pedido, SEPARADA de `estado`.
+        # `estado` sigue siendo pendiente/despachado/cumplido (lo que usan todos
+        # los reportes y filtros, así que no se rompen). `etapa` es el avance
+        # operativo de quien cocina y entrega: pendiente -> en_preparacion ->
+        # en_camino -> entregado. Al llegar a 'entregado' se mueve el stock.
+        if not _col_existe(cur, "pedidos", "etapa"):
+            _add_columna(cur, "pedidos", "etapa VARCHAR(20) NOT NULL DEFAULT 'pendiente'")
+        if _col_existe(cur, "pedidos", "etapa") and \
+                not _indice_existe(cur, "pedidos", "idx_pedidos_etapa"):
+            try:
+                cur.execute("ALTER TABLE pedidos ADD INDEX idx_pedidos_etapa (etapa)")
+            except Exception:
+                pass
         db.commit()
         # Backfill: proveedores existentes van al primer almacén principal
         if _col_existe(cur, "proveedores", "sucursal_id"):

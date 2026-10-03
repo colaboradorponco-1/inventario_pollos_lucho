@@ -445,18 +445,9 @@ def pedido_estado(pedido_id):
         conn.close()
         return err(f"No se puede pasar de '{actual}' a '{estado}'")
 
-    # Control de permisos por rol especifico
-    rol = session.get("rol")
-    if rol == "preparador":
-        # El preparador solo puede pasar de 'pendiente' a 'en_preparacion'
-        if actual != "pendiente" or estado != "en_preparacion":
-            conn.close()
-            return err("El preparador solo puede marcar el pedido como 'en_preparacion'", 403)
-    elif rol == "repartidor":
-        # El repartidor puede pasar a 'en_camino' o 'entregado'
-        if estado not in ("en_camino", "entregado"):
-            conn.close()
-            return err("El repartidor solo puede marcar el pedido como 'en_camino' o 'entregado'", 403)
+    # La logística (preparador/repartidor) mueve la ETAPA, no el `estado`:
+    # ver PUT /api/pedidos/<id>/etapa. Aquí el cambio de estado sigue siendo
+    # exclusivo de quien coordina el inventario, como siempre.
 
     # Salir de 'pendiente' a 'despachado' o 'cumplido' mueve el stock de verdad:
     # descuenta del almacén que lo despacha y lo suma a la sucursal que lo pidió.
@@ -494,7 +485,7 @@ def pedido_estado(pedido_id):
     return ok(message=f"Pedido {pedido['nro_ticket']} marcado como {estado}")
 
 
-def _despachar_stock(conn, pedido, detalle=None):
+def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
     """Mueve la mercadería de un pedido: la descuenta del almacén que lo despacha
     y la suma a la sucursal que lo pidió, dejando un reparto por proveedor.
 
@@ -504,7 +495,12 @@ def _despachar_stock(conn, pedido, detalle=None):
     confundiría con un fallo y nunca se movería stock.
     NO hace commit ni cierra la conexión: eso es del llamador, para que
     /despachar y el cambio de estado compartan exactamente la misma lógica y no
-    puedan divergir en el descuento de inventario."""
+    puedan divergir en el descuento de inventario.
+
+    `origen_propio=False` se usa cuando quien entrega NO es el proveedor (el
+    repartidor de América/Simón López entrega mercadería que salió del almacén
+    principal). Sin ese parámetro el repartidor recibiría "Solo puedes despachar
+    líneas cuyo origen sea tu propia sucursal" y el pedido nunca se cerraría."""
     if detalle is None:
         detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ?",
                                (pedido["id"],)).fetchall()
@@ -520,7 +516,7 @@ def _despachar_stock(conn, pedido, detalle=None):
             return "error", "Una línea del pedido no tiene proveedor asignado"
         if origen_id == pedido["sucursal_id"]:
             return "error", "El origen no puede ser igual al destino del pedido"
-        if sid_op is not None and origen_id != sid_op:
+        if origen_propio and sid_op is not None and origen_id != sid_op:
             return "error", "Solo puedes despachar líneas cuyo origen sea tu propia sucursal"
         grupos.setdefault(origen_id, []).append(d)
 
@@ -752,3 +748,117 @@ def logistica_resumen():
     }
     conn.close()
     return ok(resumen)
+
+
+# ---- Etapa logistica del pedido -------------------------------------------
+# `estado` sigue siendo pendiente/despachado/cumplido para que NADA de los
+# reportes ni filtros existentes cambien. `etapa` es el avance de quien
+# cocina y entrega:
+#     pendiente -> en_preparacion -> en_camino -> entregado
+# Al llegar a 'entregado' el pedido pasa a 'cumplido' y la mercaderia se
+# mueve del proveedor a la sucursal que la pidio, en una sola transaccion.
+_ETAPAS = ("pendiente", "en_preparacion", "en_camino", "entregado")
+
+_AVANCE_PREPARADOR = {"pendiente": "en_preparacion"}
+_AVANCE_REPARTIDOR = {"en_preparacion": "en_camino", "en_camino": "entregado"}
+
+_ETIQUETA_ETAPA = {
+    "pendiente": "Pendiente",
+    "en_preparacion": "En preparacion",
+    "en_camino": "En camino",
+    "entregado": "Entregado",
+}
+
+
+@pedidos_bp.route("/api/pedidos/<int:pedido_id>/etapa", methods=["PUT"])
+@login_requerido
+def pedido_etapa(pedido_id):
+    """Avanza la etapa logistica del pedido. Es lo unico que puede cambiar un
+    preparador o un repartidor; el `estado` lo sigue manejando quien coordina."""
+    conn = get_conn()
+    # FOR UPDATE: dos personas marcando a la vez no pueden saltarse la
+    # validacion de la etapa actual ni duplicar el movimiento de stock.
+    pedido = conn.execute(
+        "SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
+    if not pedido:
+        conn.close()
+        return err("Pedido no encontrado", 404)
+
+    data = request.get_json() or {}
+    destino_etapa = (data.get("etapa") or "").strip()
+    if destino_etapa not in _ETAPAS:
+        conn.close()
+        return err("Etapa invalida")
+
+    rol = session.get("rol")
+    sid = sucursal_actual()
+    if rol not in ("preparador", "repartidor") and not (es_gestion() or es_encargado_almacen(conn)):
+        conn.close()
+        return err("Tu rol no puede cambiar la etapa del pedido", 403)
+    if not sid:
+        conn.close()
+        return err("No tenes sucursal asignada", 403)
+
+    # Solo se toca un pedido cuya DESTINO es su sucursal: cada quien trabaja su cola.
+    if rol in ("preparador", "repartidor"):
+        det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
+                           (pedido_id,)).fetchall()
+        es_destino = (pedido["destino_id"] == sid
+                      or any((d["destino_id"] == sid) for d in det))
+        if not es_destino:
+            conn.close()
+            return err("Ese pedido no es de tu sucursal", 403)
+
+    actual_etapa = pedido["etapa"] or "pendiente"
+    if destino_etapa == actual_etapa:
+        conn.close()
+        return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
+
+    # Cada rol solo puede avanzar SU paso, y hacia adelante.
+    if rol == "preparador":
+        permitido = _AVANCE_PREPARADOR.get(actual_etapa)
+    elif rol == "repartidor":
+        permitido = _AVANCE_REPARTIDOR.get(actual_etapa)
+    else:
+        permitido = destino_etapa if destino_etapa != "pendiente" else None
+
+    if permitido != destino_etapa:
+        conn.close()
+        if rol == "preparador":
+            esperado = _AVANCE_PREPARADOR.get(actual_etapa)
+            if esperado is None:
+                return err(f"El pedido ya esta en {_ETIQUETA_ETAPA[actual_etapa]}; "
+                           f"el repartidor lo continua", 403)
+        return err(f"No se puede pasar de '{_ETIQUETA_ETAPA[actual_etapa]}' "
+                   f"a '{_ETIQUETA_ETAPA[destino_etapa]}'", 403)
+
+    # Un pedido ya despachado/cumplido no vuelve a mover stock.
+    stock_ya_movido = pedido["estado"] in ("despachado", "cumplido")
+
+    if destino_etapa == "entregado" and not stock_ya_movido:
+        movido = _despachar_stock(conn, pedido, origen_propio=False)
+        if movido[0] == "error":
+            conn.rollback()
+            conn.close()
+            return err(movido[1])
+        conn.execute("UPDATE pedidos SET etapa = ?, estado = 'cumplido', total = ? WHERE id = ?",
+                     (destino_etapa, round(movido[0], 2), pedido_id))
+        conn.commit()
+        conn.close()
+        registrar_auditoria("Pedido entregado",
+                            f"{pedido['nro_ticket']} etapa {actual_etapa} -> entregado")
+        return ok(message=f"Pedido {pedido['nro_ticket']} entregado. "
+                          f"Se movio el stock a tu sucursal.")
+
+    # Si el stock ya se movio al despachar, marcar entregado solo cierra la etapa.
+    nuevo_estado = pedido["estado"]
+    if destino_etapa == "entregado" and stock_ya_movido:
+        nuevo_estado = "cumplido"
+    conn.execute("UPDATE pedidos SET etapa = ?, estado = ? WHERE id = ?",
+                 (destino_etapa, nuevo_estado, pedido_id))
+    conn.commit()
+    conn.close()
+    registrar_auditoria("Pedido actualizado",
+                        f"{pedido['nro_ticket']} etapa {actual_etapa} -> {destino_etapa}")
+    return ok(message=f"Pedido {pedido['nro_ticket']}: "
+                      f"{_ETIQUETA_ETAPA[actual_etapa]} -> {_ETIQUETA_ETAPA[destino_etapa]}")
