@@ -465,6 +465,7 @@
                         <h3 id="inv-titulo">Conteo del día</h3>
                         <p id="inv-subtitulo">Llena a mano el inventario inicial y el conteo final. El ingreso del sistema ya viene puesto; anota en la columna amarilla solo lo que llegó sin pasar por el sistema.</p>
                     </div>
+                    <button class="btn btn-sm" id="btn-inv-refrescar" title="Volver a leer el stock del sistema y actualizar la columna 'Inicial' de las filas que todavia no contaste" style="white-space:nowrap">&#8635; Actualizar stock</button>
                     <button class="btn btn-icon" id="btn-inv-cerrar-panel" title="Cerrar la planilla (guarda antes de cerrar)" aria-label="Cerrar panel de conteo">&#10005;</button>
                 </div>
 
@@ -970,6 +971,7 @@
                 <div class="toolbar small" style="margin-top:12px">
                     <button class="btn" id="btn-pedido-ticket" type="button">Imprimir ticket</button>
                     <button class="btn btn-primary" id="btn-pedido-despachar" type="button">Despachar (crear reparto)</button>
+                    <span id="det-pedido-etapa-ctrl"></span>
                     <select id="pedido-cambiar-estado"><option value="">Cambiar estado...</option><option value="pendiente">Pendiente</option><option value="despachado">Despachado</option><option value="cumplido">Cumplido</option></select>
                 </div>
             </div>

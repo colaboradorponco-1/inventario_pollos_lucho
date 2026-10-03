@@ -2836,7 +2836,14 @@ $('#btn-inv-print')?.addEventListener('click', () => {
     else toast('Abre una planilla del día primero', 'err');
 });
 $('#btn-inv-borrar')?.addEventListener('click', invClick(borrarInventario));
+// Refresco del stock del sistema. El Inicial de la planilla sale del stock real,
+// asi que si despues de abrirla se corrige el stock de un producto, la planilla
+// abierta tiene que enterarse. Ademas de este boton corre un chequeo cada 45s
+// mientras la planilla este abierta, para que el encargado no tenga que volver a
+// abrirla a mano. Nunca pisa conteos, ingresos ni observaciones.
+$('#btn-inv-refrescar')?.addEventListener('click', invClick(() => refrescarStockInicial(false)));
 $('#btn-inv-cerrar-panel')?.addEventListener('click', invClick(async () => {
+    detenerVigilaInventario();
     const Digitado = Array.from($$('#inv-tbody .inv-conteo')).some((i) => i.value !== '');
     if (Digitado && INV_CERRADA === false) {
         const seguir = confirm('Hay conteos escritos sin guardar. ¿Guardar y cerrar el panel?');
@@ -3371,6 +3378,78 @@ async function abrirInventario(invId) {
         : 'Al cerrar, toda diferencia entre el conteo y el stock del sistema se corrige con un movimiento de ajuste.';
     // Que el formulario quede a la vista: si no, parece que no se abrió nada.
     $('#inv-panel-conteo').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (INV_CERRADA) detenerVigilaInventario();
+    else iniciarVigilaInventario();
+}
+
+// Vuelve a leer el stock del sistema y actualiza la columna 'Inicial' (y la
+// 'Disponible') de las filas que todavia NO se contaron.
+//
+// Por que existe: el 'Inicial' viene del stock real. Si despues de abrir la
+// planilla se corrige el stock de un producto en Productos (o llega mercaderia),
+// la planilla abierta seguia mostrando el numero viejo y el encargado contaba
+// contra un dato que ya no existia.
+//
+// Que NO rompe lo que el encargado esta escribiendo: solo se tocan el 'Inicial'
+// (que es readonly y lo pone el sistema) y la 'Disponible' derivada. Las
+// casillas de conteo, ingreso manual y observaciones nunca se tocan, y las
+// filas ya contadas se respetan: el servidor ya las congela para no moverles la
+// diferencia.
+async function refrescarStockInicial(silencioso) {
+    if (!INV_ID || INV_CERRADA) return;
+    let d;
+    try {
+        const resp = await request(API + '/inventario-diario/' + INV_ID);
+        d = resp.data || resp;
+    } catch (e) {
+        if (!silencioso) toast(e.message || 'No se pudo actualizar el stock', 'err');
+        return;
+    }
+    const lineas = d.lineas || [];
+    if (!lineas.length) return;
+    INV_FILAS = lineas;
+    let cambiados = 0;
+    lineas.forEach((f) => {
+        const iniIn = $(`#inv-tbody .inv-inicial[data-id="${f.id}"]`);
+        if (!iniIn) return;
+        // Si el encargado ya escribio un conteo en esta fila, no se toca nada:
+        // la diferencia de esa linea ya esta congelada con el stock de antes.
+        const conteoIn = $(`#inv-tbody .inv-conteo[data-id="${f.id}"]`);
+        if (conteoIn && conteoIn.value !== '') return;
+        const nuevo = fmtInvQ(f.inicial || 0);
+        if (String(iniIn.value) !== String(nuevo)) {
+            iniIn.value = nuevo;
+            cambiados++;
+            // Destacarlo un momento para que se note que se movio solo.
+            iniIn.style.transition = 'background .8s';
+            iniIn.style.background = '#FDE68A';
+            setTimeout(() => {
+                iniIn.style.transition = '';
+                iniIn.style.background = '#F5F5F5';
+            }, 1600);
+        }
+        recalcFilaInv({ target: conteoIn || { dataset: { id: f.id } } });
+    });
+    if (cambiados && !silencioso) {
+        toast(`Stock actualizado: ${cambiados} producto(s) cambiaron de valor desde que abriste la planilla.`, 'ok');
+    } else if (cambiados) {
+        console.info('[inventario] stock actualizado en ' + cambiados + ' fila(s)');
+    }
+}
+
+// Chequeo periodico del stock mientras la planilla esta abierta. Se para solo
+// cuando la planilla se cierra o se Borra, para no pedirle nada al servidor con
+// el panel en pantalla cerrada.
+let _vigilaInv = null;
+function iniciarVigilaInventario() {
+    detenerVigilaInventario();
+    _vigilaInv = setInterval(() => {
+        if (!INV_ID || INV_CERRADA || document.hidden) return;
+        refrescarStockInicial(true);
+    }, 45000);
+}
+function detenerVigilaInventario() {
+    if (_vigilaInv) { clearInterval(_vigilaInv); _vigilaInv = null; }
 }
 
 function recalcFilaInv(e) {
@@ -4296,16 +4375,36 @@ async function cargarBandeja() {
                         } else {
                             editControl = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
                         }
-                    } else {
+                    } else if (esGestionPed()) {
+                        // Gestión (admin/superadmin) conserva el control de `estado`,
+                        // que es el eje que usan los reportes y filtros.
                         editControl = esProveedorMio
-                            ? (puedeDespachar
-                                ? `<button class="btn btn-sm" onclick="despacharPedido(${p.id})">Entregar</button>`
-                                : `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
-                                    <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Pidiendo</option>
-                                    <option value="despachado" ${p.estado === 'despachado' ? 'selected' : ''}>En camino</option>
-                                    <option value="cumplido" ${p.estado === 'cumplido' ? 'selected' : ''}>Entregado</option>
-                                  </select>`)
+                            ? `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
+                                <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Pidiendo</option>
+                                <option value="despachado" ${p.estado === 'despachado' ? 'selected' : ''}>En camino</option>
+                                <option value="cumplido" ${p.estado === 'cumplido' ? 'selected' : ''}>Entregado</option>
+                              </select>`
                             : '';
+                    } else {
+                        // El encargado tiene UN solo camino: la etapa. Antes se le
+                        // mostraba el <select> de `estado` (Pidiendo / En camino /
+                        // Entregado) ademas de la etapa, y eso era una trampa: los
+                        // dos controles mueven stock, se pisaban entre si y el
+                        // pedido se leia 'Pidiendo' estando ya en camino. Ahora
+                        // avanza la etapa, que es el unico que descuenta inventario.
+                        if (!esProveedorMio) {
+                            editControl = '';
+                        } else if (puedeDespachar) {
+                            editControl = `<button class="btn btn-sm" onclick="despacharPedido(${p.id})">Entregar</button>`;
+                        } else if (etapa === 'pendiente') {
+                            editControl = `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_preparacion')">En preparación</button>`;
+                        } else if (etapa === 'en_preparacion') {
+                            editControl = `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_camino')">En camino</button>`;
+                        } else if (etapa === 'en_camino') {
+                            editControl = `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="avanzarEtapa(${p.id}, 'entregado')">Entregado</button>`;
+                        } else {
+                            editControl = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
+                        }
                     }
                     // Un solo tag, no dos iguales. Antes se veian 'Pidiendo'
                     // (estado) y 'En camino' (etapa) juntos en el mismo pedido y
@@ -4471,6 +4570,23 @@ on('#pedido-filtro', 'input', debounce(() => { pagState['#pedidos-paginacion'] =
 on('#pedido-estado', 'change', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
 on('#pedido-sucursal-realizados', 'change', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
 
+// Botones de etapa dentro del modal del pedido. Es el mismo camino que usa la
+// bandeja, para que al encargado no le quede una vista donde no puede hacer
+// nada despues de sacarle el select de `estado`.
+function pintarEtapaEnModal(p, esDestinoMio) {
+    const box = $('#det-pedido-etapa-ctrl');
+    if (!box) return;
+    if (!esDestinoMio) { box.innerHTML = ''; return; }
+    const etapa = p.etapa || 'pendiente';
+    const b = (txt, sig) =>
+        `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="avanzarEtapa(${p.id}, '${sig}')">${txt}</button>`;
+    box.innerHTML =
+        etapa === 'pendiente' ? b('En preparación', 'en_preparacion')
+        : etapa === 'en_preparacion' ? b('En camino', 'en_camino')
+        : etapa === 'en_camino' ? b('Entregado', 'entregado')
+        : `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
+}
+
 window.verPedido = async (id, accionables = true) => {
     try {
         const data = await request(API + '/pedidos/' + id);
@@ -4528,14 +4644,18 @@ window.verPedido = async (id, accionables = true) => {
         // Admins y sus encargados solo pueden cambiar estado/despachar pedidos que
         // llegan a SU almacén (destino = su sucursal); los de otras sucursales solo lectura.
         const esDestinoMio = destIds.includes(window.SUCURSAL_ID);
-        const involucrado = window.ROL === 'encargado' &&
-            (p.sucursal_id === window.SUCURSAL_ID || destIds.includes(window.SUCURSAL_ID));
         if (accionables) {
             if (despacharBtn) despacharBtn.style.display = (esAdmin || esAlmacenPrincipal) && esDestinoMio && p.estado === 'pendiente' ? 'inline-flex' : 'none';
-            if (cambia) { cambia.value = ''; cambia.style.display = (esAdmin || esAlmacenPrincipal ? esDestinoMio : involucrado) ? 'inline-flex' : 'none'; }
+            // El `estado` (Pendiente/Despachado/Cumplido) es el eje de los
+            // reportes: queda en manos de gestion. El encargado avanza la etapa,
+            // que es el unico camino que mueve stock, asi que antes de sacarle
+            // este select se le da su equivalente aca en el modal.
+            if (cambia) { cambia.value = ''; cambia.style.display = esAdmin && esDestinoMio ? 'inline-flex' : 'none'; }
+            pintarEtapaEnModal(p, esDestinoMio);
         } else {
             if (despacharBtn) despacharBtn.style.display = 'none';
             if (cambia) cambia.style.display = 'none';
+            pintarEtapaEnModal(p, esDestinoMio);
         }
     } catch (e) {
         toast(e.message, 'err');
