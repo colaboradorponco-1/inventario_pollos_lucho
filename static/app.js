@@ -3387,12 +3387,68 @@ async function guardarInventario() {
     return true;
 }
 
+// Diferencia que se VE en pantalla ahora, no la que vino del servidor. Se usa
+// para decidir si hay que exigir una explicacion: si se usara la del servidor
+// estaria mirando el valor viejo de una linea recien tipeada.
+function diffVivoDeFila(f, tr) {
+    const inp = tr.querySelector('.inv-conteo');
+    const ini = tr.querySelector('.inv-inicial');
+    const man = tr.querySelector('.inv-ingreso-man');
+    if (!inp) return { dif: 0, inicial: 0, disponible: 0, utilizada: 0 };
+    const vIni = ini && ini.value !== '' ? Number(ini.value) : (f.inicial || 0);
+    const vMan = man && man.value !== '' ? Number(man.value) : 0;
+    const inicial = Number.isFinite(vIni) ? vIni : 0;
+    const disponible = inicial + (Number.isFinite(vMan) ? vMan : 0);
+    const conteo = inp.value === '' ? null : Number(inp.value);
+    if (conteo === null || Number.isNaN(conteo)) {
+        return { dif: 0, inicial, disponible, utilizada: 0 };
+    }
+    return {
+        dif: conteo - (f.stock_sistema || 0),
+        inicial,
+        disponible,
+        utilizada: Math.max(disponible - conteo, 0),
+    };
+}
+
+// Marca en rojo las observaciones que hay que llenar y devuelve los nombres de
+// los productos correspondientes. Si no hay nada que explicar, no se molesta
+// al usuario.
+function marcarFaltanExplicar() {
+    let faltan = [];
+    $$('#inv-tbody tr[data-inv-fila]').forEach((tr) => {
+        const f = INV_FILAS.find((x) => x.id === Number(tr.dataset.invFila));
+        const obs = tr.querySelector('.inv-obs');
+        if (!f || !obs) return;
+        obs.style.borderColor = '';
+        obs.style.background = '';
+        const { dif } = diffVivoDeFila(f, tr);
+        if (Math.abs(dif) < 1e-9) return;
+        if (obs.value.trim() !== '') return;
+        obs.style.borderColor = '#dc2626';
+        obs.style.background = '#FEF2F2';
+        faltan.push(f.producto);
+    });
+    return faltan;
+}
+
 async function cerrarInventario() {
     if (!INV_ID) return;
     const sinContar = Array.from($$('#inv-tbody .inv-conteo'))
         .filter((i) => i.value === '').length;
     if (sinContar > 0) {
         toast(`Faltan ${sinContar} productos por contar`, 'err');
+        return;
+    }
+    // Se avisa antes de guardar para nomolestar al usuario dos veces. El server
+    // igual valida esto de nuevo y es el que manda.
+    let faltan = marcarFaltanExplicar();
+    if (faltan.length) {
+        toast('Antes de cerrar hay que escribir QUÉ PASÓ en Observaciones de: ' +
+            faltan.slice(0, 4).join(', ') + (faltan.length > 4 ? ` y ${faltan.length - 4} más` : '') +
+            '. Solo para los que tienen diferencia.', 'err');
+        const primera = $('#inv-tbody .inv-obs[style*="border-color"]');
+        if (primera) primera.focus();
         return;
     }
     if (!confirm('Al cerrar la planilla se ajustará el stock de los productos con diferencia. ¿Continuar?')) return;
