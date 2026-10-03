@@ -3424,44 +3424,14 @@ function diffVivoDeFila(f, tr) {
     };
 }
 
-// Marca en rojo las observaciones que hay que llenar y devuelve los nombres de
-// los productos correspondientes. Si no hay nada que explicar, no se molesta
-// al usuario.
-function marcarFaltanExplicar() {
-    let faltan = [];
-    $$('#inv-tbody tr[data-inv-fila]').forEach((tr) => {
-        const f = INV_FILAS.find((x) => x.id === Number(tr.dataset.invFila));
-        const obs = tr.querySelector('.inv-obs');
-        if (!f || !obs) return;
-        obs.style.borderColor = '';
-        obs.style.background = '';
-        const { dif } = diffVivoDeFila(f, tr);
-        if (Math.abs(dif) < 1e-9) return;
-        if (obs.value.trim() !== '') return;
-        obs.style.borderColor = '#dc2626';
-        obs.style.background = '#FEF2F2';
-        faltan.push(f.producto);
-    });
-    return faltan;
-}
-
+// Ya no se bloquea el cierre por falta de observaciones. El usuario puede
+// cerrar y ajustar stock libremente sin que el sistema le trabe el trabajo.
 async function cerrarInventario() {
     if (!INV_ID) return;
     const sinContar = Array.from($$('#inv-tbody .inv-conteo'))
         .filter((i) => i.value === '').length;
     if (sinContar > 0) {
         toast(`Faltan ${sinContar} productos por contar`, 'err');
-        return;
-    }
-    // Se avisa antes de guardar para nomolestar al usuario dos veces. El server
-    // igual valida esto de nuevo y es el que manda.
-    let faltan = marcarFaltanExplicar();
-    if (faltan.length) {
-        toast('Antes de cerrar hay que escribir QUÉ PASÓ en Observaciones de: ' +
-            faltan.slice(0, 4).join(', ') + (faltan.length > 4 ? ` y ${faltan.length - 4} más` : '') +
-            '. Solo para los que tienen diferencia.', 'err');
-        const primera = $('#inv-tbody .inv-obs[style*="border-color"]');
-        if (primera) primera.focus();
         return;
     }
     if (!confirm('Al cerrar la planilla se ajustará el stock de los productos con diferencia. ¿Continuar?')) return;

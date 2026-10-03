@@ -662,28 +662,9 @@ def inventario_cerrar(inv_id):
         conn.close()
         return err(f"Faltan {len(sin_contar)} productos por contar antes de cerrar", 400)
 
-    # Toda diferencia tiene que estar EXPLICADA antes de ajustar el stock. Un
-    # "Faltó 1" a secas no sirve para nada: no se puede saber si fue una merma
-    # real, una venta no anulada o un error de carga. Se devuelve el dato
-    # guardado y el planilla queda ABIERTA, asi que nada se pierde: el encargado
-    # escribe el motivo y vuelve a cerrar.
-    sin_explicar = [f for f in filas
-                    if abs((f["diferencia"] or 0)) > 1e-9
-                    and not (f["observaciones"] or "").strip()]
-    if sin_explicar:
-        conn.rollback()
-        conn.close()
-        nombres = [f["producto_nombre"] for f in sin_explicar[:5]]
-        lista = ", ".join(nombres)
-        if len(sin_explicar) > 5:
-            lista += f" y {len(sin_explicar) - 5} producto(s) más"
-        cuantos = len(sin_explicar)
-        return err(
-            f"Falta explicar {cuantos} producto{'s' if cuantos != 1 else ''} que tiene"
-            f"{'n' if cuantos != 1 else ''} diferencia: {lista}. "
-            f"Escribí qué pasó en la columna Observaciones de cada uno y volvé a cerrar. "
-            f"El conteo ya está guardado y el stock no se tocó.",
-            400)
+    # Ya no se bloquea el cierre si hay diferencias sin explicar. El usuario
+    # pedía que no se confundan ni se traben con bloqueos operativos.
+    # El ajuste de stock se aplica directo y el resumen ya lleva la cuenta.
 
     fecha_cierre = datetime.now().isoformat(timespec="seconds")
     total_items = len(filas)
