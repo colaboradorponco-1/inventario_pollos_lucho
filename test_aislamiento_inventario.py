@@ -250,6 +250,20 @@ def prueba_se_sabe_quien_conto():
     _check("el detalle marca si la linea es de otro encargado",
            '"es_de_otro"' in detalle)
 
+    # Respaldo: si la migracion no corrio y la columna no existe, el conteo se
+    # tiene que guardar igual. Perder el conteo de toda la planilla porque falte
+    # una columna de autoria seria JUSTO lo que hay que evitar.
+    _check("si la columna no esta, guarda igual sin la firma",
+           "if con_firma:" in guardar and guardar.count("UPDATE inventario_detalle") >= 2)
+    _check("detecta la columna desde las propias filas, sin consulta extra",
+           'any("contado_por" in f for f in validas.values())' in guardar)
+    # La rama sin firma no puede mencionar la columna: si la pusiéramos, el
+    # UPDATE fallaría contra una base sin migrar.
+    cola = guardar.split("if con_firma:", 1)[-1].split("else:", 1)[-1]
+    cola = cola.split("except _DatoInvalido")[0]
+    _check("el UPDATE sin firma NO menciona contado_por",
+           "contado_por = %s" not in cola)
+
 
 def prueba_candados_en_el_codigo():
     """Ningun endpoint que escribe planillas puede quedarse sin candado."""

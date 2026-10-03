@@ -568,6 +568,10 @@ def inventario_guardar(inv_id):
     stocks = _stocks_actuales(conn, inv["sucursal_id"])
     ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
     usuario_actual = session.get("usuario", "") or ""
+    # Si la columna `contado_por` todavia no esta en la base, `_detalle` (que
+    # hace SELECT d.*) no la trae en las filas y se detecta solo, sin consulta
+    # extra: se guarda el conteo igual, sin la firma.
+    con_firma = any("contado_por" in f for f in validas.values())
     # Avisos de "otro ya conto esto". NO bloquean el guardado: se entra igual y
     # se avisa despues. Bloquear seria perjudicar al segundo encargado, que a
     # veces esta corrigiendo un numero que el primero cargo mal. Se guarda igual
@@ -648,15 +652,30 @@ def inventario_guardar(inv_id):
                     avisos.append(f"{nom}: ya lo contó {previo} (anotó "
                                   f"{fila['conteo_fisico']}) y vos pusiste {conteo}")
                 contado_por = usuario_actual or previo
-            conn.execute("""
-                UPDATE inventario_detalle
-                SET inicial = %s, ingreso_dia = %s, ingreso_manual = %s, disponible = %s,
-                    conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s,
-                    stock_sistema = %s, observaciones = %s, contado_por = %s
-                WHERE id = %s
-            """, (inicial, ingreso, ing_man, disponible,
-                  conteo, final, utilizada, diferencia, stock_sis,
-                  (item.get("observaciones") or "")[:500] or None, contado_por, lid))
+            if con_firma:
+                conn.execute("""
+                    UPDATE inventario_detalle
+                    SET inicial = %s, ingreso_dia = %s, ingreso_manual = %s, disponible = %s,
+                        conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s,
+                        stock_sistema = %s, observaciones = %s, contado_por = %s
+                    WHERE id = %s
+                """, (inicial, ingreso, ing_man, disponible,
+                      conteo, final, utilizada, diferencia, stock_sis,
+                      (item.get("observaciones") or "")[:500] or None, contado_por, lid))
+            else:
+                # La columna todavia no esta en la base (la migracion no llego a
+                # correr). Se guarda el conteo igual, sin la firma. Que falte la
+                # autoria molesta; tumbar el guardado del inventario entero seria
+                # mucho peor: el encargado perderia el conteo de toda la planilla.
+                conn.execute("""
+                    UPDATE inventario_detalle
+                    SET inicial = %s, ingreso_dia = %s, ingreso_manual = %s, disponible = %s,
+                        conteo_fisico = %s, final = %s, utilizada = %s, diferencia = %s,
+                        stock_sistema = %s, observaciones = %s
+                    WHERE id = %s
+                """, (inicial, ingreso, ing_man, disponible,
+                      conteo, final, utilizada, diferencia, stock_sis,
+                      (item.get("observaciones") or "")[:500] or None, lid))
     except _DatoInvalido as e:
         conn.close()
         return err(str(e), 400)
