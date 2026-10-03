@@ -253,14 +253,17 @@ def pedidos():
         es_central = bool(f and f["principal"])
     if not es_superadmin() and sid:
         if es_logistica():
-            # Preparador / repartidor: SOLO los pedidos que les llegan, es decir
-            # los que tienen su sucursal como DESTINO (en la cabecera o en
-            # alguna linea). Antes NO se aplicaba ningun filtro a estos roles y
-            # veian los pedidos de todas las sucursales, mezclados con los del
-            # almacen principal.
-            q += (" AND (p.destino_id = ? OR EXISTS "
-                  "(SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
-            params += [sid, sid]
+            # Preparador / repartidor: SOLO los pedidos que PLACO su sucursal
+            # (`p.sucursal_id`), que son los que prepare y entrega.
+            #
+            # OJO, esto es lo que se corrigio: `destino_id` NO es quien recibe,
+            # es el PROVEEDOR que despacha la linea (ver _despachar_stock, que
+            # hace `origen_id = d["destino_id"]`). Filtrar por `destino_id`
+            # invertido la cola: el preparador de America veia los pedidos que
+            # OTRAS sucursales le hacen a America para que la abastezca, que no
+            # son su trabajo, y no veia los pedidos que America si pidio.
+            q += " AND p.sucursal_id = ?"
+            params.append(sid)
         elif session.get("rol") == "encargado" and not es_central:
             # Sucursal filial: ve sus pedidos (los que pide y los que le piden)
             q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
@@ -635,23 +638,28 @@ def pedido_despachar(pedido_id):
 @pedidos_bp.route("/api/pedidos/bandeja", methods=["GET"])
 @login_requerido
 def pedidos_bandeja():
-    """Pedidos pendientes agrupados por sucursal para la bandeja de llegada.
+    """Cola de trabajo agrupada por sucursal.
 
-    Todo usuario con sucursal asignada ve únicamente los pedidos en los que su
-    sucursal es el destino (destino_id = su sucursal), ya sea un almacén
-    principal, América/Simón López o cualquier otra sucursal que abastezca.
-    Solo un admin/superadmin sin sucursal asignada consolida todos los pendientes."""
+    Hay dos colas distintas y NO son la misma:
+      - Encargado / almacen: los pedidos que le PIDIERON a su sucursal, o sea
+        los que tiene que despachar (`dd.destino_id = su sucursal`, porque
+        `destino_id` es el proveedor).
+      - Preparador / repartidor: los pedidos que su sucursal PLACO
+        (`p.sucursal_id`), que son los que tienen que preparar y entregar.
+
+    Un admin/superadmin sin sucursal asignada consolida todos los pendientes."""
     conn = get_conn()
     sid = sucursal_actual()
     where = "WHERE 1=1"
     params = []
-    # Bandeja de «pedidos que me realizaron»: cada usuario ve únicamente los
-    # pedidos en los que SU sucursal es el destino (las líneas que le piden a él),
-    # ya sea un almacén principal, América/Simón López o cualquier sucursal que
-    # abastezca. Solo un admin/superadmin sin sucursal asignada consolida todo.
     if sid:
-        where += (" AND EXISTS (SELECT 1 FROM pedido_detalle dd "
-                  "WHERE dd.pedido_id = p.id AND dd.destino_id = ?)")
+        if es_logistica():
+            # El rol logistico no abastece a otras sucursales: su trabajo son
+            # los pedidos que hizo su propia sucursal.
+            where += " AND p.sucursal_id = ?"
+        else:
+            where += (" AND EXISTS (SELECT 1 FROM pedido_detalle dd "
+                      "WHERE dd.pedido_id = p.id AND dd.destino_id = ?)")
         params.append(sid)
     elif not es_gestion():
         conn.close()
@@ -721,20 +729,23 @@ def logistica_resumen():
 
     No devuelve ventas, gastos, ganancias, valor de inventario ni alertas:
     el rol logistico no gestiona nada de eso, asi que no debe verlo.
-    Cuenta unicamente los pedidos dirigidos a la sucursal del usuario."""
+    Cuenta los pedidos que PLACO su sucursal (`p.sucursal_id`), agrupados por
+    `etapa` y no por `estado`: en este flujo el `estado` sigue en 'pendiente'
+    durante preparacion y transporte, asi que contar por `estado` daba el mismo
+    numero en las dos columnas y decia '0 por entregar' con work en la calle."""
     conn = get_conn()
     sid = sucursal_actual()
     if not es_logistica() or sid is None:
         conn.close()
         return err("Solo disponible para preparador/repartidor", 403)
 
-    def _contar(estados):
-        marcas = ",".join(["%s"] * len(estados))
+    def _contar(etapas, abierto=True):
+        marcas = ",".join(["%s"] * len(etapas))
+        extra = " AND p.etapa <> 'entregado'" if abierto else ""
         f = conn.execute(
-            f"""SELECT COUNT(DISTINCT p.id) AS n FROM pedidos p
-                JOIN pedido_detalle dd ON dd.pedido_id = p.id
-                WHERE dd.destino_id = %s AND p.estado IN ({marcas})""",
-            [sid] + list(estados)).fetchone()
+            f"SELECT COUNT(*) AS n FROM pedidos p "
+            f"WHERE p.sucursal_id = %s AND p.etapa IN ({marcas}){extra}",
+            [sid] + list(etapas)).fetchone()
         return int((f or {}).get("n") or 0)
 
     nombre = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
@@ -743,8 +754,8 @@ def logistica_resumen():
         "sucursal": (nombre or {}).get("nombre") or "",
         "rol": session.get("rol"),
         "por_preparar": _contar(("pendiente",)),
-        "por_entregar": _contar(("despachado",)),
-        "total": _contar(("pendiente", "despachado")),
+        "por_entregar": _contar(("en_preparacion", "en_camino")),
+        "total": _contar(("pendiente", "en_preparacion", "en_camino")),
     }
     conn.close()
     return ok(resumen)
@@ -799,15 +810,11 @@ def pedido_etapa(pedido_id):
         conn.close()
         return err("No tenes sucursal asignada", 403)
 
-    # Solo se toca un pedido cuya DESTINO es su sucursal: cada quien trabaja su cola.
-    if rol in ("preparador", "repartidor"):
-        det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
-                           (pedido_id,)).fetchall()
-        es_destino = (pedido["destino_id"] == sid
-                      or any((d["destino_id"] == sid) for d in det))
-        if not es_destino:
-            conn.close()
-            return err("Ese pedido no es de tu sucursal", 403)
+    # Solo se toca un pedido que PLACO su sucursal: cada quien trabaja su cola.
+    # `sucursal_id` es quien pidio; `destino_id` es el proveedor que despacha.
+    if rol in ("preparador", "repartidor") and pedido["sucursal_id"] != sid:
+        conn.close()
+        return err("Ese pedido no es de tu sucursal", 403)
 
     actual_etapa = pedido["etapa"] or "pendiente"
     if destino_etapa == actual_etapa:

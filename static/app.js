@@ -4404,7 +4404,11 @@ async function pintarBadgePedidos() {
     // admin/superadmin y almacén principal cuentan todos los pendientes.
     const qs = new URLSearchParams({ estado: 'pendiente', pagina: 1, por_pagina: 1 });
     const esLogistica = window.ROL === 'preparador' || window.ROL === 'repartidor';
-    if (window.SUCURSAL_ID && (esLogistica || (window.ROL === 'encargado' && !esCentralBadge()))) {
+    if (esLogistica && window.SUCURSAL_ID) {
+        // El rol logistico trabaja los pedidos que PLACO su sucursal, no los que
+        // le pidieron a ella comoproveedor: por eso va sucursal_id y no destino_id.
+        qs.set('sucursal_id', window.SUCURSAL_ID);
+    } else if (window.SUCURSAL_ID && window.ROL === 'encargado' && !esCentralBadge()) {
         qs.set('destino_id', window.SUCURSAL_ID);
     }
     const pend = await request(API + '/pedidos?' + qs.toString());

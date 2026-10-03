@@ -79,14 +79,16 @@ def sql_de_listado(rol, sucursal_id):
     return "", []
 
 
-# (etiqueta, rol, sucursal_id, nombre, debe_llevar_filtro)
+# (etiqueta, rol, sucursal_id, nombre, filtro_obligatorio)
+# El filtro importa, no es que "lleve alguno": `destino_id` es el PROVEEDOR y
+# `sucursal_id` es quien PIDIO. Un preparador debe ver lo que pidio su sucursal.
 CASOS = [
-    ("preparador America", "preparador", 35, "America", True),
-    ("repartidor Simon", "repartidor", 33, "Simon Lopez", True),
-    ("encargado filial", "encargado", 42, "La Paz", True),
-    ("encargado principal", "encargado", 30, "Almacen Principal 1", False),
-    ("admin", "admin", 30, "Almacen Principal 1", False),
-    ("superadmin", "superadmin", None, "todas", False),
+    ("preparador America", "preparador", 35, "America", "p.sucursal_id = ?"),
+    ("repartidor Simon", "repartidor", 33, "Simon Lopez", "p.sucursal_id = ?"),
+    ("encargado filial", "encargado", 42, "La Paz", "p.sucursal_id = ?"),
+    ("encargado principal", "encargado", 30, "Almacen Principal 1", None),
+    ("admin", "admin", 30, "Almacen Principal 1", None),
+    ("superadmin", "superadmin", None, "todas", None),
 ]
 
 fallos = 0
@@ -94,17 +96,31 @@ print("=" * 72)
 print("AISLAMIENTO POR SUCURSAL EN GET /api/pedidos")
 print("=" * 72)
 
-for etiqueta, rol, sid, nombre, debe_filtrar in CASOS:
+for etiqueta, rol, sid, nombre, filtro_esperado in CASOS:
     sql, params = sql_de_listado(rol, sid)
-    lleva = "destino_id = ?" in sql or "p.sucursal_id = ?" in sql
+    lleva_destino = "destino_id = ?" in sql
+    lleva_sucursal = "p.sucursal_id = ?" in sql
+    lleva = lleva_destino or lleva_sucursal
+
+    if filtro_esperado is None:
+        ok = not lleva
+        detalle = "sin filtro (ve todos, por diseño)"
+    else:
+        ok = (filtro_esperado in sql)
+        detalle = f"filtro por {filtro_esperado}"
+
+    # El rol logistico jamas debe filtrar por destino_id: eso lo muestra como
+    # proveedor, o sea los pedidos que OTRAS sucursales le hacen a America.
+    if rol in ("preparador", "repartidor") and lleva_destino:
+        ok = False
+        detalle = "USA destino_id (proveedor): cola invertida"
+
     sids = [p for p in params if isinstance(p, int)]
-    veredicto = "OK" if lleva == debe_filtrar else "FALLA"
-    if lleva != debe_filtrar:
+    veredicto = "OK" if ok else "FALLA"
+    if not ok:
         fallos += 1
-    detalle = (f"FILTRADO por sucursal {sids}" if lleva
-               else "sin filtro (ve todos, por diseño)")
     print(f"\n{veredicto:6s} {etiqueta:24s} {nombre}")
-    print(f"        {detalle}")
+    print(f"        {detalle}" + (f"  (params {sids})" if lleva else ""))
 
 print("\n" + "=" * 72)
 print("FALLOS:", fallos)
