@@ -84,7 +84,7 @@ def create_app():
         """Preparador/repartidor: solo su cola de pedidos. Todo lo demás, bloqueado."""
         if "user_id" not in session:
             return None
-        if ruta_bloqueada_logistica(flask_request.path):
+        if ruta_bloqueada_logistica(flask_request.path, flask_request.method):
             if flask_request.path.startswith("/api/"):
                 return jsonify({"ok": False,
                                 "message": "Tu rol solo permite trabajar con los "

@@ -1200,3 +1200,12 @@ body.rol-encargado .panel-finance {
 #view-logistica .kpi { flex-direction: column; align-items: flex-start; gap: 6px; }
 #view-logistica .kpi-valor { font-size: 30px; line-height: 1.1; }
 .logistica-aviso { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+
+/* ---- Preparador / Repartidor: sin "Mis Solicitudes" ni formulario de pedido ---- */
+body.rol-logistica #tab-hist-mis-pedidos,
+body.rol-logistica #panel-hist-mis-pedidos {
+    display: none !important;
+}
+body.rol-logistica #view-pedidos .view-header p {
+    display: none;
+}

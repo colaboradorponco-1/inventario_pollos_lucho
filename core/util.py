@@ -101,25 +101,41 @@ def es_logistica():
     return session.get("rol") in ("preparador", "repartidor")
 
 
-# Endpoints que un preparador/repartidorJamás debe tocar: Todo lo que no sea
-# su cola de pedidos. Los pedidos (bandeja + cambio de estado) quedan fuera.
+# Endpoints que un preparador/repartidor JAMAŚ debe tocar: todo lo que no sea
+# su cola de pedidos. Los pedidos (bandeja + etapa) quedan fuera.
 RUTAS_BLOQUEADAS_LOGISTICA = (
-    "/api/dashboard", "/api/productos", "/api/categorias", "/api/movimientos",
-    "/api/ventas", "/api/ventas/", "/api/gastos", "/api/gastos/",
-    "/api/reportes", "/api/inventario", "/api/inventario/",
+    "/api/dashboard", "/api/categorias", "/api/movimientos",
+    "/api/ventas", "/api/gastos", "/api/reportes", "/api/inventario",
     "/api/usuarios", "/api/auditoria", "/api/almacenes",
-    "/api/proveedores", "/api/repartos", "/api/lotes", "/api/backup",
+    "/api/proveedores", "/api/repartos", "/api/backup",
     "/api/config",
 )
 
+# Endpoints que el rol logistico puede LEER (los necesita para que los pedidos
+# se rendericen con nombre, unidad y stock) pero nunca escribir.
+RUTAS_SOLO_LECTURA_LOGISTICA = ("/api/productos",)
 
-def ruta_bloqueada_logistica(path):
-    """True si `path` es un endpoint prohibido para preparador/repartidor."""
+
+def ruta_bloqueada_logistica(path, method="GET"):
+    """True si `path`+`method` es un endpoint prohibido para preparador/repartidor."""
     if not es_logistica():
         return False
+    metodo = (method or "GET").upper()
     for bloqueada in RUTAS_BLOQUEADAS_LOGISTICA:
         if path == bloqueada or path.startswith(bloqueada + "/"):
             return True
+    if metodo in ("GET", "HEAD", "OPTIONS"):
+        return False
+    # Única escritura permitida: advancing la etapa logística del pedido.
+    import re as _re
+    if _re.fullmatch(r"/api/pedidos/\d+/etapa", path) and metodo == "PUT":
+        return False
+    for solo_lectura in RUTAS_SOLO_LECTURA_LOGISTICA:
+        if path == solo_lectura or path.startswith(solo_lectura + "/"):
+            return True
+    # No crean pedidos: su panel es solo la cola que les llega.
+    if path == "/api/pedidos" or path.startswith("/api/pedidos/"):
+        return True
     return False
 
 

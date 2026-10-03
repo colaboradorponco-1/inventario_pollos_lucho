@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-title" content="Pollos Lucho">
     <link rel="stylesheet" href="/static/style.css?v=202610031130">
 </head>
-<body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }}">
+<body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }} {{ 'rol-logistica' if session.get('rol') in ('preparador', 'repartidor') else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
@@ -865,7 +865,7 @@
             </div>
             <div class="segment-tabs" id="tabs-historial-pedidos">
                 <button class="segment-tab active" data-tab="realizados" id="tab-hist-realizados" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 1. Pedidos que nos hicieron (Bandeja)</button>
-                <button class="segment-tab" data-tab="mis-pedidos" id="tab-hist-mis-pedidos" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg> 2. Pedidos que hicimos (Mis Solicitudes)</button>
+                <button class="segment-tab" data-tab="mis-pedidos" id="tab-hist-mis-pedidos" type="button" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg> 2. Pedidos que hicimos (Mis Solicitudes)</button>
             </div>
             <div id="panel-hist-mis-pedidos">
                 <div class="panel">

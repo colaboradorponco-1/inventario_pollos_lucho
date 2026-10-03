@@ -4070,6 +4070,9 @@ function sucursalProvee() {
 function puedeVerBandeja() {
     if (!window.ROL) return false;
     if (esGestionPed()) return true;
+    // Preparador y repartidor solo trabajan sobre la cola de pedidos de su
+    // sucursal: la bandeja es exactamente lo que necesitan ver.
+    if (window.ROL === 'preparador' || window.ROL === 'repartidor') return true;
     if (window.ROL !== 'encargado') return false;
     if (window.SUCURSAL_PRINCIPAL) return true;
     return sucursalProvee();
@@ -4084,6 +4087,7 @@ function inicializarPestanasPedidos() {
     // quedan únicamente con su bandeja. América y Simón López proveen a otras
     // sucursales PERO también hacen sus propios pedidos: conservan las dos.
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
+        || window.ROL === 'preparador' || window.ROL === 'repartidor'
         || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
 
     if (soloBandeja) {
