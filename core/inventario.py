@@ -160,6 +160,14 @@ def _productos_planilla(conn, sid, fecha, cat_id):
     """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid, cat_id, cat_id)).fetchall()
 
 
+def _misma_cantidad(a, b):
+    """Compara cantidades sin que 5 y 5.0 se miren distintas (MySQL devuelve DOUBLE)."""
+    try:
+        return abs(float(a or 0) - float(b or 0)) < 1e-9
+    except (TypeError, ValueError):
+        return (a or 0) == (b or 0)
+
+
 def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
     """Agrega a una planilla ABIERTA los productos que ahora pertenecen a su
     categoría y actualiza sus nombres sin pisar conteos ya digitados.
@@ -197,26 +205,44 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
             # así, si un pedido se entregó después de crear la planilla, al abrirla
             # ya figura (50 -> 60) y nadie lo anota dos veces. Si ya contaron (o
             # escribieron observaciones) se respeta lo que hicieron.
+            #
+            # OJO: se escribe SOLO si el valor cambió de verdad. La planilla
+            # abierta se refresca sola cada 45s, y escribir las ~100 filas en
+            # cada chequeo churnaba la tabla y podía chocar con el guardado del
+            # otro encargado en la misma planilla (los UPDATE toman el candado de
+            # la fila). Si nada cambió, cero escrituras.
             if d["conteo_fisico"] is None and not (d["observaciones"] or ""):
-                conn.execute("""
-                    UPDATE inventario_detalle
-                    SET categoria_id = %s, categoria_nombre = %s,
-                        producto_nombre = %s, codigo = %s, unidad = %s,
-                        stock_sistema = %s, inicial = %s, ingreso_dia = 0,
-                        disponible = %s
-                    WHERE id = %s
-                """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
-                      f["nombre"], f["codigo"], f["unidad"] or "unidad",
-                      stock_dia, inicial, disponible, d["id"]))
+                if not _misma_cantidad(d["inicial"], inicial) or \
+                        not _misma_cantidad(d["disponible"], disponible) or \
+                        not _misma_cantidad(d["stock_sistema"], stock_dia) or \
+                        (d["categoria_nombre"] or "") != (f["categoria_nombre"] or "Sin categoría") or \
+                        (d["producto_nombre"] or "") != (f["nombre"] or "") or \
+                        (d["codigo"] or "") != (f["codigo"] or "") or \
+                        (d["unidad"] or "") != (f["unidad"] or "unidad"):
+                    conn.execute("""
+                        UPDATE inventario_detalle
+                        SET categoria_id = %s, categoria_nombre = %s,
+                            producto_nombre = %s, codigo = %s, unidad = %s,
+                            stock_sistema = %s, inicial = %s, ingreso_dia = 0,
+                            disponible = %s
+                        WHERE id = %s
+                    """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
+                          f["nombre"], f["codigo"], f["unidad"] or "unidad",
+                          stock_dia, inicial, disponible, d["id"]))
+                    cambios += 1
             else:
-                conn.execute("""
-                    UPDATE inventario_detalle
-                    SET categoria_id = %s, categoria_nombre = %s,
-                        producto_nombre = %s, codigo = %s, unidad = %s
-                    WHERE id = %s
-                """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
-                      f["nombre"], f["codigo"], f["unidad"] or "unidad", d["id"]))
-            cambios += 1
+                if (d["categoria_nombre"] or "") != (f["categoria_nombre"] or "Sin categoría") or \
+                        (d["producto_nombre"] or "") != (f["nombre"] or "") or \
+                        (d["codigo"] or "") != (f["codigo"] or "") or \
+                        (d["unidad"] or "") != (f["unidad"] or "unidad"):
+                    conn.execute("""
+                        UPDATE inventario_detalle
+                        SET categoria_id = %s, categoria_nombre = %s,
+                            producto_nombre = %s, codigo = %s, unidad = %s
+                        WHERE id = %s
+                    """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
+                          f["nombre"], f["codigo"], f["unidad"] or "unidad", d["id"]))
+                    cambios += 1
     if cambios:
         conn.commit()
     return cambios
