@@ -265,6 +265,51 @@ def prueba_se_sabe_quien_conto():
            "contado_por = %s" not in cola)
 
 
+def prueba_iniciar_planilla_no_falla_en_silencio():
+    """'Iniciar inventario' no puede volver a no hacer NADA cuando hay error.
+
+    Esto paso de verdad: el boton de confirmar no estaba envuelto en el mismo
+    try/catch que los otros, asi que el mensaje del servidor se perdia y en
+    pantalla no pasaba absolutely nada. Solo se veia en la consola.
+    """
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "static", "app.js"), encoding="utf-8") as fh:
+        js = fh.read()
+
+    m = re.search(r"async function confirmarCrearInventario\(.*?\n(?=\}\S|\n\S)", js, re.S)
+    cuerpo = m.group(0) if m else ""
+    _check("confirmarCrearInventario atrapa el error del servidor",
+           "catch (e)" in cuerpo and "toast(" in cuerpo)
+    _check("el error se muestra, no se traga", "No se pudo iniciar el inventario" in cuerpo)
+    _check("si falla, refresca la lista para poder abrir la que ya existe",
+           "listarInventario()" in cuerpo)
+
+    # Y el toast tiene que aguantar un mensaje largo: el aviso de planillas que
+    # coexisten no entra en 3 segundos.
+    mt = re.search(r"function toast\([^)]*\)", js)
+    _check("toast acepta duracion", mt and "ms" in mt.group(0), mt.group(0) if mt else "")
+    _check("el aviso de coexistencia dura mas de 3s", "15000" in cuerpo)
+
+
+def prueba_se_pueden_abrir_las_dos_tipos_de_planilla():
+    """El usuario decidiu que 'todas las categorias' y 'por categoria' pueden
+    coexistir el mismo dia. No se bloquea, pero tampoco se avisa en silencio."""
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "core", "inventario.py"), encoding="utf-8") as fh:
+        inv = fh.read()
+
+    m = re.search(r"def inventario_crear\(.*?\n(?=@|\Z)", inv, re.S)
+    crear = m.group(0) if m else ""
+    _check("ya NO bloquea la mezcla de planillas",
+           "No se puede mezclar" not in crear
+           and "Podés" not in crear.split("avisos_planilla")[0])
+    _check("pero avisa cuales planillas van a coexistir",
+           "avisos_planilla" in crear and "contados dos veces" in crear)
+    _check("el aviso viaja en la respuesta de la planilla creada",
+           '"avisos": avisos_planilla' in crear)
+    _check("no devuelve 409 al mezclar", "409" not in crear)
+
+
 def prueba_candados_en_el_codigo():
     """Ningun endpoint que escribe planillas puede quedarse sin candado."""
     src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -296,6 +341,8 @@ def main():
     prueba_no_puede_abrir_otra_sucursal()
     prueba_mensaje_dice_quien_abrio()
     prueba_se_sabe_quien_conto()
+    prueba_iniciar_planilla_no_falla_en_silencio()
+    prueba_se_pueden_abrir_las_dos_tipos_de_planilla()
     prueba_candados_en_el_codigo()
     print("=" * 70)
     print(f"FALLOS: {len(FALLOS)}")

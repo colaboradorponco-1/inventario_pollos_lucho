@@ -128,7 +128,7 @@ async function conSubmit(fn, botonesSeleccion = 'button[type="submit"]') {
     }
 }
 
-function toast(msg, type = 'ok') {
+function toast(msg, type = 'ok', ms = 3000) {
     const t = $('#toast');
     t.textContent = msg;
     t.className = `toast show ${type}`;
@@ -136,7 +136,7 @@ function toast(msg, type = 'ok') {
     t._toastTimer = setTimeout(() => {
         t.classList.remove('show');
         setTimeout(() => { if (!t.classList.contains('show')) t.textContent = ''; }, 300);
-    }, 3000);
+    }, ms);
 }
 
 // ---------------- Modales (accesibilidad) ----------------
@@ -3270,8 +3270,26 @@ async function confirmarCrearInventario() {
     $('#inv-hora').value = hora || '';
     closeModal('modal-inv-nueva');
     const qs = new URLSearchParams({ fecha, hora: hora || '', categoria_id: categoria });
-    const r = await request(API + '/inventario-diario?' + qs.toString(), { method: 'POST' });
+    let r;
+    try {
+        r = await request(API + '/inventario-diario?' + qs.toString(), { method: 'POST' });
+    } catch (e) {
+        // Antes este boton NO estaba envuelto en invClick, asi que el error del
+        // servidor se perdia: solo aparecia en la consola y en pantalla no
+        // pasaba nada al tocar "Iniciar inventario".
+        toast(e.message || 'No se pudo iniciar el inventario', 'err');
+        // Si el problema es que ya hay planillas de otro tipo para ese dia, lo
+        // util es refrescar la lista para que el encargado pueda abrir la que
+        // ya existe en vez de quedar trabado.
+        await listarInventario();
+        return;
+    }
     toast(r.message || 'Planilla lista', 'ok');
+    // Si ese dia ya habia planillas del otro tipo, se avisa y se deja crear
+    // igual (el usuario decide asi). El aviso dura mas que un toast normal
+    // porque es largo y dice quais planillas van a coexistir.
+    const avisos = (r.data && r.data.avisos) || [];
+    if (avisos.length) toast(avisos.join(' '), 'err', 15000);
     await listarInventario();
     const nueva = r.data || r;
     await abrirInventario(nueva.id);

@@ -355,20 +355,32 @@ def inventario_crear():
         cat_nombre = c["nombre"] or f"Categoría {cat_id}"
 
     # Una planilla "de todas las categorías" y una "por categoría" del mismo día
-    #meterían dos veces al mismo producto. Al cerrar, cada una compara contra el
-    # stock que dejó la anterior, así que la diferencia queda repartida entre las
-    # dos planillas y no se sabe dónde se contabilizó. Se impide mezclar.
+    # pueden meter dos veces al mismo producto: al cerrar, cada una compara contra
+    # el stock que dejó la anterior, así que la diferencia queda repartida entre
+    # las dos y no se sabe dónde se contabilizó.
+    #
+    # El usuario decidió que esto NO se bloquea: puede abrir de las dos formas,
+    # como le quede más cómoda a la persona que cuenta. Pero no se avisa en
+    # silencio: se crea igual y se le dice qué planillas del mismo día van a
+    # coexistir, para que al cerrar sepa que el producto puede quedar contado en
+    # las dos.
     criterio_opuesto = ("> 0" if cat_id == 0 else "= 0")
-    opuesta = conn.execute(
-        f"SELECT id FROM inventario_diario "
-        f"WHERE sucursal_id = %s AND fecha = %s AND categoria_id {criterio_opuesto}",
-        (sid, fecha)).fetchone()
-    if opuesta and cat_id == 0:
-        conn.close()
-        return err(
-            "Ese día ya hay una planilla por categoría. Cierra o borra esas "
-            "planillas antes de crear una de todas las categorías, o el mismo "
-            "producto se contaría dos veces.", 400)
+    opuestas = conn.execute(
+        f"SELECT id, categoria_nombre, estado FROM inventario_diario "
+        f"WHERE sucursal_id = %s AND fecha = %s AND categoria_id {criterio_opuesto} "
+        f"ORDER BY categoria_nombre",
+        (sid, fecha)).fetchall()
+    avisos_planilla = []
+    if opuestas:
+        detalle = ", ".join(
+            f"{o['categoria_nombre'] or 'Sin categoría'}"
+            f"{' (cerrada)' if o['estado'] == 'cerrado' else ''}"
+            for o in opuestas)
+        avisos_planilla.append(
+            f"Ojo: ese día ya tiene {len(opuestas)} planilla(s) de otro tipo "
+            f"({detalle}). Se puede abrir esta igual, pero los productos que "
+            f"estén en las dos pueden quedar contados dos veces: al cerrar, cada "
+            f"una descuenta su diferencia contra el stock que dejó la otra.")
 
     existente = conn.execute(
         "SELECT * FROM inventario_diario WHERE sucursal_id = %s AND categoria_id = %s AND fecha = %s",
@@ -437,9 +449,13 @@ def inventario_crear():
     conn.close()
     registrar_auditoria("Planilla de inventario creada",
                         f"Sucursal {sid} - {fecha} - {cat_nombre}")
+    mensaje = f"Planilla creada: {cat_nombre}"
+    if avisos_planilla:
+        mensaje = f"{mensaje}. {' '.join(avisos_planilla)}"
     return ok({"id": inv_id, "estado": "abierto", "fecha": fecha, "sucursal_id": sid,
                "categoria_id": cat_id, "categoria_nombre": cat_nombre,
-               "lineas": len(filas)}, message=f"Planilla creada: {cat_nombre}")
+               "lineas": len(filas), "avisos": avisos_planilla},
+              message=mensaje)
 
 
 # --------------------------------------------------------------------------
