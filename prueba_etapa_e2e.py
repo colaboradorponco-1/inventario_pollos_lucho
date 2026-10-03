@@ -147,6 +147,29 @@ def dar_stock(prod_id, sucursal_id, cantidad):
                          datetime.now(), AVISO, "prueba_e2e", sucursal_id)
 
 
+def pedido_en_bandeja(pid, rol, sucursal):
+    """El pedido tal como lo recibe el frontend, por la bandeja.
+
+    Esto importa: el endpoint de etapa podia guardar bien la etapa y aun asi la
+    pantalla no avanza, porque el SELECT de la bandeja no incluia la columna
+    `etapa` y el JS caia siempre en su valor por defecto 'pendiente'. El boton
+    se quedaba ahi y al volver a apretar/contestar el backend 'ya estaba en En
+    preparacion'. Hay que probar la RESPUESTA, no solo el endpoint."""
+    with srv.test_request_context("/api/pedidos/bandeja", method="GET"):
+        session["user_id"] = 1
+        session["rol"] = rol
+        session["sucursal_id"] = sucursal
+        session["usuario"] = "prueba_e2e"
+        resp = ped.pedidos_bandeja()
+    if es_error(resp):
+        return None, mensaje(resp)
+    for grupo in resp.get_json() or []:
+        for p in grupo.get("pedidos", []):
+            if p.get("id") == pid:
+                return p, ""
+    return None, "el pedido no aparece en la bandeja"
+
+
 def correr_flujo(pid, sucursal_logistica, origen_id, destino_id, prod, cantidad):
     """El flujo completo del caso, con las aserciones comunes."""
     stock_o = stock_actual(CONN, prod["id"], origen_id)
@@ -164,6 +187,11 @@ def correr_flujo(pid, sucursal_logistica, origen_id, destino_id, prod, cantidad)
     check("el stock NO se movio todavia",
           stock_actual(CONN, prod["id"], origen_id) == stock_o,
           f"origen={stock_actual(CONN, prod['id'], origen_id)}")
+    # La pantalla tiene que reflejar el cambio, no solo la base de datos.
+    p, err = pedido_en_bandeja(pid, "preparador", sucursal_logistica)
+    check("la bandeja le DEVUELVE la etapa en_preparacion al frontend",
+          p is not None and p.get("etapa") == "en_preparacion",
+          f"etapa que ve la pantalla={(p or {}).get('etapa')!r} {err}".strip())
 
     # 3) El preparador no se salta su paso
     r = llamar(pid, "preparador", "en_camino", sucursal_logistica)
@@ -173,6 +201,10 @@ def correr_flujo(pid, sucursal_logistica, origen_id, destino_id, prod, cantidad)
     r = llamar(pid, "repartidor", "en_camino", sucursal_logistica)
     check("repartidor marca En camino", not es_error(r), mensaje(r))
     check("la etapa quedo en en_camino", etapa_estado(pid)[0] == "en_camino")
+    p, err = pedido_en_bandeja(pid, "repartidor", sucursal_logistica)
+    check("la bandeja le DEVUELVE la etapa en_camino al frontend",
+          p is not None and p.get("etapa") == "en_camino",
+          f"etapa que ve la pantalla={(p or {}).get('etapa')!r} {err}".strip())
     check("el stock AUN no se movio",
           stock_actual(CONN, prod["id"], origen_id) == stock_o,
           f"origen={stock_actual(CONN, prod['id'], origen_id)}")

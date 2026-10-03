@@ -697,7 +697,7 @@ def pedidos_bandeja():
         where += " AND date(p.fecha) <= date(?)"
         params.append(hasta[:10])
     rows = conn.execute("""
-        SELECT p.id, p.nro_ticket, p.fecha, p.estado, p.nota, p.usuario, p.sucursal_id,
+        SELECT p.id, p.nro_ticket, p.fecha, p.estado, p.etapa, p.nota, p.usuario, p.sucursal_id,
                s.nombre AS sucursal_nombre
         FROM pedidos p JOIN sucursales s ON s.id = p.sucursal_id
         """ + where + """
