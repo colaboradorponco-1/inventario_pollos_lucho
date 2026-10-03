@@ -3057,27 +3057,38 @@ function fmtInvQ(v) {
 
 // La diferencia se escribe con palabras, no con un numero con signo. Un "-1"
 // en rojo no le dice nada a nadie: nadie sabe si se perdio algo, si esta mal el
-// conteo, o que significa. "Falto 1" si se entiende de una.
-function diffInvBadge(d) {
+// conteo, o que significa. "Faltan 5" si se entiende de una.
+// f es la fila, solo para el texto que sale al pasar el mouse: muestra de donde
+// sale el numero ("el sistema tiene 31 y vos contaste 26").
+function diffInvBadge(d, f) {
+    f = f || {};
     const n = Number(d || 0);
+    // Para el texto del tooltip. Si viniera null desde la base, se veria la
+    // palabra "undefined" arriba, que es peor que no mostrarlo.
+    const sys = f.stock_sistema === null || f.stock_sistema === undefined
+        ? 0 : fmtInvQ(f.stock_sistema);
+    const fin = f.final === null || f.final === undefined ? '?' : fmtInvQ(f.final);
     if (Math.abs(n) < 1e-9) {
         return '<span style="color:var(--muted)">Cuadra</span>';
     }
     const q = fmtInvQ(Math.abs(n));
-    // El singular depende de la MAGNITUD, no del signo: -1 es "Faltó 1", no
-    // "Faltaron 1". Comparar n contra 1 daba 2 en el negativo y salía en plural.
+    // El singular depende de la MAGNITUD, no del signo: -1 es "Falta 1", no
+    // "Faltan 1". Comparar n contra 1 daba 2 en el negativo y salia en plural.
     const uno = Math.abs(Math.abs(n) - 1) < 1e-9;
+    // En PRESENTE, no en pasado. "Faltaron 5" se lee como algo que ya paso y
+    // quedo atras; lo que el encargado necesita es saber cuantas faltan AHORA.
     if (n < 0) {
         return `<strong style="color:#dc2626" ` +
-            `title="En el estante hay ${q} menos de lo que el sistema tiene. ` +
-            `Si no hubo una entrega ni una venta sin anotar, algo se perdio o el ` +
-            `conteo esta equivocado. Al cerrar la planilla se descuenta del stock.">` +
-            `Falt${uno ? 'ó' : 'aron'} ${q}</strong>`;
+            `title="El sistema tiene ${sys} y vos contaste ${fin}. ` +
+            `Faltan ${q}. Si hubo una entrega o una venta que no se anotaron, la ` +
+            `diferencia se va sola: no es una merma. Al cerrar la planilla lo que ` +
+            `falte se descuenta del stock.">` +
+            `Falta${uno ? '' : 'n'} ${q}</strong>`;
     }
     return `<strong style="color:#0F3D2E" ` +
-        `title="En el estante hay ${q} mas de lo que el sistema tiene. ` +
-        `Al cerrar la planilla se suma al stock.">` +
-        `Sobr${uno ? 'ó' : 'aron'} ${q}</strong>`;
+        `title="Vos contaste ${fin} y el sistema tiene ${sys}. ` +
+        `Sobran ${q}. Al cerrar la planilla lo que sobre se suma al stock.">` +
+        `Sobra${uno ? '' : 'n'} ${q}</strong>`;
 }
 
 async function loadInventario() {
@@ -3297,7 +3308,7 @@ async function abrirInventario(invId) {
                 </td>
                 <td class="num" data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
                 <td class="num" style="color:var(--muted)">${esc(fmtInvQ(f.stock_sistema))}</td>
-                <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia)}</td>
+                <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia, f)}</td>
                 <td class="inv-col-obs">
                     <input type="text" class="inv-obs" data-id="${f.id}"
                            value="${esc(f.observaciones || '')}" placeholder="—" ${bloq}>
@@ -3343,7 +3354,7 @@ function recalcFilaInv(e) {
     const uEl = $(`[data-inv-util="${id}"]`);
     const difEl = $(`[data-inv-dif="${id}"]`);
     if (uEl) uEl.textContent = fmtInvQ(utilizada);
-    if (difEl) difEl.innerHTML = diffInvBadge(dif);
+    if (difEl) difEl.innerHTML = diffInvBadge(dif, f);
 }
 
 function collectedInventario() {
