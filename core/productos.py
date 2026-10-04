@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
-from .lotes import elegir_destino, stock_por_destino
+from .lotes import (destinos_validos, elegir_destino, stock_por_destino)
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    ok_paginado, paginar_params, sucursal_actual, sucursal_operativa,
                    clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen)
@@ -280,6 +280,7 @@ def productos():
     nombres = {}
     reservas = {}
     if para_pedido:
+        validos = destinos_validos(conn)
         destinos = stock_por_destino(conn)
         # Un solo SELECT para los nombres: si se hiciera por producto serían
         # cientos de consultas en cada carga del catálogo.
@@ -302,20 +303,19 @@ def productos():
         r["destino_stock"] = None
         r["destino_nombre"] = ""
         if para_pedido and destino is None:
-            # Automático: se resuelve por stock (misma regla que pedidos.py).
-            sid_dest, stock_dest = elegir_destino(destinos.get(r["id"]), r["sucursal_id"])
+            # Automático: va a quien REPARTE el producto, que es la sucursal que
+            # lo tiene en el catálogo (o el principal si esa no despacha).
+            # NO se elige "la que tiene stock": tener mercadería no da permiso
+            # para repartirla, y el pedido se la llevaría de su propia venta.
+            sid_dest, stock_dest = elegir_destino(
+                destinos.get(r["id"]), validos, r["sucursal_id"])
             r["destino_id"] = sid_dest
             r["destino_nombre"] = nombres.get(sid_dest, "")
             if sid_dest:
-                # El disponible se mide contra el destino REAL, no contra el
-                # almacén del catálogo: si el pedido va a salir de Simón López,
-                # lo que importa es cuánto hay ahí.
                 disp = stock_dest - reservas.get((int(r["id"]), sid_dest), 0.0)
                 r["stock_prov"] = max(0.0, disp)
                 r["destino_stock"] = stock_dest
             else:
-                # Sin destino válido no se puede pedir: disponible 0 para que
-                # no ofrezca cantidades que el servidor va a rechazar.
                 r["stock_prov"] = 0.0
         else:
             r["destino_id"] = destino

@@ -21,61 +21,77 @@ def normalizar_fecha_vencimiento(valor):
         return None
 
 
+def destinos_validos(conn):
+    """[sucursal_id, ...] con las que un pedido puede salir, por prioridad.
+
+    Solo las que de verdad pueden atender: el almacén principal y las
+    sucursales marcadas como proveedora. El principal va primero.
+    """
+    filas = conn.execute(
+        "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1 "
+        "ORDER BY principal DESC, nombre, id").fetchall()
+    return [int(f["id"]) for f in filas]
+
+
 def stock_por_destino(conn):
-    """{producto_id: [(sucursal_id, stock, es_principal, nombre), ...]}
+    """{producto_id: [(sucursal_id, stock, nombre), ...]} -> solo los VÁLIDOS
+    que tienen stock > 0, ordenados por prioridad.
 
-    Solo destinos que de verdad pueden atender un pedido (principal = 1 o
-    provee = 1) y con stock > 0. La lista de cada producto viene ordenada por
-    prioridad: el almacén principal primero y después las sucursales
-    proveedora por nombre.
-
-    Existe porque el destino de un pedido NO puede ser la sucursal donde el
-    producto está registrado en el catálogo. La principal distribuye un mismo
-    producto a varias sucursales y el stock real vive en `lotes`, por sucursal:
-    un producto registrado en América puede tener todo su stock en Simón López.
-    Antes se usaba `productos.sucursal_id` a secas, así que el pedido se
-    mandaba a América, que es donde estaba escrito y donde no había nada.
+    Sirve para INFORMAR ("en Simón López hay 30 de este producto"), NO para
+    elegir destino a automatico. Tener stock no significa que la sucursal
+    reparta ese producto: una sucursal puede tener mercadería para su propia
+    venta y que otro encargado se la lleve en un pedido, dejándola sin nada.
+    Quien reparte un producto es la sucursal que lo tiene en el catálogo.
     """
     filas = conn.execute("""
-        SELECT l.producto_id, l.sucursal_id, s.principal, s.nombre,
-               SUM(l.cantidad) AS c
+        SELECT l.producto_id, l.sucursal_id, s.nombre, SUM(l.cantidad) AS c
         FROM lotes l
         JOIN sucursales s ON s.id = l.sucursal_id
         WHERE l.cantidad > 0 AND l.sucursal_id IS NOT NULL
           AND (s.principal = 1 OR IFNULL(s.provee, 0) = 1)
-        GROUP BY l.producto_id, l.sucursal_id, s.principal, s.nombre
+        GROUP BY l.producto_id, l.sucursal_id, s.nombre
         ORDER BY s.principal DESC, s.nombre, l.sucursal_id
     """).fetchall()
     out = {}
     for f in filas:
         out.setdefault(int(f["producto_id"]), []).append(
-            (int(f["sucursal_id"]), float(f["c"] or 0), bool(f["principal"]), f["nombre"] or ""))
+            (int(f["sucursal_id"]), float(f["c"] or 0), f["nombre"] or ""))
     return out
 
 
-def elegir_destino(candidatos, sucursal_producto):
-    """Elige el destino de un pedido entre los que tienen stock. -> (id, stock)
+def elegir_destino(candidatos, validos, sucursal_producto):
+    """Destino de un pedido. -> (id, stock)  (id None si no hay a quién pedir)
 
-    Regla, en este orden:
+    NO se elige "la sucursal que tiene stock". Se elige QUIEN REPARTE el
+    producto, que es la sucursal que lo tiene en el catálogo, y solo si esa
+    sucursal puede atender pedidos. Tener stock no da permiso para repartir.
 
-    1. La sucursal donde el producto está registrado, SI es un destino válido y
-       tiene stock. Esto conserva el comportamiento de siempre: lo que ya
-       funcionaba no cambia.
-    2. Si ahí no hay nada, el de mayor prioridad que sí tenga: el principal
-       primero, después las proveedoras por nombre.
-    3. Si ningún destino válido tiene stock, None. No se manda a una sucursal
-       vacía: es mejor un error claro que un pedido que nadie puede despachar.
-
-    `candidatos` tiene que venir de `stock_por_destino` (ya viene ordenada por
-    prioridad).
+    1. La sucursal del catálogo, si puede atender pedidos. Aunque no tenga
+       stock: esa sucursal es la responsable de repartirlo, y si no tiene se
+       para que la persona decida, en vez de que el sistema le vacíe el
+       inventario de otra sucursal.
+    2. Si el producto está en una sucursal que no puede atender (o es global),
+       el principal, que es quien reparte.
+    3. Si no hay ningún destino válido, None.
     """
-    if not candidatos:
-        return None, 0.0
+    validos = list(validos or [])
     if sucursal_producto:
-        for sid, stock, _pr, _nom in candidatos:
-            if sid == int(sucursal_producto):
-                return sid, stock
-    return candidatos[0][0], candidates[0][1]
+        try:
+            sid = int(sucursal_producto)
+        except (TypeError, ValueError):
+            sid = None
+        if sid is not None and sid in validos:
+            return sid, stock_en_destino(candidatos, sid)
+    if validos:
+        return validos[0], stock_en_destino(candidatos, validos[0])
+    return None, 0.0
+
+
+def stock_en_destino(candidatos, sucursal_id):
+    for sid, stock, _nom in candidatos or []:
+        if sid == int(sucursal_id):
+            return stock
+    return 0.0
 
 
 def stock_lotes(conn, producto_id, sucursal_id=None):

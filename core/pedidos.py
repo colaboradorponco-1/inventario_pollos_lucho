@@ -15,7 +15,8 @@ from datetime import datetime
 from flask import Blueprint, redirect, render_template, request, session
 
 from database import get_conn
-from .lotes import elegir_destino, stock_por_destino
+from .lotes import (destinos_validos, elegir_destino, stock_en_destino,
+                   stock_por_destino)
 from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
                    paginar_params, sucursal_actual, sucursal_operativa, stock_actual,
                    es_gestion, es_superadmin, es_encargado_almacen, registrar_movimiento,
@@ -140,20 +141,22 @@ def pedidos():
         fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         destino_defecto = data.get("destino_id")
-        # Ids de las sucursales que pueden ser destino de un pedido. Se valida
-        # abajo contra esta lista: el destino lo elige la sucursal que pide y hay
-        # más de un almacén principal, así que no se puede asumir que sea el
-        # almacén del producto.
-        proveedores_validos = {
-            r["id"] for r in conn.execute(
-                "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1").fetchall()
-        }
-        # ...y de qué destino hay stock real, para cada producto. Se calcula una
-        # sola vez (una consulta) y se usa por línea.
+        # Quiénes pueden ser destino de un pedido, por prioridad: el almacén
+        # principal primero y después las sucursales proveedora. Se valida abajo
+        # contra esta lista. El destino NO se elige por stock (tener mercadería
+        # no da permiso para repartirla), sino por quién tiene el producto en
+        # el catálogo; ver `elegir_destino`.
+        validos = destinos_validos(conn)
+        proveedores_validos = set(validos)
+        # Dónde hay stock de cada producto. Solo para AVISAR cuando el destino
+        # responsable no tiene: que la persona decida, no que el sistema le
+        # vacíe el inventario a otra sucursal.
         candidatos = stock_por_destino(conn)
         # Destinos invalidos acumulados (ver mas abajo): antes se cortaba en el
         # primero y se caia el pedido entero.
         destinos_malos = {}
+        # Productos cuyo destino responsable no tiene stock: aviso, no bloqueo.
+        sin_stock = []
         items = []
         for item in detalle:
             prod_id = item.get("producto_id")
@@ -201,17 +204,15 @@ def pedidos():
                 continue
             proveedor = item.get("destino_id") or destino_defecto
             if not proveedor:
-                # Sin destino explícito se elige el que REALMENTE tiene el stock.
-                # La sucursal del catálogo solo cuenta si tiene mercadería: un
-                # producto que la principal distribuyó a otra sucursal queda
-                # escrito en el catálogo de una, pero el stock está en la otra.
+                # Sin destino explicito va a quien REPARTE el producto: la
+                # sucursal que lo tiene en el catalogo (si puede atender
+                # pedidos), o el principal si esta en una que no despacha.
                 proveedor, _stock_destino = elegir_destino(
-                    candidatos.get(prod_id), fila["sucursal_id"])
+                    candidatos.get(prod_id), validos, fila["sucursal_id"])
             if not proveedor:
                 conn.close()
-                return err(f"No hay stock de '{fila['nombre']}' en ningún almacén que "
-                           f"pueda atender el pedido. Revisá si hay mercadería "
-                           f"disponible o pedí a otra sucursal.")
+                return err(f"'{fila['nombre']}' no tiene una sucursal que pueda "
+                           f"repartirlo. Revisá la sucursal del producto en el catálogo.")
             if proveedor == sucursal_id:
                 conn.close()
                 return err(f"'{fila['nombre']}' es de tu propia sucursal; no puede pedirse a ti mismo")
@@ -222,6 +223,11 @@ def pedidos():
             if proveedor not in proveedores_validos:
                 destinos_malos.setdefault(proveedor, []).append(fila["nombre"])
                 continue
+            # Si a quien le toca despachar no tiene de esto, se avisa y se sigue:
+            # el pedido se guarda igual y la persona ve donde hay. Bloquear
+            # acá seria peor, porque el problema real es el stock, no el pedido.
+            if stock_en_destino(candidatos.get(prod_id), proveedor) <= 0:
+                sin_stock.append((proveedor, fila["nombre"], prod_id))
             texto_tacho = _texto_tacho(fraccion) if por_tacho else ""
             items.append((prod_id, fila["nombre"], cantidad, proveedor,
                           fila["unidad"] or "unidad", fraccion if por_tacho else 0,
@@ -266,9 +272,38 @@ def pedidos():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad))
         conn.commit()
+        # Aviso (no bloquea) por producto: a quien le toca despachar no tiene
+        # stock. Se arma antes de cerrar la conexión porque necesita los nombres.
+        aviso = ""
+        if sin_stock:
+            por_destino = {}
+            for prov, nombre, prod_id in sin_stock:
+                por_destino.setdefault(prov, []).append((nombre, prod_id))
+            partes = []
+            for prov, pares in por_destino.items():
+                # Dónde SÍ hay de estos productos, para que la persona pueda
+                # cambiar el destino si hace falta. No se cambia sola: sacarle
+                # el inventario a otra sucursal tiene que ser una decisión.
+                donde = []
+                for nombre, prod_id in pares:
+                    otras = ["%s (%g)" % (nom, st) for sid, st, nom
+                             in candidatos.get(prod_id, []) if sid != prov]
+                    if otras:
+                        donde.append("%s está en %s" % (nombre, ", ".join(otras[:2])))
+                faltan = [n for n, _ in pares]
+                lista = ", ".join(sorted(set(faltan))[:3])
+                if len(set(faltan)) > 3:
+                    lista += " (+%d más)" % (len(set(faltan)) - 3)
+                msg = "%s no tiene stock de %s." % (_nombre_sucursal(conn, prov), lista)
+                if donde:
+                    msg += " " + " | ".join(sorted(set(donde))[:2])
+                partes.append(msg)
+            aviso = " ".join(partes)
         conn.close()
         registrar_auditoria("Pedido registrado", f"{nro} de sucursal ID {sucursal_id}")
-        return ok({"id": pedido_id, "nro_ticket": nro}, message=f"Pedido {nro} registrado")
+        return ok({"id": pedido_id, "nro_ticket": nro},
+                  message=("Pedido %s registrado. Ojo: %s" % (nro, aviso)) if aviso
+                          else "Pedido %s registrado" % nro)
 
     estado = request.args.get("estado", "").strip()
     filtro = request.args.get("filtro", "").strip()

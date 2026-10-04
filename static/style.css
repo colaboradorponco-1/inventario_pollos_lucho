@@ -493,6 +493,7 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.ok { background: var(--green); }
 .toast.err { background: var(--red); }
+.toast.warn { background: var(--orange, #d97706); }
 
 .empty { text-align: center; color: var(--muted); padding: 20px; font-style: italic; }
 

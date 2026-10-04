@@ -4238,17 +4238,18 @@ async function loadPedidos() {
         await loadCatalogos();
         await cargarProductosPedido();
         const sucursales = await request(API + '/sucursales');
-        // Selector de almacén destino: solo los principales (a una filial no se
-        // le pide), y no se ofrece la propia sucursal porque el backend
-        // rechaza pedirte a ti mismo.
+        // Selector de almacén destino. "Automático" es lo de siempre: cada
+        // producto va a la sucursal que lo reparte (la que lo tiene en el
+        // catálogo). Abajo están los almacenes a los que SÍ se puede pedir
+        // (principales y sucursales marcadas como proveedora), por si hay que
+        // sacarlo de uno puntual. No se ofrece la propia sucursal porque el
+        // backend rechaza pedirte a ti mismo.
         const selDest = $('#pedido-destino');
         if (selDest) {
             const yo = window.SUCURSAL_ID;
-            const ppales = sucursales.filter((x) => x.principal && x.id !== yo);
-            // "Automático" primero: es el comportamiento de siempre y el que
-            // reparte el pedido entre los almacenes de cada producto.
-            selDest.innerHTML = '<option value="">Automático (cada producto a su almacén)</option>'
-                + ppales.map((x) => `<option value="${x.id}">Todo a ${esc(x.nombre)}</option>`).join('');
+            const pueden = sucursales.filter((x) => (x.principal || x.provee) && x.id !== yo);
+            selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
+                + pueden.map((x) => `<option value="${x.id}">Todo a ${esc(x.nombre)}</option>`).join('');
         }
         const opciones = opcionesSucursales(sucursales, 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
@@ -4417,7 +4418,11 @@ $('#form-pedido').addEventListener('submit', async (e) => {
                 detalle,
             }),
         }), '#form-pedido button[type="submit"]');
-        toast(res.message, 'ok');
+        // Si el backend avisa que al destino responsable no le hay stock, el
+        // aviso va en amarillo y dura más: es información, no un error, pero
+        // si no se lee el pedido sale igual y queda sin despachar.
+        const esAviso = String(res.message || '').includes('Ojo:');
+        toast(res.message, esAviso ? 'warn' : 'ok', esAviso ? 12000 : 3000);
         pedidoSel = {};
         pedidoTacho = {};
         $('#pedido-nota').value = '';
