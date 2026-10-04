@@ -147,6 +147,9 @@ def pedidos():
             r["id"] for r in conn.execute(
                 "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1").fetchall()
         }
+        # Destinos invalidos acumulados (ver mas abajo): antes se cortaba en el
+        # primero y se caia el pedido entero.
+        destinos_malos = {}
         items = []
         for item in detalle:
             prod_id = item.get("producto_id")
@@ -197,12 +200,29 @@ def pedidos():
             # se podía pedir a cualquier sucursal pasando su id a mano, incluso
             # a una que no despacha.
             if proveedor not in proveedores_validos:
-                conn.close()
-                return err(f"'{_nombre_sucursal(conn, proveedor)}' no es un almacén válido para pedir")
+                destinos_malos.setdefault(proveedor, []).append(fila["nombre"])
+                continue
             texto_tacho = _texto_tacho(fraccion) if por_tacho else ""
             items.append((prod_id, fila["nombre"], cantidad, proveedor,
                           fila["unidad"] or "unidad", fraccion if por_tacho else 0,
                           texto_tacho, tacho_unidad if por_tacho else 0))
+        if destinos_malos:
+            # Se informan TODOS los destinos invalidos de una vez. Antes se
+            # devolvia en la primera linea mala, asi que un pedido de 24
+            # productos se caia entero por culpa de una sola sucursal mal
+            # marcada, y el encargado no tenia forma de saber cuales eran las
+            # que habia que arreglar: se enteraba de a una, reintentando.
+            msgs = []
+            for prov, noms in destinos_malos.items():
+                unicos = sorted(set(noms))
+                lista = ", ".join(unicos[:3])
+                if len(unicos) > 3:
+                    lista += " (+%d más)" % (len(unicos) - 3)
+                msgs.append("%s → %s" % (_nombre_sucursal(conn, prov), lista))
+            conn.close()
+            return err("Estas sucursales no pueden ser destino porque no están marcadas "
+                       "como proveedores: %s. Marcá «¿Provee a otras?» en esa sucursal, "
+                       "o pedí a otro almacén." % "; ".join(msgs))
         if not items:
             conn.close()
             return err("El pedido no tiene productos válidos")
@@ -320,7 +340,18 @@ def pedido_detalle(pedido_id):
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
-    detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,)).fetchall()
+    # Orden fijo: primero por destino (para que cada quien reciba lo suyo en un
+    # bloque), después por categoría y luego por nombre. Sin esto el detalle
+    # salía en el orden en que se guardó el pedido, que es el orden en que el
+    # encargado tocó los productos, no el que se ve en pantalla.
+    detalle = conn.execute(
+        "SELECT d.*, COALESCE(cat.nombre, 'Sin categoría') AS categoria_nombre "
+        "FROM pedido_detalle d "
+        "LEFT JOIN productos pr ON pr.id = d.producto_id "
+        "LEFT JOIN categorias cat ON cat.id = pr.categoria_id "
+        "WHERE d.pedido_id = ? "
+        "ORDER BY d.destino_id, categoria_nombre, d.producto_nombre, d.id",
+        (pedido_id,)).fetchall()
     if not _puede_ver_pedido(conn, pedido, detalle):
         conn.close()
         return err("No tienes permisos para ver este pedido", 403)
@@ -733,10 +764,13 @@ def pedidos_bandeja():
         marks = ",".join("?" * len(pedido_ids))
         det = conn.execute(f"""
             SELECT d.pedido_id, d.producto_nombre, d.cantidad, d.unidad,
-                   d.tacho_texto, d.tacho_unidad, d.destino_id, s.nombre AS destino_nombre
+                   d.tacho_texto, d.tacho_unidad, d.destino_id, s.nombre AS destino_nombre,
+                   COALESCE(c.nombre, 'Sin categoría') AS categoria_nombre
             FROM pedido_detalle d LEFT JOIN sucursales s ON s.id = d.destino_id
+            LEFT JOIN productos pr ON pr.id = d.producto_id
+            LEFT JOIN categorias c ON c.id = pr.categoria_id
             WHERE d.pedido_id IN ({marks})
-            ORDER BY d.pedido_id, d.producto_nombre
+            ORDER BY d.pedido_id, d.destino_id, categoria_nombre, d.producto_nombre, d.id
         """, pedido_ids).fetchall()
     conn.close()
     det_map = {}

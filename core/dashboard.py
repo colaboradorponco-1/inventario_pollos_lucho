@@ -408,14 +408,18 @@ def catalogos():
             "SELECT * FROM almacenes WHERE sucursal_id = %s ORDER BY nombre", (sid_alm,)).fetchall()]
         proveedores = [dict(r) for r in conn.execute(
             "SELECT * FROM proveedores WHERE sucursal_id = %s OR sucursal_id IS NULL ORDER BY nombre", (sid,)).fetchall()]
-    ids_proveedoras = {r["sucursal_id"] for r in conn.execute(
-        "SELECT DISTINCT sucursal_id FROM productos WHERE activo = 1 AND sucursal_id IS NOT NULL").fetchall()}
+    # `provee` tiene que ser LA MISMA regla que usa el backend al validar el
+    # destino de un pedido (`principal = 1 OR provee = 1`, pedidos.py). Antes se
+    # pisaba la columna real con un proxy ("esta sucursal tiene productos
+    # activos"), y como son reglas distintas la pantalla le mostraba al
+    # responsable productos de una sucursal que el servidor despues rechazaba con
+    # "'X' no es un almacen valido para pedir", tumbando el pedido entero.
     data = {
         "almacenes": almacenes,
         "categorias": [dict(r) for r in conn.execute("SELECT * FROM categorias ORDER BY nombre").fetchall()],
         "proveedores": proveedores,
         "sucursales": [
-            dict(r, provee=(r["id"] in ids_proveedoras))
+            dict(r, provee=bool(r.get("principal")) or bool(r.get("provee")))
             for r in conn.execute("SELECT * FROM sucursales ORDER BY principal DESC, nombre").fetchall()
         ],
     }

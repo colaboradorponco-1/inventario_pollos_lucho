@@ -1032,6 +1032,30 @@ body.rol-encargado .panel-finance {
 
 /* Tarjetas de producto con +/− */
 .cat-bloque { margin-bottom: 14px; }
+/* Titulo de categoria dentro de cada almacen. Separa los bloques para que se
+   recorra el deposito por seccion y no mezclado. */
+.cat-bloque h4.cat-titulo {
+    margin: 16px 0 6px;
+    font-size: 12px;
+    color: var(--primary-dark, #0F3D2E);
+    border-bottom: 1px solid var(--border, #e4e1d9);
+    padding-bottom: 4px;
+}
+/* La lista de productos del pedido scrola sola. Sin alto maximo el asistente
+   crecia sin limite (hay cientos de tarjetas) y habia que scrollear la pagina
+   entera para llegar al boton de enviar. */
+#pedido-listado {
+    max-height: calc(100vh - 430px);
+    min-height: 200px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 6px;
+    scrollbar-width: thin;
+}
+@media (max-width: 900px) {
+    /* En pantalla chica no conviene frenar el scroll: queda muy poco alto. */
+    #pedido-listado { max-height: 55vh; min-height: 0; }
+}
 .cat-bloque h4 {
     margin: 0 0 6px;
     font-size: 12px;

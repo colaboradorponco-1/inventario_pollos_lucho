@@ -2628,7 +2628,9 @@ async function cargarSucursales() {
     const sucursales = await request(API + '/sucursales');
     $('#sucursales-tbody').innerHTML = ordenarSucursales(sucursales).map((s) => `
         <tr>
-            <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s.nombre)}</span></td>
+            <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s.nombre)}</span>${(s.num_productos && !s.principal && !s.provee)
+                ? `<span class="badge badge-pendiente" title="Esta sucursal tiene ${s.num_productos} producto(s) en el catálogo pero no está marcada como proveedora, así que NADIE puede pedirlos: el servidor los rechaza. Si de verdad despacha mercadería, editá la sucursal y marcá «¿Provee a otras?».">⚠ ${s.num_productos} no se pueden pedir</span>`
+                : ''}</td>
             <td>${s.direccion || '—'}</td>
             <td><span class="badge ${s.principal ? 'badge-bajo' : 'badge-entrada'}">${s.principal ? 'Principal' : 'Sucursal'}</span></td>
             <td>${s.principal || s.provee
@@ -3829,6 +3831,79 @@ function irPaso(n) {
     if (n === 3) renderRevisionPedido();
 }
 
+// Orden de lectura del pedido: dentro de cada almacén, primero por categoría y
+// después por nombre. Es el orden en que se recorre el depósito, y es el mismo
+// que se usa al guardar el pedido y al imprimirlo, así que lo que se ve es lo
+// que queda.
+function agruparPorCategoria(prods) {
+    const ordenados = (prods || []).slice().sort((a, b) => {
+        const ca = a.categoria_nombre || 'Sin categoría';
+        const cb = b.categoria_nombre || 'Sin categoría';
+        const d = ca.localeCompare(cb);
+        return d !== 0 ? d : (a.nombre || '').localeCompare(b.nombre || '');
+    });
+    const grupos = [];
+    let actual = null;
+    ordenados.forEach((p) => {
+        const cat = p.categoria_nombre || 'Sin categoría';
+        if (!actual || actual.cat !== cat) {
+            actual = { cat, prods: [] };
+            grupos.push(actual);
+        }
+        actual.prods.push(p);
+    });
+    return grupos;
+}
+
+// Productos que están seleccionados, en el MISMO orden en que se ven: por
+// almacén (los principales primero), luego categoría y luego nombre.
+// Se usa al revisar y al guardar. Antes se armaba con Object.keys(pedidoSel),
+// que es el orden en que se fueron tocando los steppers: el pedido quedaba
+// guardado en un orden distinto del de la pantalla.
+function productosElegidos() {
+    const ppal = sucPrincipalPed();
+    const datosProv = (id) => {
+        const s = (catalogos.sucursales || []).find((x) => x.id === id);
+        return { nombre: s ? s.nombre : '', principal: s ? !!s.principal : false };
+    };
+    const prov = (p) => p.sucursal_id || (ppal ? ppal.id : 0);
+    return (pedidoProdsAll || [])
+        .filter((p) => (pedidoSel[p.id] || 0) > 0)
+        .sort((a, b) => {
+            const ia = prov(a), ib = prov(b);
+            if (ia !== ib) {
+                const A = datosProv(ia), B = datosProv(ib);
+                if (A.principal !== B.principal) return A.principal ? -1 : 1;
+                const d = A.nombre.localeCompare(B.nombre);
+                if (d !== 0) return d;
+            }
+            const ca = a.categoria_nombre || 'Sin categoría';
+            const cb = b.categoria_nombre || 'Sin categoría';
+            const d = ca.localeCompare(cb);
+            return d !== 0 ? d : (a.nombre || '').localeCompare(b.nombre || '');
+        });
+}
+
+// Los productos que la pantalla está mostrando ahora mismo (mismo filtro de
+// almacén y misma búsqueda que usa renderTarjetasPedido).
+function pedidoProductosVisibles() {
+    const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
+    const ppal = sucPrincipalPed();
+    const sid = pedidoSucursal || (($('#pedido-sucursal') || {}).value ? +$('#pedido-sucursal').value : null);
+    return (pedidoProdsAll || []).filter((p) => {
+        const provId = p.sucursal_id || (ppal ? ppal.id : null);
+        if (!provId) return false;
+        if (sid && provId === sid) return false;
+        if (!proveeActivo(provId)) return false;
+        if (pedidoProvFiltro && String(provId) !== pedidoProvFiltro) return false;
+        if (q) {
+            const buscar = (p.nombre + ' ' + (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
+            if (!buscar.includes(q)) return false;
+        }
+        return true;
+    });
+}
+
 function renderTarjetasPedido() {
     const cont = $('#pedido-listado');
     if (!cont) return;
@@ -3881,7 +3956,9 @@ function renderTarjetasPedido() {
     cont.innerHTML = keysV.map((k) => `
         <div class="cat-bloque">
             <h4 class="prov-titulo">${provs[k].principal ? '★ ' : ''}Lo provee ${esc(provs[k].nombre)}</h4>
-            ${provs[k].prod.map((p) => {
+            ${agruparPorCategoria(provs[k].prod).map((g) => `
+            <h4 class="cat-titulo">${esc(g.cat)} · ${g.prods.length}</h4>
+            ${g.prods.map((p) => {
                 const qty = pedidoSel[p.id] || 0;
                 const max = maxPedido(p);
                 const agotado = max <= 0;
@@ -3904,6 +3981,7 @@ function renderTarjetasPedido() {
                     </div>
                 </div>`;
             }).join('')}
+            `).join('')}
         </div>`).join('');
 }
 
@@ -3911,9 +3989,10 @@ function renderRevisionPedido() {
     const cont = $('#pedido-revision');
     if (!cont) return;
     const items = [];
-    Object.keys(pedidoSel).forEach((id) => {
-        const v = pedidoSel[id];
-        if (v > 0) items.push({ id: +id, cantidad: v, p: (pedidoProdsAll || []).find((x) => x.id === +id) });
+    // Mismo orden que la pantalla de selección (almacén, categoría, nombre), para
+    // que lo que se revisa sea lo mismo que se va a guardar.
+    productosElegidos().forEach((p) => {
+        items.push({ id: p.id, cantidad: pedidoSel[p.id], p });
     });
     if (!items.length) {
         cont.innerHTML = '<p class="empty">Todavía no elegiste productos. Vuelve al paso 2.</p>';
@@ -4277,10 +4356,14 @@ $('#form-pedido').addEventListener('submit', async (e) => {
     if (!sucursal_id) return toast('Primero elige la sucursal que pide', 'err');
     const detalle = [];
     const mal = [];
-    Object.keys(pedidoSel).forEach((id) => {
+    // Se recorre en el orden en que se ve (almacén, categoría, nombre) y no con
+    // Object.keys(pedidoSel), que daba el orden en que se fueron tocando los
+    // productos.
+    const elegidos = productosElegidos();
+    elegidos.forEach((p) => {
+        const id = p.id;
         const v = pedidoSel[id];
         if (v > 0) {
-            const p = (pedidoProdsAll || []).find((x) => x.id === +id);
             const max = maxPedido(p);
             if (v > max) mal.push(p ? p.nombre : ('#' + id));
             // Destino del pedido. Si se elige un almacén concreto, TODO el
@@ -4295,8 +4378,25 @@ $('#form-pedido').addEventListener('submit', async (e) => {
                            tacho_fraccion: tch ? tch.f : 0, tacho_unidad: tch ? tch.u : 0 });
         }
     });
+    // Primero los errores duros. El aviso de productos ocultos va después:
+    // preguntar "¿continuar?" y después salir con un error de disponible es
+    // confuso y hace dudar al encargado de si el pedido se mand o no.
     if (mal.length) return toast('No se puede enviar, superan el disponible: ' + mal.slice(0, 3).join(', ') + (mal.length > 3 ? '…' : ''), 'err');
     if (!detalle.length) return toast('Aún no marcaste ningún producto', 'err');
+    // Productos seleccionados que están ocultos por el filtro de almacén o por
+    // la búsqueda: se van a mandar igual, pero el encargado no los ve. Pasó de
+    // verdad (un usuario vio 24 productos y se fueron 32), así que antes de
+    // enviar se le dice cuántos son y cuáles.
+    const visibles = new Set(pedidoProductosVisibles().map((p) => p.id));
+    const ocultos = elegidos.filter((p) => !visibles.has(p.id));
+    if (ocultos.length) {
+        const lista = ocultos.slice(0, 5).map((p) => p.nombre).join(', ')
+            + (ocultos.length > 5 ? ` y ${ocultos.length - 5} más` : '');
+        const msg = `Atención: tenés ${ocultos.length} producto(s) seleccionados que NO `
+            + `están visibles ahora (los tapó el filtro de almacén o la búsqueda):\n\n`
+            + lista + `\n\nSi mandás ahora, también van en el pedido. ¿Continuar?`;
+        if (!confirm(msg)) return;
+    }
     try {
         const res = await conSubmit(() => request(API + '/pedidos', {
             method: 'POST',

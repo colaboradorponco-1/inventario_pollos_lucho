@@ -45,7 +45,8 @@ def sucursales():
     rows = conn.execute("""
         SELECT s.*,
                (SELECT COUNT(*) FROM repartos r WHERE r.sucursal_id = s.id) AS num_repartos,
-               (SELECT COALESCE(SUM(r.total), 0) FROM repartos r WHERE r.sucursal_id = s.id) AS total_repartido
+               (SELECT COALESCE(SUM(r.total), 0) FROM repartos r WHERE r.sucursal_id = s.id) AS total_repartido,
+               (SELECT COUNT(*) FROM productos p WHERE p.sucursal_id = s.id AND p.activo = 1) AS num_productos
         FROM sucursales s
         ORDER BY s.principal DESC, s.nombre
     """).fetchall()
