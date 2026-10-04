@@ -21,6 +21,63 @@ def normalizar_fecha_vencimiento(valor):
         return None
 
 
+def stock_por_destino(conn):
+    """{producto_id: [(sucursal_id, stock, es_principal, nombre), ...]}
+
+    Solo destinos que de verdad pueden atender un pedido (principal = 1 o
+    provee = 1) y con stock > 0. La lista de cada producto viene ordenada por
+    prioridad: el almacén principal primero y después las sucursales
+    proveedora por nombre.
+
+    Existe porque el destino de un pedido NO puede ser la sucursal donde el
+    producto está registrado en el catálogo. La principal distribuye un mismo
+    producto a varias sucursales y el stock real vive en `lotes`, por sucursal:
+    un producto registrado en América puede tener todo su stock en Simón López.
+    Antes se usaba `productos.sucursal_id` a secas, así que el pedido se
+    mandaba a América, que es donde estaba escrito y donde no había nada.
+    """
+    filas = conn.execute("""
+        SELECT l.producto_id, l.sucursal_id, s.principal, s.nombre,
+               SUM(l.cantidad) AS c
+        FROM lotes l
+        JOIN sucursales s ON s.id = l.sucursal_id
+        WHERE l.cantidad > 0 AND l.sucursal_id IS NOT NULL
+          AND (s.principal = 1 OR IFNULL(s.provee, 0) = 1)
+        GROUP BY l.producto_id, l.sucursal_id, s.principal, s.nombre
+        ORDER BY s.principal DESC, s.nombre, l.sucursal_id
+    """).fetchall()
+    out = {}
+    for f in filas:
+        out.setdefault(int(f["producto_id"]), []).append(
+            (int(f["sucursal_id"]), float(f["c"] or 0), bool(f["principal"]), f["nombre"] or ""))
+    return out
+
+
+def elegir_destino(candidatos, sucursal_producto):
+    """Elige el destino de un pedido entre los que tienen stock. -> (id, stock)
+
+    Regla, en este orden:
+
+    1. La sucursal donde el producto está registrado, SI es un destino válido y
+       tiene stock. Esto conserva el comportamiento de siempre: lo que ya
+       funcionaba no cambia.
+    2. Si ahí no hay nada, el de mayor prioridad que sí tenga: el principal
+       primero, después las proveedoras por nombre.
+    3. Si ningún destino válido tiene stock, None. No se manda a una sucursal
+       vacía: es mejor un error claro que un pedido que nadie puede despachar.
+
+    `candidatos` tiene que venir de `stock_por_destino` (ya viene ordenada por
+    prioridad).
+    """
+    if not candidatos:
+        return None, 0.0
+    if sucursal_producto:
+        for sid, stock, _pr, _nom in candidatos:
+            if sid == int(sucursal_producto):
+                return sid, stock
+    return candidatos[0][0], candidates[0][1]
+
+
 def stock_lotes(conn, producto_id, sucursal_id=None):
     """Stock total del producto (suma de lotes); por sucursal si se indica."""
     if sucursal_id is None:

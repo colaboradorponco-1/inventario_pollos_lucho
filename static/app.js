@@ -3806,6 +3806,10 @@ function pedidoDestinoActual() {
 }
 
 function proveedorCantShow(p) {
+    // Con destino resuelto (catálogo de pedidos) se muestra el almacén por el
+    // que se pediría de verdad, que puede no ser donde el producto está
+    // escrito en el catálogo.
+    if (p.destino_nombre) return p.destino_nombre;
     if (p.sucursal_id) return p.sucursal_nombre || String(p.sucursal_id);
     return (sucPrincipalPed() || {}).nombre || 'Almacén Principal';
 }
@@ -3861,12 +3865,11 @@ function agruparPorCategoria(prods) {
 // que es el orden en que se fueron tocando los steppers: el pedido quedaba
 // guardado en un orden distinto del de la pantalla.
 function productosElegidos() {
-    const ppal = sucPrincipalPed();
     const datosProv = (id) => {
         const s = (catalogos.sucursales || []).find((x) => x.id === id);
         return { nombre: s ? s.nombre : '', principal: s ? !!s.principal : false };
     };
-    const prov = (p) => p.sucursal_id || (ppal ? ppal.id : 0);
+    const prov = provDeProducto;
     return (pedidoProdsAll || [])
         .filter((p) => (pedidoSel[p.id] || 0) > 0)
         .sort((a, b) => {
@@ -3888,10 +3891,9 @@ function productosElegidos() {
 // almacén y misma búsqueda que usa renderTarjetasPedido).
 function pedidoProductosVisibles() {
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
-    const ppal = sucPrincipalPed();
     const sid = pedidoSucursal || (($('#pedido-sucursal') || {}).value ? +$('#pedido-sucursal').value : null);
     return (pedidoProdsAll || []).filter((p) => {
-        const provId = p.sucursal_id || (ppal ? ppal.id : null);
+        const provId = provDeProducto(p);
         if (!provId) return false;
         if (sid && provId === sid) return false;
         if (!proveeActivo(provId)) return false;
@@ -3909,10 +3911,9 @@ function renderTarjetasPedido() {
     if (!cont) return;
     const sid = pedidoSucursal;
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
-    const ppal = sucPrincipalPed();
     const provs = {};
     (pedidoProdsAll || []).forEach((p) => {
-        const provId = p.sucursal_id || (ppal ? ppal.id : null);
+        const provId = provDeProducto(p);
         if (!provId) return;
         if (sid && provId === sid) return;
         if (!proveeActivo(provId)) return;
@@ -4215,12 +4216,21 @@ async function cargarProductosPedido() {
     // pendientes) se pide para el almacén elegido cuando es uno concreto: hay
     // dos almacenes principales y lo que hay en Almacén 1 no es lo que hay en
     // Almacén 2. En automático no se manda destino y cada producto se mide
-    // contra su propio almacén.
+    // contra el almacén por el que SE PEDIRÍA (el que tiene stock), que es lo
+    // que devuelve destino_id/destino_nombre con para_pedido=1.
     const dest = pedidoDestinoActual();
-    const qs = new URLSearchParams({ por_pagina: '1000' });
+    const qs = new URLSearchParams({ por_pagina: '1000', para_pedido: '1' });
     if (dest) qs.set('destino_id', String(dest));
     const respP = await request(API + '/productos?' + qs.toString());
     pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
+}
+
+// Sucursal por la que se pediría este producto. Si el servidor ya la resolvió
+// (tiene stock), se usa esa; si no, la del catálogo como antes.
+function provDeProducto(p) {
+    if (p.destino_id) return p.destino_id;
+    const ppal = sucPrincipalPed();
+    return p.sucursal_id || (ppal ? ppal.id : null);
 }
 
 async function loadPedidos() {

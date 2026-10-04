@@ -15,6 +15,7 @@ from datetime import datetime
 from flask import Blueprint, redirect, render_template, request, session
 
 from database import get_conn
+from .lotes import elegir_destino, stock_por_destino
 from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
                    paginar_params, sucursal_actual, sucursal_operativa, stock_actual,
                    es_gestion, es_superadmin, es_encargado_almacen, registrar_movimiento,
@@ -147,6 +148,9 @@ def pedidos():
             r["id"] for r in conn.execute(
                 "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1").fetchall()
         }
+        # ...y de qué destino hay stock real, para cada producto. Se calcula una
+        # sola vez (una consulta) y se usa por línea.
+        candidatos = stock_por_destino(conn)
         # Destinos invalidos acumulados (ver mas abajo): antes se cortaba en el
         # primero y se caia el pedido entero.
         destinos_malos = {}
@@ -155,6 +159,13 @@ def pedidos():
             prod_id = item.get("producto_id")
             if not prod_id:
                 continue
+            # El id se usa como clave de `candidatos`, que viene con claves
+            # enteras: si llega "12" en vez de 12 no encontraría el stock.
+            try:
+                prod_id = int(prod_id)
+            except (TypeError, ValueError):
+                conn.close()
+                return err("El producto del pedido no es válido")
             cantidad = float(item.get("cantidad", 0) or 0)
             try:
                 fraccion = float(item.get("tacho_fraccion") or 0)
@@ -188,10 +199,19 @@ def pedidos():
                 cantidad = round(fraccion * tacho_unidad, 3)
             if cantidad <= 0:
                 continue
-            proveedor = item.get("destino_id") or destino_defecto or fila["sucursal_id"]
+            proveedor = item.get("destino_id") or destino_defecto
+            if not proveedor:
+                # Sin destino explícito se elige el que REALMENTE tiene el stock.
+                # La sucursal del catálogo solo cuenta si tiene mercadería: un
+                # producto que la principal distribuyó a otra sucursal queda
+                # escrito en el catálogo de una, pero el stock está en la otra.
+                proveedor, _stock_destino = elegir_destino(
+                    candidatos.get(prod_id), fila["sucursal_id"])
             if not proveedor:
                 conn.close()
-                return err(f"Indica el proveedor para '{fila['nombre']}'")
+                return err(f"No hay stock de '{fila['nombre']}' en ningún almacén que "
+                           f"pueda atender el pedido. Revisá si hay mercadería "
+                           f"disponible o pedí a otra sucursal.")
             if proveedor == sucursal_id:
                 conn.close()
                 return err(f"'{fila['nombre']}' es de tu propia sucursal; no puede pedirse a ti mismo")

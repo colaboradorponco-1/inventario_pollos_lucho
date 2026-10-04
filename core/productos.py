@@ -6,6 +6,7 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
+from .lotes import elegir_destino, stock_por_destino
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    ok_paginado, paginar_params, sucursal_actual, sucursal_operativa,
                    clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen)
@@ -269,8 +270,58 @@ def productos():
     dest = request.args.get("destino_id", "").strip()
     destino = int(dest) if dest.isdigit() else None
     prov = _stock_disponible(conn, destino_id=destino)
+    # `para_pedido=1` lo manda solo el catálogo del formulario de pedidos. En ese
+    # caso cada producto trae el destino por el que SE PEDIRÍA (el que tiene
+    # stock) y el disponible de ahí, para que la pantalla y el servidor elijan lo
+    # mismo. Sin el flag, las demás pantallas siguen midiendo contra el almacén
+    # donde el producto está registrado, que es lo de siempre.
+    para_pedido = request.args.get("para_pedido", "").strip() in ("1", "true", "si")
+    destinos = {}
+    nombres = {}
+    reservas = {}
+    if para_pedido:
+        destinos = stock_por_destino(conn)
+        # Un solo SELECT para los nombres: si se hiciera por producto serían
+        # cientos de consultas en cada carga del catálogo.
+        nombres = {r["id"]: r["nombre"] or "" for r in conn.execute(
+            "SELECT id, nombre FROM sucursales").fetchall()}
+        # Lo ya apartado en pedidos pendientes, POR DESTINO. Sin esto se
+        # mostraría el stock del destino resuelto sin descontar lo que otros
+        # pedidos ya mineraron de ahí, y dos personas podrían pedir lo mismo.
+        for r in conn.execute(
+            "SELECT d.producto_id AS pid, "
+            "       COALESCE(d.destino_id, pd.destino_id) AS dest, "
+            "       SUM(d.cantidad) AS c "
+            "FROM pedido_detalle d JOIN pedidos pd ON pd.id = d.pedido_id "
+            "WHERE pd.estado = 'pendiente' "
+            "GROUP BY d.producto_id, COALESCE(d.destino_id, pd.destino_id)"
+        ).fetchall():
+            reservas[(int(r["pid"]), r["dest"])] = float(r["c"] or 0)
     for r in rows:
         r["stock_prov"] = prov.get(r["id"], 0)
+        r["destino_stock"] = None
+        r["destino_nombre"] = ""
+        if para_pedido and destino is None:
+            # Automático: se resuelve por stock (misma regla que pedidos.py).
+            sid_dest, stock_dest = elegir_destino(destinos.get(r["id"]), r["sucursal_id"])
+            r["destino_id"] = sid_dest
+            r["destino_nombre"] = nombres.get(sid_dest, "")
+            if sid_dest:
+                # El disponible se mide contra el destino REAL, no contra el
+                # almacén del catálogo: si el pedido va a salir de Simón López,
+                # lo que importa es cuánto hay ahí.
+                disp = stock_dest - reservas.get((int(r["id"]), sid_dest), 0.0)
+                r["stock_prov"] = max(0.0, disp)
+                r["destino_stock"] = stock_dest
+            else:
+                # Sin destino válido no se puede pedir: disponible 0 para que
+                # no ofrezca cantidades que el servidor va a rechazar.
+                r["stock_prov"] = 0.0
+        else:
+            r["destino_id"] = destino
+            # Con "Todo a X" el destino es el elegido, así que también se
+            # muestra ese nombre y no el del catálogo.
+            r["destino_nombre"] = nombres.get(destino, "") if para_pedido else ""
     conn.close()
     return ok_paginado(rows, total, pagina, por_pagina)
 

@@ -30,6 +30,23 @@ def _check(nombre, ok, detalle=""):
         FALLOS.append(nombre)
 
 
+def _py_fn(src, nombre):
+    """Cuerpo de una funcion Python (dedentido a partir de la sangria)."""
+    m = re.search(r"^def %s\(.*?\):\s*$" % re.escape(nombre), src, re.M)
+    if not m:
+        return ""
+    base = None
+    lineas = []
+    for linea in src[m.end():].split("\n"):
+        if linea.strip() and not linea.startswith((" ", "\t")):
+            break
+        lineas.append(linea)
+    if not lineas:
+        return ""
+    base = len(lineas[0]) - len(lineas[0].lstrip())
+    return "\n".join(l[base:] if len(l) > base else l for l in lineas)
+
+
 def _leer(rel):
     with io.open(os.path.join(RAIZ, rel), encoding="utf-8") as fh:
         return fh.read()
@@ -275,6 +292,69 @@ def prueba_error_de_destino_no_tumba_el_pedido():
            bloque.index("_nombre_sucursal") < bloque.index("conn.close()"))
 
 
+def prueba_destino_se_elige_por_stock():
+    """El caso de las tapas: la principal las distribuye y el stock queda en una
+    sucursal, pero el producto esta escrito en el catalogo de otra."""
+    lotes = _leer(os.path.join("core", "lotes.py"))
+    py = _leer(os.path.join("core", "pedidos.py"))
+    prod = _leer(os.path.join("core", "productos.py"))
+    js = _leer(os.path.join("static", "app.js"))
+
+    _check("existe stock_por_destino (una consulta para todos los productos)",
+           "def stock_por_destino" in lotes)
+    _check("solo mira destinos que pueden atender (principal o provee)",
+           re.search(r"principal = 1 OR IFNULL\(s?\.?provee, 0\) = 1", lotes) is not None)
+    _check("ordena por prioridad: principal primero, luego nombre",
+           re.search(r"ORDER BY s\.principal DESC, s\.nombre", lotes) is not None)
+    _check("existe elegir_destino con la regla de prioridad",
+           "def elegir_destino" in lotes and "candidatos[0][0]" in lotes)
+
+    # El backend NO puede seguir usando productos.sucursal_id como destino.
+    _check("el pedido YA NO usa la sucursal del catalogo como destino",
+           "or fila[\"sucursal_id\"]" not in py,
+           "esa era la causa: mandaba el pedido a donde el producto estaba "
+           "escrito y no a donde hay stock")
+    _check("el pedido resuelve el destino con elegir_destino",
+           "elegir_destino(" in py and "candidatos.get(prod_id)" in py)
+    _check("calcula los candidatos una sola vez, no por linea",
+           py.count("stock_por_destino(conn)") == 1)
+    _check("si no hay stock en ningun destino, el error lo dice",
+           "No hay stock de" in py and "ningún almacén que" in py)
+
+    # Pantalla y servidor tienen que elegir LO MISMO.
+    _check("el catalogo de pedidos pide la resolucion por stock",
+           "para_pedido" in prod and "stock_por_destino(conn)" in prod)
+    _check("el catalogo manda el destino resuelto y el disponible de ahi",
+           "destino_id" in prod and "destino_nombre" in prod and "destino_stock" in prod)
+    _check("el disponible se mide contra el destino RESUELTO, no el del catalogo",
+           "reservas.get((int(r[\"id\"]), sid_dest)" in prod
+           and "stock_dest - reservas.get" in prod)
+    _check("lo apartado en pedidos pendientes se descuenta del destino real",
+           "COALESCE(d.destino_id, pd.destino_id)" in prod
+           and "WHERE pd.estado = 'pendiente'" in prod)
+    _check("sin destino valido el disponible es 0 (no ofrece lo que el server rechaza)",
+           re.search(r"else:\s*\n\s*# Sin destino v", prod) is not None)
+    _check("las demas pantallas NO cambian de comportamiento",
+           re.search(r"para_pedido = request\.args\.get", prod) is not None)
+    _check("el frontend agrupa por el destino resuelto",
+           "function provDeProducto" in js and js.count("provDeProducto(p)") >= 3)
+    _check("el frontend pide para_pedido=1",
+           "para_pedido: '1'" in js)
+
+
+def prueba_no_rompe_el_caso_que_ya_funcionaba():
+    """La regla 1 de elegir_destino: si el producto esta en un destino valido y
+    TIENE stock, se usa ese. No se cambia lo que ya andaba."""
+    lotes = _leer(os.path.join("core", "lotes.py"))
+    fn = _py_fn(lotes, "elegir_destino")
+    _check("primero respeta la sucursal del producto si tiene stock",
+           "if sid == int(sucursal_producto)" in fn)
+    _check("solo si hay stock (los candidatos ya vienen con stock > 0)",
+           "if not candidatos" in fn)
+    _check("si no hay ninguno, devuelve None para que el backend avise",
+           "return None, 0.0" in fn)
+
+
 def main():
     print("=" * 72)
     print("ORDEN DE LOS PRODUCTOS EN LOS PEDIDOS")
@@ -283,6 +363,8 @@ def main():
     prueba_ticket_conserva_orden()
     prueba_bandeja_ordenada()
     prueba_catalogo_provee_coincide_con_backend()
+    prueba_destino_se_elige_por_stock()
+    prueba_no_rompe_el_caso_que_ya_funcionaba()
     prueba_error_de_destino_no_tumba_el_pedido()
     prueba_front_ordena_por_categoria()
     prueba_front_manda_en_el_orden_visible()
