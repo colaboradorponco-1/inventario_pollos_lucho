@@ -478,6 +478,7 @@ def inventario_detalle(inv_id):
         "cerrado_por": inv["cerrado_por"] or "",
         "fecha_hora_cierre": inv["fecha_hora_cierre"] or "",
         "estado": inv["estado"],
+        "puede_editar": inv["sucursal_id"] == sucursal_operativa(),
         "observaciones": inv["observaciones"] or "",
         "lineas": lineas,
         "resumen": {
