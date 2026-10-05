@@ -750,8 +750,6 @@ def inventario_guardar(inv_id):
 # --------------------------------------------------------------------------
 # Cerrar la planilla y ajustar el stock al conteo físico
 # --------------------------------------------------------------------------
-@inventario_bp.route("/api/inventario-diario/<int:inv_id>/cerrar", methods=["POST"])
-@login_requerido
 def _avisos_conteo_cruzado(conn, inv):
     """Productos contados en OTRA planilla de la misma sucursal y fecha.
 
@@ -814,6 +812,8 @@ def _avisos_conteo_cruzado(conn, inv):
     ]
 
 
+@inventario_bp.route("/api/inventario-diario/<int:inv_id>/cerrar", methods=["POST"])
+@login_requerido
 def inventario_cerrar(inv_id):
     """Cierra la planilla. Por cada línea con diferencia genera un movimiento tipo
     'ajuste' para que el stock del sistema coincida con el conteo físico. La operación

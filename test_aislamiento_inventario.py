@@ -420,7 +420,11 @@ def prueba_dos_encargados_no_disparan_el_aviso():
     conn = CierreConn(otras=[],                      # <- no hay otra planilla
                       mios=[_linea(1, "Pollo", 10)],
                       ajenos=[])
-    avisos = invmod._avisos_conteo_cruzado.__wrapped__(conn, inv)
+    # Antes era `_avisos_conteo_cruzado.__wrapped__(...)`: el `.__wrapped__`
+    # estaba porque el decorador de la ruta habia quedado pegado a este auxiliar
+    # por error. Con eso estos tests PASABAN mientras la ruta de cierre estaba
+    # rota. Se llama directo: si un dia vuelve a estar decorated, revienta acá.
+    avisos = invmod._avisos_conteo_cruzado(conn, inv)
     _check("dos encargados sobre la MISMA planilla no generan aviso",
            avisos == [], f"avisos={avisos}")
 
@@ -439,7 +443,7 @@ def prueba_avisa_si_ya_esta_contado_en_otra_planilla():
                       mios=[_linea(1, "Pollo entero", 10)],
                       ajenos=[Fila(producto_id=1, producto_nombre="Pollo entero",
                                    conteo_fisico=8)])
-    avisos = invmod._avisos_conteo_cruzado.__wrapped__(conn, inv)
+    avisos = invmod._avisos_conteo_cruzado(conn, inv)
     _check("avisa cuando el producto ya esta contado en otra planilla",
            len(avisos) == 1, f"avisos={avisos}")
     if avisos:
@@ -456,7 +460,7 @@ def prueba_no_avisa_si_no_se_pisan_productos():
                       mios=[_linea(1, "Pollo", 10)],
                       ajenos=[Fila(producto_id=2, producto_nombre="Papas",
                                    conteo_fisico=5)])
-    avisos = invmod._avisos_conteo_cruzado.__wrapped__(conn, inv)
+    avisos = invmod._avisos_conteo_cruzado(conn, inv)
     _check("no avisa si las planillas no comparten productos",
            avisos == [], f"avisos={avisos}")
 
@@ -489,6 +493,50 @@ def prueba_el_aviso_del_cierre_se_ve_en_pantalla():
            re.search(r"toast\(a,\s*'err',\s*20000\)", fn) is not None)
 
 
+def prueba_cada_ruta_apunta_a_su_vista():
+    """Que CADA ruta ejecute la vista que le corresponde, no un auxiliar.
+
+    Cuando se agrego `_avisos_conteo_cruzado` quedo escrita ENTRE los
+    decoradores (`@inventario_bp.route(...) /cerrar` y `@login_requerido`) y
+    `def inventario_cerrar`. Flask atado `POST .../cerrar` a esa funcion
+    auxiliar, que recibe `(conn, inv)`: la llamaba con `inv_id` y reventaba con
+    TypeError, o sea 500 "Error interno del servidor" en TODOS los cierres.
+    Y `inventario_cerrar` se quedaba sin ruta y sin candado de sesion: nadie
+    podia cerrar ninguna planilla.
+
+    Se comprueba sobre el blueprint ya registrado, que es donde se ve a quien
+    quedo atada cada ruta de verdad.
+    """
+    app = _servidor()
+    rutas = {}
+    for regla in app.url_map.iter_rules():
+        if not regla.rule.startswith("/api/inventario-diario"):
+            continue
+        vista = app.view_functions.get(regla.endpoint)
+        for metodo in regla.methods - {"HEAD", "OPTIONS"}:
+            rutas[f"{metodo} {regla.rule}"] = getattr(vista, "__name__", "?")
+    cierre = rutas.get("POST /api/inventario-diario/<int:inv_id>/cerrar")
+    _check("la ruta de cerrar ejecuta `inventario_cerrar`",
+           cierre == "inventario_cerrar",
+           f"esa ruta ejecuta `{cierre}`: por eso el cierre daba 500 y la "
+           f"planilla nunca quedaba cerrada")
+    _check("ninguna ruta del inventario queda atada a un auxiliar (nombre con _)",
+           not [r for r, v in rutas.items() if v.startswith("_")],
+           f"auxiliares expuestos: {[r for r, v in rutas.items() if v.startswith('_')]}")
+    # Y que la vista de cerrar este donde el decorador de sesion la espera.
+    fuente = _leer_inventario()
+    m = re.search(r"@login_requerido\s*\ndef inventario_cerrar\(", fuente)
+    _check("inventario_cerrar tiene @login_requerido pegado a su def",
+           m is not None,
+           "si el decorador se separa del def, la vista se queda sin candado")
+
+
+def _leer_inventario():
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "core", "inventario.py"), encoding="utf-8") as fh:
+        return fh.read()
+
+
 def main():
     print("=" * 70)
     print("AISLAMIENTO POR SUCURSAL DEL INVENTARIO DIARIO")
@@ -505,6 +553,7 @@ def main():
     prueba_el_cierre_avisa_pero_no_bloquea()
     prueba_el_aviso_del_cierre_se_ve_en_pantalla()
     prueba_candados_en_el_codigo()
+    prueba_cada_ruta_apunta_a_su_vista()
     print("=" * 70)
     print(f"FALLOS: {len(FALLOS)}")
     if FALLOS:
