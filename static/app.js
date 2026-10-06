@@ -799,6 +799,23 @@ function opcionesSucursales(lista, placeholder) {
     if (grupo !== null) html += '</optgroup>';
     return html;
 }
+function sucursalesFiltroPedidos(lista) {
+    // Lista FIJA del filtro del módulo de pedidos, igual para todo el mundo:
+    // los Almacenes Principales + las sucursales AS (America, Simon Lopez),
+    // renombradas como "AS America"/"AS Simon" porque de ellas se encargan sus
+    // receptores. Ya no aparece la sucursal propia ni las filiales en el filtro.
+    const base = lista || (catalogos && catalogos.sucursales) || [];
+    return base
+        .map((s) => {
+            if (!s.principal && s.provee) {
+                const n = nombreNorm(s.nombre);
+                if (n.includes('america')) return Object.assign({}, s, { nombre: 'AS America' });
+                if (n.includes('simon') || n.includes('simon lopez')) return Object.assign({}, s, { nombre: 'AS Simon' });
+            }
+            return s;
+        })
+        .filter((s) => s.principal || s.provee);
+}
 
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
 function puedeVerTodasSucursales() { return esAdmin() || esAlmacenPpal(); }
@@ -4256,7 +4273,7 @@ async function loadPedidos() {
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + pueden.map((x) => `<option value="${x.id}">Todo a ${esc(x.nombre)}</option>`).join('');
         }
-        const opciones = opcionesSucursales(sucursales, 'Todas las sucursales');
+        const opciones = opcionesSucursales(sucursalesFiltroPedidos(sucursales), 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
         if (filtroSel) filtroSel.innerHTML = opciones;
         const filtroReal = $('#pedido-sucursal-realizados');
@@ -4453,6 +4470,7 @@ async function cargarBandeja() {
     const panel = $('#panel-hist-realizados');
     if (!panel) return;
     if (!puedeVerBandeja()) return;
+    if (!catalogos || !catalogos.sucursales) await loadCatalogos();
     const eyeSvg = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
     try {
         const desde = ($('#pedido-bandeja-desde') || {}).value || '';
@@ -4474,7 +4492,7 @@ async function cargarBandeja() {
         const btsB = $('#bandeja-suc-btns');
         if (btsB) {
             btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-                .concat(ordenarSucursales(gruposRaw.map((g) => ({ id: String(g.sucursal_id), nombre: g.nombre }))))
+                .concat(ordenarSucursales(sucursalesFiltroPedidos(catalogos.sucursales).map((s) => ({ id: String(s.id), nombre: s.nombre }))))
                 .map((b) => `
                     <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
                 .join('');
