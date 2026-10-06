@@ -407,7 +407,7 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
            and "stock_dest - reservas.get" in prod)
     _check("lo apartado en pedidos pendientes se descuenta del destino real",
            "COALESCE(d.destino_id, pd.destino_id)" in prod
-           and "WHERE pd.estado = 'pendiente'" in prod)
+           and "pd.estado IN ('pendiente', 'en_camino')" in prod)
     _check("las demas pantallas NO cambian de comportamiento",
            re.search(r"para_pedido = request\.args\.get", prod) is not None)
 

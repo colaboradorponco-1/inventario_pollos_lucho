@@ -1079,6 +1079,11 @@
                     <label id="prod-sucursal-label" style="display:none">Sucursal <select id="prod-sucursal"></select></label>
                 </div>
                 <label>Proveedor <select id="prod-proveedor"></select></label>
+                <label>Tipo <select id="prod-provee">
+                    <option value="1">Para proveer (otras sucursales lo piden)</option>
+                    <option value="0">Solo para inventario (no se ofrece en pedidos)</option>
+                </select>
+                <small class="unit-hint">Ambos se anotan en el inventario general. Solo los «para proveer» aparecen cuando otra sucursal arma un pedido.</small></label>
                 <label id="campo-stock-inicial">Stock inicial (compra, sumará stock) <input type="number" id="prod-stock-inicial" step="any" min="0"></label>
                 <label id="campo-stock-actual" style="display:none">Stock actual <input type="number" id="prod-stock-actual" step="any" min="0"></label>
                 <p class="scan-hint" id="prod-stock-hint" style="display:none">Al guardar se registra un "Ajuste de inventario" por la diferencia.</p>
@@ -1377,7 +1382,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610062130"></script>
+    <script src="/static/app.js?v=202610062215"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

@@ -189,11 +189,16 @@ def pedidos():
                 tacho_unidad = 0
             fila = conn.execute(
                 "SELECT id, nombre, sucursal_id, unidad, IFNULL(unidad_tacho, 0) AS unidad_tacho, "
-                "IFNULL(pide_tacho, 0) AS pide_tacho "
+                "IFNULL(pide_tacho, 0) AS pide_tacho, IFNULL(para_proveer, 1) AS para_proveer "
                 "FROM productos WHERE id = ? AND activo = 1", (prod_id,)).fetchone()
             if not fila:
                 conn.close()
                 return err("Producto no encontrado")
+            # Los productos «solo para inventario» no se ofrecen a otras sucursales:
+            # se quedan en el almacén que los registró, no entran a la cola de pedidos.
+            if not fila["para_proveer"]:
+                conn.close()
+                return err(f"'{fila['nombre']}' es solo de inventario y no se puede pedir")
             # Pedido por tachos: la medida (¼, ½, ¾, entero) viene en la línea del
             # pedido y quien pide escribe a cuánto equivale un tacho (1 tacho = N
             # kg/unidades). Si no lo escribe, se toma el valor configurado del

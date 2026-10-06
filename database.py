@@ -256,6 +256,7 @@ def init_db():
                     "sucursal_id INT,"
                     "unidad_tacho DOUBLE DEFAULT 0,"
                     "pide_tacho TINYINT NOT NULL DEFAULT 0,"
+                    "para_proveer TINYINT DEFAULT 1,"
                     "activo TINYINT DEFAULT 1,"
                     "FOREIGN KEY (categoria_id) REFERENCES categorias(id),"
                     "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
@@ -620,6 +621,11 @@ def migrar_esquema():
             _add_columna(cur, "productos", "pide_tacho TINYINT NOT NULL DEFAULT 0")
             # Los que ya tenían «1 tacho = N» configurado siguen pudiendo pedirse por tachos.
             cur.execute("UPDATE productos SET pide_tacho = 1 WHERE unidad_tacho > 0")
+        # El producto puede ser «para proveer» (lo piden otras sucursales) o solo
+        # «para inventario» (se ve en el inventario general pero no se ofrece en
+        # pedidos). Default 1 para no cambiar el comportamiento de lo existente.
+        if not _col_existe(cur, "productos", "para_proveer"):
+            _add_columna(cur, "productos", "para_proveer TINYINT NOT NULL DEFAULT 1")
         if not _col_existe(cur, "pedido_detalle", "tacho_fraccion"):
             _add_columna(cur, "pedido_detalle", "tacho_fraccion DOUBLE DEFAULT 0")
         if not _col_existe(cur, "pedido_detalle", "tacho_texto"):

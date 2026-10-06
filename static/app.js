@@ -808,12 +808,13 @@ function esSucursalAS(s) {
     return n.includes('america') || n.includes('simon');
 }
 function sucursalesFiltroPedidos(lista) {
-    // Lista FIJA del filtro del módulo de pedidos, igual para todo el mundo:
-    // los Almacenes Principales + las sucursales AS (America, Simon Lopez),
-    // renombradas como "AS America"/"AS Simon Lopez" porque de ellas se encargan
-    // sus receptores. No depende del flag `provee` porque la sucursal receptora
-    // tiene que verse aunque su columna no esté marcada.
+    // El admin/superadmin ve TODAS las sucursales del negocio (Almacén
+    // Principal, AS, America, Simon Lopez, Siglo xx, 6 de agosto...) tal cual
+    // están dadas de alta, para filtrar por cualquier almacén. Los encargados
+    // ven la lista fija con la que trabajan: los Almacenes Principales + las
+    // sucursales AS (America, Simon Lopez).
     const base = lista || (catalogos && catalogos.sucursales) || [];
+    if (esGestionPed()) return base;
     return base
         .map((s) => (esSucursalAS(s) ? Object.assign({}, s, { nombre: nombreSucursalPedido(s) }) : s))
         .filter((s) => s.principal || s.provee || esSucursalAS(s));
@@ -1180,6 +1181,7 @@ async function openProductoModal(id, lista) {
         $('#prod-precio-venta').value = p.precio_venta;
         $('#prod-vencimiento').value = p.vencimiento || '';
         $('#prod-proveedor').value = p.proveedor_id || '';
+        $('#prod-provee').value = String(p.para_proveer == null ? 1 : +p.para_proveer);
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
         if (esGestionDlg) poblarAlmacenes(+$('#prod-sucursal').value || 0);
         if (esGestionDlg && p.sucursal_id && !p.almacen_id) {
@@ -1214,6 +1216,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         precio_venta: +$('#prod-precio-venta').value || 0,
         vencimiento: $('#prod-vencimiento').value || null,
         proveedor_id: +$('#prod-proveedor').value || null,
+        para_proveer: +$('#prod-provee').value === 1 ? 1 : 0,
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
     if (esCentral()) {

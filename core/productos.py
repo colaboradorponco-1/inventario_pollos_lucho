@@ -39,6 +39,16 @@ def _pide_tacho(data):
     return 1 if str(v).lower() in ("1", "true", "on", "yes") else 0
 
 
+def _para_proveer(data):
+    """¿Este producto se ofrece a otras sucursales en pedidos? (1 = sí).
+    Los de «solo inventario» se ven en el inventario general pero no aparecen
+    cuando otra sucursal arma un pedido."""
+    v = data.get("para_proveer")
+    if v is None:
+        return 1
+    return 1 if str(v).lower() in ("1", "true", "on", "yes") else 0
+
+
 def _stock_sucursal_permitido(conn, ver_todo, sid):
     """Valida ?stock_sucursal= antes de usarlo.
 
@@ -129,13 +139,14 @@ def productos():
                 return err("El almacén no pertenece a esa sucursal", 400)
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
-                                   precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, pide_tacho, activo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, 1)
+                                   precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, pide_tacho, para_proveer, activo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 1)
         """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
               data.get("categoria_id"),
               data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
               data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
-              data.get("almacen_id"), proveedor_id, sid, _tacho_unidad(data), _pide_tacho(data)))
+              data.get("almacen_id"), proveedor_id, sid, _tacho_unidad(data), _pide_tacho(data),
+              _para_proveer(data)))
         conn.commit()
         new_id = cur.lastrowid
         stock_inicial = data.get("stock_inicial", 0) or 0
@@ -172,6 +183,7 @@ def productos():
     proveedor = request.args.get("proveedor", "").strip()
     estado = request.args.get("estado", "").strip()
     sucursal = request.args.get("sucursal", "").strip()
+    para_pedido = request.args.get("para_pedido", "").strip() in ("1", "true", "si")
     sid = sucursal_actual()
     # Cualquier valor no numérico en un filtro devolvía 500 en vez de 400.
     def _id_o_none(v):
@@ -206,6 +218,7 @@ def productos():
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
                IFNULL(p.unidad_tacho, 0) AS unidad_tacho,
                IFNULL(p.pide_tacho, 0) AS pide_tacho,
+               IFNULL(p.para_proveer, 1) AS para_proveer,
                c.nombre AS categoria_nombre, a.nombre AS almacen_nombre,
                su.nombre AS sucursal_nombre, pr.nombre AS proveedor_nombre,
                COALESCE(s.cantidad, 0) AS stock,
@@ -248,6 +261,10 @@ def productos():
             # El scope de visibilidad limita a filiales: solo lo que pueden ver
             q += " AND p.sucursal_id = ?"
             params.append(sucursal)
+    # El formulario de pedidos SOLO ofrece lo marcado «para proveer»; lo de
+    # «solo inventario» se ve en el inventario general pero no se puede pedir.
+    if para_pedido:
+        q += " AND p.para_proveer = 1"
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":
@@ -275,7 +292,6 @@ def productos():
     # stock) y el disponible de ahí, para que la pantalla y el servidor elijan lo
     # mismo. Sin el flag, las demás pantallas siguen midiendo contra el almacén
     # donde el producto está registrado, que es lo de siempre.
-    para_pedido = request.args.get("para_pedido", "").strip() in ("1", "true", "si")
     destinos = {}
     nombres = {}
     reservas = {}
@@ -357,6 +373,7 @@ def producto_por_codigo():
                p.costo_promedio, p.precio_venta, p.almacen_id, p.proveedor_id, p.sucursal_id, p.activo,
                IFNULL(p.unidad_tacho, 0) AS unidad_tacho,
                IFNULL(p.pide_tacho, 0) AS pide_tacho,
+               IFNULL(p.para_proveer, 1) AS para_proveer,
                COALESCE(s.cantidad, 0) AS stock,
                (SELECT MIN(l2.fecha_vencimiento) FROM lotes l2
                 WHERE l2.producto_id = p.id AND l2.cantidad > 0
@@ -492,7 +509,7 @@ def producto(prod_id):
     conn.execute("""
         UPDATE productos SET codigo=?, nombre=?, marca=?, categoria_id=?, unidad=?, stock_minimo=?,
                costo_promedio=?, precio_venta=?, almacen_id=?, proveedor_id=?, sucursal_id=?,
-               unidad_tacho=?, pide_tacho=?
+               unidad_tacho=?, pide_tacho=?, para_proveer=?
         WHERE id=?
     """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
           data.get("categoria_id"),
@@ -502,7 +519,9 @@ def producto(prod_id):
           _tacho_unidad(data) if data.get("unidad_tacho") is not None
           else (fila.get("unidad_tacho") or 0),
           _pide_tacho(data) if data.get("pide_tacho") is not None
-          else (fila.get("pide_tacho") or 0), prod_id))
+          else (fila.get("pide_tacho") or 0),
+          _para_proveer(data) if data.get("para_proveer") is not None
+          else int(fila.get("para_proveer") or 1), prod_id))
     # Ajuste directo de stock: registra la diferencia como movimiento para mantener la sincronía
     stock_nuevo = data.get("stock")
     if stock_nuevo is not None:
