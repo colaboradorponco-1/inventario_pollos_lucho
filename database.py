@@ -582,6 +582,13 @@ def migrar_esquema():
         # misma sucursal (mismo rol, misma sucursal) y ven el mismo panel.
         if not _col_existe(cur, "usuarios", "receptor"):
             _add_columna(cur, "usuarios", "receptor TINYINT NOT NULL DEFAULT 0")
+        # Backfill auto de receptores: los almacenes receptor se llaman
+        # "AS <Sucursal>" (p. ej. "AS America", "AS Simon Lopez"). Se marcan
+        # solos en cada arranque, para que el usuario no tenga que correr
+        # UPDATE a mano cada vez que se crea uno. Idempotente: solo sube de
+        # 0 a 1, nunca pisa un 1 manual.
+        cur.execute("UPDATE usuarios SET receptor = 1 "
+                    "WHERE usuario LIKE 'AS %' AND receptor = 0")
         if not _col_existe(cur, "movimientos", "sucursal_id"):
             _add_columna(cur, "movimientos", "sucursal_id INT")
         if not _col_existe(cur, "gastos", "sucursal_id"):
