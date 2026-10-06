@@ -677,8 +677,8 @@ def migrar_esquema():
         _map_estado = {"despachado": "en_camino", "cumplido": "entregado"}
         _map_etapa = {"en_preparacion": "en_camino", "despachado": "en_camino",
                       "cumplido": "entregado"}
-        for fila in cur.execute(
-                "SELECT id, estado, etapa FROM pedidos").fetchall():
+        cur.execute("SELECT id, estado, etapa FROM pedidos")
+        for fila in cur.fetchall():
             _e_old = (fila["estado"] or "pendiente").strip().lower() or "pendiente"
             _t_old = (fila["etapa"] or "pendiente").strip().lower() or "pendiente"
             _e = _map_estado.get(_e_old, _e_old if _e_old in _nuevos else "pendiente")
