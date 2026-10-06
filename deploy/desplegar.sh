@@ -55,22 +55,29 @@ ls -ld "$APP_DIR" "$APP_DIR/respaldos" || true
 # Respaldo previo: garantiza un punto de restauracion del estado exacto de la
 # base justo antes del cambio. Si falla, no se toca la app (set -e).
 echo "==> Respaldo previo al despliegue"
-# `respaldar.py` se ejecuta desde $APP_DIR porque escribe el .sql en
-# <BASE>/respaldos/ (ver deploy/respaldar_respaldo.sh, que lo espera en la raiz).
-# El problema: si un `rsync --delete` se lleva ese archivo, este paso aborta con
-# set -e, NO se reinicia la app, y el deploy siguiente vuelve a fallar igual:
-# un fallo que se repite solo y deja la aplicacion caida sin tocar la base.
-# El clon de $STAGE siempre lo tiene, asi que se restaura desde ahi.
-if [ ! -f "$APP_DIR/respaldar.py" ]; then
-  if [ -f "$STAGE/respaldar.py" ]; then
-    cp "$STAGE/respaldar.py" "$APP_DIR/respaldar.py"
-    chown pollos:pollos "$APP_DIR/respaldar.py" 2>/dev/null || true
-    echo "respaldar.py no estaba en $APP_DIR: restaurado desde el clon"
-  else
-    echo "ERROR: no se encuentra respaldar.py ni en $APP_DIR ni en el clon"
-    exit 1
-  fi
-fi
+# Antes de respaldar se rellenan los archivos de codigo que falten en $APP_DIR.
+#
+# Por que: `rsync --delete` borra de $APP_DIR todo lo que no este en el clon, y
+# `core/backup.py` y `respaldar.py` llegaron al servidor por una via que el rsync
+# no cubria. Con el codigo incompleto el respaldo previo no arranca, el deploy
+# aborta aqui por `set -e`, y nunca llega al rsync que lo repararia: un deadlock
+# que se repite en cada intento y deja la app caida sin tocar la base.
+# (Log real: "ModuleNotFoundError: No module named 'core.backup'" y
+#            "can't open file '/opt/pollos-lucho/respaldar.py'")
+#
+# Solo se rellenan huecos: nunca se sobrescribe un archivo existente, ni se tocan
+# datos, .env ni venv. El rsync de mas abajo igualiza todo el resto.
+find "$STAGE" -name '*.py' -not -path '*/__pycache__/*' -print0 \
+| while IFS= read -r -d '' src; do
+    dst="$APP_DIR/${src#"$STAGE"/}"
+    if [ ! -f "$dst" ]; then
+      mkdir -p "$(dirname "$dst")"
+      cp "$src" "$dst"
+      chown pollos:pollos "$dst" 2>/dev/null || true
+      echo "   restaurado del clon: ${src#"$STAGE"/}"
+    fi
+  done
+
 sudo -u pollos "$VENV/bin/python" "$APP_DIR/respaldar.py" \
   || { echo "ERROR: el respaldo previo fallo; despliegue abortado"; exit 1; }
 
