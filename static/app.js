@@ -816,6 +816,18 @@ function sucursalesFiltroPedidos(lista) {
         })
         .filter((s) => s.principal || s.provee);
 }
+// Nombre visible de una sucursal en el módulo de pedidos: las sucursales AS
+// (America, Simon Lopez) se muestran como "AS America"/"AS Simon" porque su
+// receptor se encarga de ellas.
+function nombreSucursalPedido(s) {
+    if (!s) return '';
+    if (s.principal) return s.nombre;
+    if (!s.provee) return s.nombre;
+    const n = nombreNorm(s.nombre);
+    if (n.includes('america')) return 'AS America';
+    if (n.includes('simon') || n.includes('simon lopez')) return 'AS Simon';
+    return s.nombre;
+}
 
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
 function puedeVerTodasSucursales() { return esAdmin() || esAlmacenPpal(); }
@@ -3946,7 +3958,7 @@ function renderTarjetasPedido() {
             const su = (catalogos.sucursales || []).find((s) => s.id === provId);
             provs[key] = {
                 id: provId,
-                nombre: su ? su.nombre : (p.sucursal_nombre || ('Sucursal ' + provId)),
+                nombre: su ? nombreSucursalPedido(su) : (p.sucursal_nombre || ('Sucursal ' + provId)),
                 principal: !!(su && su.principal),
                 prod: [],
             };
@@ -4271,7 +4283,7 @@ async function loadPedidos() {
             const yo = window.SUCURSAL_ID;
             const pueden = sucursales.filter((x) => (x.principal || x.provee) && x.id !== yo);
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
-                + pueden.map((x) => `<option value="${x.id}">Todo a ${esc(x.nombre)}</option>`).join('');
+                + pueden.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
         }
         const opcionesAS = opcionesSucursales(sucursalesFiltroPedidos(sucursales), 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
