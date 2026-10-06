@@ -84,10 +84,12 @@ def login():
     session["rol"] = row["rol"]
     session["sucursal_id"] = row["sucursal_id"]
     session["sucursal_nombre"] = sucursal_nombre
+    session["receptor"] = bool(row.get("receptor"))
     registrar_auditoria("Inicio de sesión", f"Usuario {row['usuario']} ingresó al sistema")
     return ok({"usuario": row["usuario"], "nombre": row["nombre"], "rol": row["rol"],
                "sucursal_id": row["sucursal_id"],
-               "sucursal_nombre": sucursal_nombre}, message="Bienvenido")
+               "sucursal_nombre": sucursal_nombre, "receptor": bool(row.get("receptor"))},
+              message="Bienvenido")
 
 
 @auth_bp.route("/api/logout", methods=["POST"])
@@ -117,6 +119,7 @@ def sesion():
                "sucursal_nombre": session.get("sucursal_nombre", ""),
                "sucursal_principal": principal,
                "es_la_paz": es_la_paz,
+               "receptor": bool(session.get("receptor")),
                "superadmin": session.get("rol") == "superadmin"})
 
 

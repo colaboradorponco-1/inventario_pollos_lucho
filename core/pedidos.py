@@ -20,7 +20,7 @@ from .lotes import (destinos_validos, elegir_destino, stock_en_destino,
 from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
                    paginar_params, sucursal_actual, sucursal_operativa, stock_actual,
                    es_gestion, es_superadmin, es_encargado_almacen, registrar_movimiento,
-                   es_logistica)
+                   es_logistica, es_receptor)
 
 pedidos_bp = Blueprint("pedidos", __name__)
 
@@ -129,6 +129,11 @@ def pedidos():
         if not detalle:
             conn.close()
             return err("El pedido no tiene productos")
+        # Un usuario RECEPTOR (p. ej. "AS America"/"AS Simon Lopez") es el
+        # almacén que RECIBE pedidos: no hace pedidos propios.
+        if es_receptor():
+            conn.close()
+            return err("Este usuario solo recibe pedidos, no realiza pedidos propios")
         sid = sucursal_actual()
         if session.get("rol") == "encargado":
             sucursal_id = sid
@@ -759,6 +764,20 @@ def pedidos_bandeja():
     sid = sucursal_actual()
     where = "WHERE 1=1"
     params = []
+    # La bandeja es la recepción de pedidos. La ven:
+    #  - admin/superadmin (gestion),
+    #  - el rol logístico (preparador/repartidor) de su sucursal,
+    #  - el encargado de un ALMACÉN PRINCIPAL (despacha lo que le piden), y
+    #  - los usuarios RECEPTOR (p. ej. "AS America"/"AS Simon Lopez"), que son
+    #    el almacén receptor de las sucursales proveedoras.
+    # El encargado NORMAL de una filial NO ve la bandeja: él pide ("Mis
+    # pedidos"), no despacha. Antes bastaba con ser proveedor (provee=1) y el
+    # encargado de América y el receptor AS America veían el MISMO panel; ahora
+    # la recepción es solo del usuario receptor.
+    if sid and not es_logistica() and not es_gestion() and not (
+            es_receptor() or es_encargado_almacen(conn)):
+        conn.close()
+        return ok([])
     if sid:
         # La cola de trabajo son los pedidos que tu sucursal DESPACHA (las lineas
         # que le piden a ella).

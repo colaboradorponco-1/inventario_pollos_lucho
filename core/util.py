@@ -101,6 +101,15 @@ def es_logistica():
     return session.get("rol") in ("preparador", "repartidor")
 
 
+def es_receptor():
+    """True si el usuario es un ALMACEN receptor (p. ej. 'AS America').
+
+    Son la recepción de una sucursal proveedora: su panel es la bandeja de
+    pedidos que le hacen a esa sucursal y solo sus propios datos. No crean
+    pedidos propios ('Mis pedidos')."""
+    return bool(session.get("receptor"))
+
+
 # Endpoints que un preparador/repartidor JAMAŚ debe tocar: todo lo que no sea
 # su cola de pedidos. Los pedidos (bandeja + etapa) quedan fuera.
 RUTAS_BLOQUEADAS_LOGISTICA = (

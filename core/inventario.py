@@ -853,7 +853,13 @@ def inventario_cerrar(inv_id):
     # las dos planillas se puedan cerrar.
     avisos_cierre = _avisos_conteo_cruzado(conn, inv)
 
-    fecha_cierre = datetime.now().isoformat(timespec="seconds")
+    ahora = datetime.now()
+    # fecha_hora_cierre se guarda en ISO con 'T' (es lo que espera fmtFechaHoraES
+    # en el front). Los movimientos y lotes usan 'AAAA-MM-DD HH:MM:SS', el formato
+    # de todo el resto de la BD: si se guarda con 'T', fmtDate lo rompe y se ve
+    # '05T18:20:07/10/2026' en la tabla de movimientos y en el Excel.
+    fecha_cierre = ahora.isoformat(timespec="seconds")
+    fecha_mov = ahora.strftime("%Y-%m-%d %H:%M:%S")
     total_items = len(filas)
     ajustes = 0
     faltantes = 0
@@ -882,7 +888,7 @@ def inventario_cerrar(inv_id):
         try:
             registrar_movimiento(
                 conn, f["producto_id"], "ajuste", dif,
-                f["costo_promedio"] or 0, fecha_cierre,
+                f["costo_promedio"] or 0, fecha_mov,
                 f"Inventario diario {inv['fecha']} (ajuste "
                 f"{'faltante' if dif < 0 else 'sobrante'})",
                 session.get("usuario", ""), inv["sucursal_id"])

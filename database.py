@@ -575,6 +575,13 @@ def migrar_esquema():
         # 1) Columnas faltantes
         if not _col_existe(cur, "usuarios", "sucursal_id"):
             _add_columna(cur, "usuarios", "sucursal_id INT")
+        # Usuarios RECEPTURA (p. ej. "AS America" / "AS Simon Lopez"): son el
+        # ALMACEN de una sucursal proveedora. Su panel es la BANDEJA de pedidos
+        # que le hacen a esa sucursal y solo sus propios datos; no crean "Mis
+        # pedidos". Sin esta columna no se distinguen del encargado normal de la
+        # misma sucursal (mismo rol, misma sucursal) y ven el mismo panel.
+        if not _col_existe(cur, "usuarios", "receptor"):
+            _add_columna(cur, "usuarios", "receptor TINYINT NOT NULL DEFAULT 0")
         if not _col_existe(cur, "movimientos", "sucursal_id"):
             _add_columna(cur, "movimientos", "sucursal_id INT")
         if not _col_existe(cur, "gastos", "sucursal_id"):
@@ -927,6 +934,30 @@ def migrar_esquema():
                 except Exception:
                     pass
         db.commit()
+
+        # 8) Normalizar marcas de tiempo: 'AAAA-MM-DDTHH:MM:SS' -> 'AAAA-MM-DD HH:MM:SS'.
+        #
+        # El cierre del inventario diario y la auditoría se guardaban con el ISO
+        # completo (con 'T'), pero todo el resto de la BD usa el espacio. Con la 'T'
+        # la tabla de movimientos mostraba la fecha rota ('05T18:20:07/10/2026') y
+        # el Excel la exportaba igual. Idempotente: después de la primera pasada no
+        # queda nada que tocar. NO se toca inventario_diario.fecha_hora_cierre, que
+        # sí se lee en formato ISO.
+        try:
+            for _t, _c in (("movimientos", "fecha"), ("lotes", "fecha_ingreso"),
+                           ("auditoria", "fecha")):
+                cur.execute(f"UPDATE {_t} SET {_c} = REPLACE({_c}, 'T', ' ') "
+                            f"WHERE {_c} LIKE '____-__-__T%'")
+                if cur.rowcount:
+                    print(f"[migrar] {cur.rowcount} marca(s) de tiempo con 'T' "
+                          f"normalizadas en {_t}.{_c}")
+            db.commit()
+        except Exception as _e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            print(f"[migrar] AVISO: no se pudieron normalizar las fechas con 'T': {_e}")
     finally:
         db.close()
 

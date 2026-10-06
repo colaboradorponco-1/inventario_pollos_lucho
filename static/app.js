@@ -14,8 +14,16 @@ const fmtDate = (d) => {
         return (gmt[4] + ':' + gmt[5]) === '00:00' ? dma : dma + ' ' + gmt[4] + ':' + gmt[5];
     }
     const parts = d.split(' ');
-    const datePart = parts[0] || '';
-    const timePart = parts[1] || '';
+    let datePart = parts[0] || '';
+    let timePart = parts[1] || '';
+    // ISO con 'T' (p. ej. '2026-10-05T18:20:07', como se guarda el cierre del
+    // inventario y la auditoría): sin este corte el 'T18:20:07' quedaba pegado
+    // al día y se mostraba '05T18:20:07/10/2026'.
+    if (!timePart && datePart.indexOf('T') > 0) {
+        const ti = datePart.indexOf('T');
+        timePart = datePart.slice(ti + 1);
+        datePart = datePart.slice(0, ti);
+    }
     const dp = datePart.split('-');
     if (dp.length !== 3) return d;
     const formatted = dp[2] + '/' + dp[1] + '/' + dp[0];
@@ -4269,7 +4277,7 @@ async function loadPedidos() {
         if (esEncargadoPed()) {
             const mie = sucursales.find((x) => x.id === window.SUCURSAL_ID);
             selSuc.innerHTML = mie ? `<option value="${mie.id}">${mie.principal ? '★ ' : ''}${esc(mie.nombre)}</option>` : '';
-            if (window.SUCURSAL_PRINCIPAL && !sucursalProvee()) {
+            if ((window.SUCURSAL_PRINCIPAL && !sucursalProvee()) || window.RECEPTOR) {
                 const form = $('#form-pedido');
                 if (form && form.closest('.panel')) form.closest('.panel').style.display = 'none';
             }
@@ -4312,9 +4320,11 @@ function sucursalProvee() {
 
 // «Mis pedidos» (wizard + historial de los que yo realicé) es visible para
 // toda sucursal que hace pedidos. La bandeja «Pedidos que me realizaron» solo
-// la ven las que tienen marcada la casilla «¿Provee a otras?». Quien no la
-// tenga marcada queda solo con «Mis pedidos»: es una sucursal que pide, y no un
-// destino al que le encarguen mercadería.
+// la ve quien DESPACHA la recepción: un encargado de almacén principal, o un
+// usuario RECEPTOR (p. ej. "AS America"/"AS Simon Lopez"), que son el almacén
+// receptor de las sucursales proveedoras. Quien no despacha queda solo con
+// «Mis pedidos»: es una sucursal que pide, y no un destino al que le encarguen
+// mercadería.
 function puedeVerBandeja() {
     if (!window.ROL) return false;
     if (esGestionPed()) return true;
@@ -4322,8 +4332,12 @@ function puedeVerBandeja() {
     // sucursal: la bandeja es exactamente lo que necesitan ver.
     if (window.ROL === 'preparador' || window.ROL === 'repartidor') return true;
     if (window.ROL !== 'encargado') return false;
+    // Un encargado de almacén principal despacha lo que le piden. Un usuario
+    // RECEPTOR (AS America / AS Simon Lopez) es el almacén receptor de su
+    // sucursal proveedora. El encargado NORMAL de una filial —aunque la
+    // sucursal tenga marcado provee=1— NO la ve: él pide, no despacha.
     if (window.SUCURSAL_PRINCIPAL) return true;
-    return sucursalProvee();
+    return !!window.RECEPTOR;
 }
 
 function inicializarPestanasPedidos() {
@@ -4331,12 +4345,12 @@ function inicializarPestanasPedidos() {
     const tabReal = $('#tab-hist-realizados');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
-    // Solo un almacén principal «puro» (que reparte pero no pide) y el admin se
-    // quedan únicamente con su bandeja. Las filiales que no tienen marcada la
-    // casilla «¿Provee a otras?» también hacen sus propios pedidos: conservan
-    // las dos pestañas.
+    // Almacén principal «puro», preparador/repartidor, admin y usuario RECEPTOR
+    // se quedan únicamente con su bandeja. Las sucursales que piden (filiales y
+    // la propia proveedora con su encargado normal) conservan «Mis pedidos».
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
         || window.ROL === 'preparador' || window.ROL === 'repartidor'
+        || !!window.RECEPTOR
         || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
 
     if (soloBandeja) {
@@ -4904,6 +4918,7 @@ async function init() {
         window.SUCURSAL_ID = s.sucursal_id || null;
         window.SUCURSAL_PRINCIPAL = !!s.sucursal_principal;
         window.ES_LA_PAZ = !!s.es_la_paz;
+        window.RECEPTOR = !!s.receptor;
         const ocultar = (v) => {
             const btn = document.querySelector(`.menu-btn[data-view="${v}"]`);
             if (btn) btn.style.display = 'none';
@@ -4912,6 +4927,14 @@ async function init() {
         // Preparador y repartidor SOLO ven pedidos operativos, se oculta todo lo demas.
         if (s.rol === 'encargado') {
             ['usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
+            // Usuario RECEPTOR (p. ej. "AS America" / "AS Simon Lopez"): es el
+            // ALMACEN de una sucursal proveedora. Su trabajo es recibir los
+            // pedidos que le hacen a esa sucursal (bandeja) y sus propios datos:
+            // dashboard, productos, entradas/salidas, proveedores, reportes y
+            // configuración. No opera inventario, ventas, compras, repartos ni gastos.
+            if (window.RECEPTOR) {
+                ['inventario', 'ventas', 'compras', 'repartos', 'gastos'].forEach(ocultar);
+            }
         } else if (s.rol === 'admin') {
             ['usuarios', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
         } else if (s.rol === 'preparador' || s.rol === 'repartidor') {
@@ -4942,6 +4965,7 @@ async function init() {
             let rol;
             if (s.rol === 'superadmin') rol = 'Superadministrador';
             else if (s.rol === 'admin') rol = 'Administrador';
+            else if (window.RECEPTOR) rol = 'Almacén receptor';
             else rol = 'Encargado';
             const ini = esc((s.nombre || s.usuario || '?')[0].toUpperCase());
             const suc = window.SUCURSAL ? `<div class="sesion-suc">${esc(window.SUCURSAL)}</div>` : '';
