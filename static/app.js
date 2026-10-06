@@ -799,33 +799,35 @@ function opcionesSucursales(lista, placeholder) {
     if (grupo !== null) html += '</optgroup>';
     return html;
 }
+// ¿Esta sucursal es una recepción AS (America / Simon Lopez)? Se detecta por
+// nombre aunque su columna `provee` no esté activa: basta con que exista para
+// que su encargado de recepción la vea en el filtro del módulo de pedidos.
+function esSucursalAS(s) {
+    if (!s || s.principal) return false;
+    const n = nombreNorm(s.nombre);
+    return n.includes('america') || n.includes('simon');
+}
 function sucursalesFiltroPedidos(lista) {
     // Lista FIJA del filtro del módulo de pedidos, igual para todo el mundo:
     // los Almacenes Principales + las sucursales AS (America, Simon Lopez),
-    // renombradas como "AS America"/"AS Simon" porque de ellas se encargan sus
-    // receptores. Ya no aparece la sucursal propia ni las filiales en el filtro.
+    // renombradas como "AS America"/"AS Simon Lopez" porque de ellas se encargan
+    // sus receptores. No depende del flag `provee` porque la sucursal receptora
+    // tiene que verse aunque su columna no esté marcada.
     const base = lista || (catalogos && catalogos.sucursales) || [];
     return base
-        .map((s) => {
-            if (!s.principal && s.provee) {
-                const n = nombreNorm(s.nombre);
-                if (n.includes('america')) return Object.assign({}, s, { nombre: 'AS America' });
-                if (n.includes('simon') || n.includes('simon lopez')) return Object.assign({}, s, { nombre: 'AS Simon Lopez' });
-            }
-            return s;
-        })
-        .filter((s) => s.principal || s.provee);
+        .map((s) => (esSucursalAS(s) ? Object.assign({}, s, { nombre: nombreSucursalPedido(s) }) : s))
+        .filter((s) => s.principal || s.provee || esSucursalAS(s));
 }
 // Nombre visible de una sucursal en el módulo de pedidos: las sucursales AS
-// (America, Simon Lopez) se muestran como "AS America"/"AS Simon" porque su
-// receptor se encarga de ellas.
+// (America, Simon Lopez) se muestran como "AS America"/"AS Simon Lopez" porque
+// su receptor se encarga de ellas.
 function nombreSucursalPedido(s) {
     if (!s) return '';
-    if (s.principal) return s.nombre;
-    if (!s.provee) return s.nombre;
-    const n = nombreNorm(s.nombre);
-    if (n.includes('america')) return 'AS America';
-    if (n.includes('simon') || n.includes('simon lopez')) return 'AS Simon Lopez';
+    if (esSucursalAS(s)) {
+        const n = nombreNorm(s.nombre);
+        if (n.includes('america')) return 'AS America';
+        return 'AS Simon Lopez';
+    }
     return s.nombre;
 }
 
