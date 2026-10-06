@@ -4311,23 +4311,19 @@ function sucursalProvee() {
 }
 
 // «Mis pedidos» (wizard + historial de los que yo realicé) es visible para
-// toda sucursal que hace pedidos. La bandeja «Pedidos que me realizaron» la
-// ven unicamente:
-// - admin/superadmin, que coordina todas las sucursales;
-// - preparador y repartidor, que trabajan sobre la cola de pedidos de su
-//   sucursal: para ellos la bandeja ES la herramienta de trabajo.
-//
-// El encargado de una sucursal ya NO la ve, ni siquiera siendo almacén
-// principal ni teniendo marcada la casilla «¿Provee a otras?». Antes aparecía
-// según la casilla o el nombre de la sucursal, y terminaba siendo un panel
-// distinto en cada una. Ahora la bandeja es una sola cosa, la cola de trabajo,
-// y el encargado se queda solo con «Mis pedidos».
+// toda sucursal que hace pedidos. La bandeja «Pedidos que me realizaron» solo
+// la ven las que tienen marcada la casilla «¿Provee a otras?». Quien no la
+// tenga marcada queda solo con «Mis pedidos»: es una sucursal que pide, y no un
+// destino al que le encarguen mercadería.
 function puedeVerBandeja() {
     if (!window.ROL) return false;
     if (esGestionPed()) return true;
-    // El rol logístico solo trabaja sobre la cola de pedidos de su sucursal.
+    // Preparador y repartidor solo trabajan sobre la cola de pedidos de su
+    // sucursal: la bandeja es exactamente lo que necesitan ver.
     if (window.ROL === 'preparador' || window.ROL === 'repartidor') return true;
-    return false;
+    if (window.ROL !== 'encargado') return false;
+    if (window.SUCURSAL_PRINCIPAL) return true;
+    return sucursalProvee();
 }
 
 function inicializarPestanasPedidos() {
@@ -4335,11 +4331,13 @@ function inicializarPestanasPedidos() {
     const tabReal = $('#tab-hist-realizados');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
-    // El admin y el rol logístico se quedan únicamente con su bandeja. El
-    // encargado de cualquier sucursal tiene las dos pestañas: pide con «Mis
-    // pedidos» y la cola la ve el admin o quien esté en logística.
+    // Solo un almacén principal «puro» (que reparte pero no pide) y el admin se
+    // quedan únicamente con su bandeja. Las filiales que no tienen marcada la
+    // casilla «¿Provee a otras?» también hacen sus propios pedidos: conservan
+    // las dos pestañas.
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
-        || window.ROL === 'preparador' || window.ROL === 'repartidor';
+        || window.ROL === 'preparador' || window.ROL === 'repartidor'
+        || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
 
     if (soloBandeja) {
         if (tabMis) tabMis.style.display = 'none';

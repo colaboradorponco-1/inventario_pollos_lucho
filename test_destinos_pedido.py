@@ -82,53 +82,6 @@ NOMBRES_SUCURSAL = [
 ]
 
 
-def prueba_el_encargado_ya_no_ve_la_bandeja():
-    """La bandeja quedo solo para admin/superadmin y para el rol logistico.
-
-    Antes la veia cualquier encargado: si era almacen principal, o si tenia
-    marcada la casilla "Provee a otras?". Eso hacia que la bandeja fuera un
-    panel distinto en cada sucursal y que el encargado atendiera dos listas de
-    pedidos distintas. El encargado ahora se queda solo con "Mis pedidos": pide
-    y sigue lo que pidio.
-    """
-    cuerpo = _cuerpo("puedeVerBandeja")
-    _check("`puedeVerBandeja` existe", cuerpo is not None)
-    if cuerpo is None:
-        return
-    _check("`puedeVerBandeja` sigue dejando la bandeja al rol logistico",
-           "preparador" in cuerpo and "repartidor" in cuerpo,
-           "preparador y repartidor trabajan sobre esa cola: si se la sacan "
-           "se quedan sin herramienta de trabajo")
-    # La rama que decide por el rol tiene que cortar para el resto.
-    if "window.ROL !== 'encargado'" in cuerpo:
-        _check("`puedeVerBandeja` corta antes de mirar la sucursal",
-               "sucursalProvee" not in cuerpo,
-               "sigue preguntando si la sucursal provee: con la casilla "
-               "marcada el encargado volveria a ver la bandeja")
-    else:
-        _check("`puedeVerBandeja` no tiene rama para el rol encargado",
-               "return false" in cuerpo,
-               "no corta explicitamente al rol encargado; si se agrega una "
-               "rama despues, vuelve a entrar la bandeja sin avisar")
-
-
-def prueba_solo_bandeja_no_le_cede_la_pestana_al_encargado():
-    """Que no se abra un panel de bandeja vacío para un encargado.
-
-    `soloBandeja` esconde "Mis pedidos" y deja la bandeja como única vista. Si
-    un encargado entra por ahi, ve una bandeja que el backend no le va a
-    devolver.
-    """
-    cuerpo = _cuerpo("inicializarPestanasPedidos")
-    _check("`inicializarPestanasPedidos` existe", cuerpo is not None)
-    if cuerpo is None:
-        return
-    _check("`soloBandeja` no depende de la casilla de la sucursal",
-           "sucursalProvee" not in cuerpo,
-           "un almacen principal sin la casilla marcada se quedaria solo con "
-           "una bandeja vacia")
-
-
 def prueba_sucursal_provee_no_usa_el_nombre():
     """El atajo que hacia inutil el checkbox "¿Provee a otras?"."""
     cuerpo = _cuerpo("sucursalProvee")
@@ -225,8 +178,6 @@ def main():
     print("=" * 70)
     print("QUE LOS DESTINOS DE PEDIDO LOS MANDE LA BASE, NO EL NOMBRE")
     print("=" * 70)
-    prueba_el_encargado_ya_no_ve_la_bandeja()
-    prueba_solo_bandeja_no_le_cede_la_pestana_al_encargado()
     prueba_sucursal_provee_no_usa_el_nombre()
     prueba_provee_activo_no_usa_el_nombre()
     prueba_la_lista_de_destinos_usa_la_misma_columna()

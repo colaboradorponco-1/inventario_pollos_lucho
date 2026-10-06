@@ -756,13 +756,6 @@ def pedidos_bandeja():
 
     Un admin/superadmin sin sucursal asignada consolida todos los pendientes."""
     conn = get_conn()
-    # La bandeja es la COLA de trabajo: la ven el admin/superadmin y el rol
-    # logístico. El encargado se queda solo con «Mis pedidos», así que aunque un
-    # navegador con el app.js viejo siga pidiendo la cola, no recibe nada. Se
-    # devuelve la lista vacía con la misma forma que el resto de respuestas.
-    if session.get("rol") == "encargado":
-        conn.close()
-        return ok([])
     sid = sucursal_actual()
     where = "WHERE 1=1"
     params = []
