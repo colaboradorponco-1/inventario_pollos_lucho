@@ -3087,6 +3087,7 @@ function renderPagination(containerId, total, pagina, porPagina, loadFn) {
 // conteo y el stock del sistema se corrige con un movimiento de ajuste.
 let INV_ID = null;
 let INV_CERRADA = false;
+let INV_SOLO_LECTURA = false;
 let INV_FILAS = [];
 
 function fmtInvQ(v) {
@@ -3304,14 +3305,19 @@ async function abrirInventario(invId) {
     if (!d || !d.id) { toast('No se pudo abrir la planilla', 'err'); return; }
     INV_ID = d.id;
     INV_CERRADA = d.estado === 'cerrado';
+    // Planilla de otra sucursal: se puede ver pero no tocar (admin y encargados de
+    // almacén principal ven todas, pero solo modifican la de su sucursal).
+    INV_SOLO_LECTURA = d.puede_editar === false;
     INV_FILAS = d.lineas || [];
     $('#inv-panel-conteo').style.display = '';
     $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
-        : 'El inicial ya viene con el stock actual del sistema (ya incluye los pedidos entregados). Anota en ingreso manual SOLO lo que llegó sin pasar por el sistema (compra directa, devolución, de la casa), y el conteo final. Disponible = inicial + ingreso manual. Si tu conteo no da igual al sistema, la columna Diferencia te dice cuántas faltan o sobran.';
+: (INV_SOLO_LECTURA
+            ? 'Solo lectura: esta planilla es de otra sucursal. Podés verla, pero solo el encargado de esa sucursal puede guardarla o cerrarla.'
+            : 'El inicial ya viene con el stock actual del sistema (ya incluye los pedidos entregados). Anota en ingreso manual SOLO lo que llegó sin pasar por el sistema (compra directa, devolución, de la casa), y el conteo final. Disponible = inicial + ingreso manual. Si tu conteo no da igual al sistema, la columna Diferencia te dice cuántas faltan o sobran.');
     $('#inv-observaciones').value = d.observaciones || '';
-    $('#inv-observaciones').disabled = INV_CERRADA;
+    $('#inv-observaciones').disabled = INV_CERRADA || INV_SOLO_LECTURA;
     const h = $('#inv-hora');
     if (h && !INV_CERRADA) {
         const dH = new Date();
@@ -3352,7 +3358,8 @@ async function abrirInventario(invId) {
             ? `<div style="font-size:10px;color:${f.es_de_otro ? '#B45309' : '#6B7280'};margin-top:1px">
                    ${f.es_de_otro ? 'Lo contó' : 'Contó'}: ${esc(quien)}</div>`
             : '';
-        const bloq = INV_CERRADA ? 'disabled' : '';
+        // Planilla cerrada O de otra sucursal: los casilleros no se tocan.
+        const bloq = (INV_CERRADA || INV_SOLO_LECTURA) ? 'disabled' : '';
         html += `
             <tr data-inv-fila="${f.id}">
                 <td class="inv-col-tit"><strong>${esc(f.producto)}</strong>${marcaQuien}</td>
@@ -3388,14 +3395,16 @@ async function abrirInventario(invId) {
     $$('.inv-conteo, .inv-ingreso-man')
         .forEach((inp) => inp.addEventListener('input', recalcFilaInv));
 
-    $('#btn-inv-guardar').style.display = INV_CERRADA ? 'none' : '';
-    $('#btn-inv-cerrar').style.display = INV_CERRADA ? 'none' : '';
-    $('#btn-inv-borrar').style.display = INV_CERRADA ? 'none' : '';
+    $('#btn-inv-guardar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
+    $('#btn-inv-cerrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
+    $('#btn-inv-borrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-excel').style.display = '';
     $('#btn-inv-print').style.display = '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
         ? 'Esta planilla está cerrada. El stock ya fue ajustado según el conteo.'
-        : 'Al cerrar, toda diferencia entre el conteo y el stock del sistema se corrige con un movimiento de ajuste.';
+        : (INV_SOLO_LECTURA
+            ? 'Solo lectura: es la planilla de otra sucursal.'
+            : 'Al cerrar, toda diferencia entre el conteo y el stock del sistema se corrige con un movimiento de ajuste.');
     // Que el formulario quede a la vista: si no, parece que no se abrió nada.
     $('#inv-panel-conteo').scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (INV_CERRADA) detenerVigilaInventario();
