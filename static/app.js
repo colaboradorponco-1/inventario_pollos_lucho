@@ -3979,10 +3979,16 @@ function renderTarjetasPedido() {
     });
     const bts = $('#pedido-prov-btns');
     if (bts) {
-        bts.innerHTML = [''].concat(keys).map((k) => {
-            const id = k ? String(provs[k].id) : '';
-            const nombre = k ? (provs[k].principal ? '★ ' : '') + provs[k].nombre : 'Todos';
-            return `<button type="button" class="btn btn-sm ${pedidoProvFiltro === id ? 'btn-primary' : ''}" data-prov="${id}">${esc(nombre)}</button>`;
+        // Lista FIJA de sucursales (principales + AS), igual para todos: así el
+        // encargado de America ve "AS America" aunque no se pida a sí mismo, y
+        // el de Simon Lopez ve "AS Simon Lopez". Antes los botones salían de
+        // los proveedores que tenían productos, y la propia sucursal nunca
+        // aparecía.
+        const fijas = sucursalesFiltroPedidos(catalogos && catalogos.sucursales)
+            .map((s) => ({ id: String(s.id), nombre: (s.principal ? '★ ' : '') + (nombreSucursalPedido(s) || s.nombre) }));
+        bts.innerHTML = [{ id: '', nombre: 'Todos' }].concat(fijas).map((b) => {
+            const activa = pedidoProvFiltro === b.id;
+            return `<button type="button" class="btn btn-sm ${activa ? 'btn-primary' : ''}" data-prov="${b.id}">${esc(b.nombre)}</button>`;
         }).join('');
     }
     const keysV = pedidoProvFiltro ? keys.filter((k) => String(provs[k].id) === pedidoProvFiltro) : keys;
