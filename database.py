@@ -669,26 +669,23 @@ def migrar_esquema():
             _add_columna(cur, "pedidos", "etapa VARCHAR(20) NOT NULL DEFAULT 'pendiente'")
         # Unificación de estados (2026): estado y etapa comparten el MISMO flujo
         # pendiente -> en_camino -> entregado (+ rechazado desde pendiente).
-        # Se mapean los valores viejos de `estado` (despachado/cumplido) y de
-        # `etapa` (en_preparacion). El estado y la etapa quedan ALINEADOS, como
-        # exige el flujo nuevo. Idempotente: después de la primera corrida no
-        # quedan filas con los valores viejos.
-        _orden = {"pendiente": 0, "en_camino": 1, "entregado": 2}
-        _map_estado = {"pendiente": "pendiente", "despachado": "en_camino",
-                       "cumplido": "entregado"}
-        _map_etapa = {"pendiente": "pendiente", "en_preparacion": "en_camino",
-                      "despachado": "en_camino", "cumplido": "entregado",
-                      "entregado": "entregado", "en_camino": "en_camino",
-                      "rechazado": "pendiente"}
+        # Solo se mapean los valores VIEJOS (despachado/cumplido/en_preparacion):
+        # los que ya están en el vocabulario nuevo pasan intactos. Idempotente:
+        # en cada arranque no queda trabajo pendiente y nunca pisa un 'rechazado'.
+        _orden = {"pendiente": 0, "en_camino": 1, "entregado": 2, "rechazado": 3}
+        _nuevos = set(_orden)
+        _map_estado = {"despachado": "en_camino", "cumplido": "entregado"}
+        _map_etapa = {"en_preparacion": "en_camino", "despachado": "en_camino",
+                      "cumplido": "entregado"}
         for fila in cur.execute(
                 "SELECT id, estado, etapa FROM pedidos").fetchall():
-            _e = _map_estado.get((fila["estado"] or "pendiente").strip().lower(),
-                                 "pendiente")
-            _t = _map_etapa.get((fila["etapa"] or "pendiente").strip().lower(),
-                                "pendiente")
+            _e_old = (fila["estado"] or "pendiente").strip().lower() or "pendiente"
+            _t_old = (fila["etapa"] or "pendiente").strip().lower() or "pendiente"
+            _e = _map_estado.get(_e_old, _e_old if _e_old in _nuevos else "pendiente")
+            _t = _map_etapa.get(_t_old, _t_old if _t_old in _nuevos else "pendiente")
             # El que esté más avanzado de los dos manda (pedidos en tránsito
             # tenían etapa 'en_camino' con estado 'pendiente').
-            _final = _e if _orden.get(_e, 0) >= _orden.get(_t, 0) else _t
+            _final = _e if _orden[_e] >= _orden[_t] else _t
             if _final != fila["estado"] or _final != fila["etapa"]:
                 cur.execute("UPDATE pedidos SET estado = %s, etapa = %s WHERE id = %s",
                             (_final, _final, fila["id"]))
