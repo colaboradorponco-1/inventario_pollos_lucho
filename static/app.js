@@ -3706,10 +3706,13 @@ let pedidoSucursal = null;     // sucursal que hace el pedido
 let pedidoProvFiltro = '';     // filtrar el paso 2 por proveedor ('' = todos)
 let bandejaSucF = '';          // filtrar la bandeja por sucursal ('' = todas)
 const esEncargadoPed = () => window.ROL === 'encargado';
-const ESTADO_LAB = { pendiente: 'Pidiendo', despachado: 'En camino', cumplido: 'Entregado' };
-
-// Etapa logistica (columna `etapa` del pedido). Es SEPARADA del `estado`:
-// el estado sigue siendo pendiente/despachado/cumplido para los reportes.
+// UN SOLO vocabulario de estados, el que opera el personal en la bandeja:
+//   Sin empezar -> En preparación -> En camino -> Entregado
+// Antes había DOS (ESTADO_LAB 'Pidiendo/En camino/Entregado' y ETAPA_LAB
+// 'Sin empezar/En preparación/...') y un mismo pedido se veía con palabras
+// distintas según el rol. `estado` y `etapa` siguen vivos en la BD (reportes,
+// filtros), pero TODO se muestra con estas etiquetas.
+const ESTADO_LAB = { pendiente: 'Sin empezar', despachado: 'En camino', cumplido: 'Entregado' };
 const ETAPA_LAB = {
     pendiente: 'Sin empezar',
     en_preparacion: 'En preparación',
@@ -4493,7 +4496,7 @@ async function cargarBandeja() {
         }
         const total = grupos.reduce((a, g) => a + g.pedidos.length, 0);
         const resumen = $('#historial-resumen');
-        if (resumen) resumen.textContent = total ? `${total} pendiente(s)` : '';
+        if (resumen) resumen.textContent = total ? `${total} pedido(s) por despachar` : '';
         if (!total) {
             // Distinguir "no hay nada pendiente" de "tu filtro de fecha lo
             // esconde": antes ambos casos mostraban el mismo texto, y por eso
@@ -4544,7 +4547,7 @@ async function cargarBandeja() {
                         // que es el eje que usan los reportes y filtros.
                         editControl = esProveedorMio
                             ? `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
-                                <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Pidiendo</option>
+                                <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Sin empezar</option>
                                 <option value="despachado" ${p.estado === 'despachado' ? 'selected' : ''}>En camino</option>
                                 <option value="cumplido" ${p.estado === 'cumplido' ? 'selected' : ''}>Entregado</option>
                               </select>`
@@ -4977,7 +4980,15 @@ async function init() {
     }
     await loadCatalogos();
     restaurarFiltros();
-    loadDashboard();
+    // El ALMACÉN RECEPTOR (p. ej. "AS America"/"AS Simon Lopez") aterriza
+    // directo en su bandeja de pedidos: su trabajo es recibir/despachar lo que
+    // le piden a su sucursal. No abre en el dashboard.
+    if (window.RECEPTOR) {
+        const bP = $('.menu-btn[data-view="pedidos"]');
+        if (bP) bP.click();
+    } else {
+        loadDashboard();
+    }
     syncPedidosNuevos();
     setInterval(syncPedidosNuevos, 30000);
     const btnRef = document.getElementById('btn-refrescar-top');

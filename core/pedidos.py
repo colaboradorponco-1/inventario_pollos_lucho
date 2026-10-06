@@ -917,8 +917,8 @@ _AVANCE_PREPARADOR = {"pendiente": "en_preparacion"}
 _AVANCE_REPARTIDOR = {"en_preparacion": "en_camino", "en_camino": "entregado"}
 
 _ETIQUETA_ETAPA = {
-    "pendiente": "Pendiente",
-    "en_preparacion": "En preparacion",
+    "pendiente": "Sin empezar",
+    "en_preparacion": "En preparación",
     "en_camino": "En camino",
     "entregado": "Entregado",
 }
