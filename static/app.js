@@ -4273,11 +4273,12 @@ async function loadPedidos() {
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + pueden.map((x) => `<option value="${x.id}">Todo a ${esc(x.nombre)}</option>`).join('');
         }
-        const opciones = opcionesSucursales(sucursalesFiltroPedidos(sucursales), 'Todas las sucursales');
+        const opciones = opcionesSucursales(sucursales, 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
         if (filtroSel) filtroSel.innerHTML = opciones;
+        const opcionesAS = opcionesSucursales(sucursalesFiltroPedidos(sucursales), 'Todas las sucursales');
         const filtroReal = $('#pedido-sucursal-realizados');
-        if (filtroReal) filtroReal.innerHTML = opciones;
+        if (filtroReal) filtroReal.innerHTML = opcionesAS;
         const selSuc = $('#pedido-sucursal');
         if (esEncargadoPed()) {
             const mie = sucursales.find((x) => x.id === window.SUCURSAL_ID);
@@ -4470,7 +4471,6 @@ async function cargarBandeja() {
     const panel = $('#panel-hist-realizados');
     if (!panel) return;
     if (!puedeVerBandeja()) return;
-    if (!catalogos || !catalogos.sucursales) await loadCatalogos();
     const eyeSvg = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
     try {
         const desde = ($('#pedido-bandeja-desde') || {}).value || '';
@@ -4492,7 +4492,7 @@ async function cargarBandeja() {
         const btsB = $('#bandeja-suc-btns');
         if (btsB) {
             btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-                .concat(ordenarSucursales(sucursalesFiltroPedidos(catalogos.sucursales).map((s) => ({ id: String(s.id), nombre: s.nombre }))))
+                .concat(ordenarSucursales(gruposRaw.map((g) => ({ id: String(g.sucursal_id), nombre: g.nombre }))))
                 .map((b) => `
                     <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
                 .join('');
