@@ -55,6 +55,22 @@ ls -ld "$APP_DIR" "$APP_DIR/respaldos" || true
 # Respaldo previo: garantiza un punto de restauracion del estado exacto de la
 # base justo antes del cambio. Si falla, no se toca la app (set -e).
 echo "==> Respaldo previo al despliegue"
+# `respaldar.py` se ejecuta desde $APP_DIR porque escribe el .sql en
+# <BASE>/respaldos/ (ver deploy/respaldar_respaldo.sh, que lo espera en la raiz).
+# El problema: si un `rsync --delete` se lleva ese archivo, este paso aborta con
+# set -e, NO se reinicia la app, y el deploy siguiente vuelve a fallar igual:
+# un fallo que se repite solo y deja la aplicacion caida sin tocar la base.
+# El clon de $STAGE siempre lo tiene, asi que se restaura desde ahi.
+if [ ! -f "$APP_DIR/respaldar.py" ]; then
+  if [ -f "$STAGE/respaldar.py" ]; then
+    cp "$STAGE/respaldar.py" "$APP_DIR/respaldar.py"
+    chown pollos:pollos "$APP_DIR/respaldar.py" 2>/dev/null || true
+    echo "respaldar.py no estaba en $APP_DIR: restaurado desde el clon"
+  else
+    echo "ERROR: no se encuentra respaldar.py ni en $APP_DIR ni en el clon"
+    exit 1
+  fi
+fi
 sudo -u pollos "$VENV/bin/python" "$APP_DIR/respaldar.py" \
   || { echo "ERROR: el respaldo previo fallo; despliegue abortado"; exit 1; }
 
