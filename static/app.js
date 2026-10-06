@@ -810,7 +810,7 @@ function sucursalesFiltroPedidos(lista) {
             if (!s.principal && s.provee) {
                 const n = nombreNorm(s.nombre);
                 if (n.includes('america')) return Object.assign({}, s, { nombre: 'AS America' });
-                if (n.includes('simon') || n.includes('simon lopez')) return Object.assign({}, s, { nombre: 'AS Simon' });
+                if (n.includes('simon') || n.includes('simon lopez')) return Object.assign({}, s, { nombre: 'AS Simon Lopez' });
             }
             return s;
         })
@@ -825,7 +825,7 @@ function nombreSucursalPedido(s) {
     if (!s.provee) return s.nombre;
     const n = nombreNorm(s.nombre);
     if (n.includes('america')) return 'AS America';
-    if (n.includes('simon') || n.includes('simon lopez')) return 'AS Simon';
+    if (n.includes('simon') || n.includes('simon lopez')) return 'AS Simon Lopez';
     return s.nombre;
 }
 
@@ -4293,7 +4293,7 @@ async function loadPedidos() {
         const selSuc = $('#pedido-sucursal');
         if (esEncargadoPed()) {
             const mie = sucursales.find((x) => x.id === window.SUCURSAL_ID);
-            selSuc.innerHTML = mie ? `<option value="${mie.id}">${mie.principal ? '★ ' : ''}${esc(mie.nombre)}</option>` : '';
+            selSuc.innerHTML = mie ? `<option value="${mie.id}">${mie.principal ? '★ ' : ''}${esc(nombreSucursalPedido(mie))}</option>` : '';
             if ((window.SUCURSAL_PRINCIPAL && !sucursalProvee()) || window.RECEPTOR) {
                 const form = $('#form-pedido');
                 if (form && form.closest('.panel')) form.closest('.panel').style.display = 'none';
@@ -4527,9 +4527,13 @@ async function cargarBandeja() {
         }
         const puedeDespachar = esGestionPed() || esAlmacenPpal();
         const miSuc = String(window.SUCURSAL_ID || '');
-        $('#bandeja-contenido').innerHTML = grupos.map((g) => `
+        const catSuc = (catalogos && catalogos.sucursales) || [];
+        $('#bandeja-contenido').innerHTML = grupos.map((g) => {
+            const suGrupo = catSuc.find((s) => String(s.id) === String(g.sucursal_id));
+            const nomGrupo = suGrupo ? nombreSucursalPedido(suGrupo) : g.nombre;
+            return `
             <div class="bandeja-sucursal">
-                <h3>${esc(g.nombre)} <span class="ciudad-tag">${ciudadSucursal(g.nombre)}</span> <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
+                <h3>${esc(nomGrupo)} <span class="ciudad-tag">${ciudadSucursal(g.nombre)}</span> <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
                 ${g.pedidos.map((p) => {
                     // `destino_id` de una linea es el PROVEEDOR que despacha, no
                     // quien recibe. `esProveedorMio` dice si ESTA sucursal es la
@@ -4620,7 +4624,8 @@ async function cargarBandeja() {
                             </tbody>
                         </table>
                     </div>`;}).join('')}
-            </div>`).join('');
+            </div>`;
+        }).join('');
     } catch (e) {
         const cont = $('#bandeja-contenido');
         if (cont) cont.innerHTML = '<p class="empty">' + esc(e.message) + '</p>';
