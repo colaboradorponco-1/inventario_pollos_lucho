@@ -4289,22 +4289,23 @@ let pestanaPedidos = puedeVerBandeja() ? 'realizados' : 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
 
-// Sucursales que ABASTECEN a otras (América y Simón López): reciben pedidos
-// en su bandeja (pedidos que les hacen a ellas) pero TAMBIÉN hacen sus propios
-// pedidos, así que conservan las dos pestañas aunque en la base queden marcadas
-// como principal.
+// ¿Esta sucursal abastece a otras? La respuesta es SIEMPRE la casilla "¿Provee a
+// otras?" de la base (`sucursales.provee`). NO se decide por el nombre: las
+// sucursales se crean y se renombran, y un atajo por nombre dejaba a América y
+// Simón López viendo la bandeja aunque nadie las hubiera marcado como
+// proveedoras. La única excepción son los almacenes principales, que ya
+// vienen marcados aparte en `SUCURSAL_PRINCIPAL`.
 function sucursalProvee() {
     const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
     if (!m) return false;
-    if (m.provee) return true;
-    const nombreNorm = (m.nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    return nombreNorm.includes('america') || nombreNorm.includes('simon lopez');
+    return !!m.provee || !!window.SUCURSAL_PRINCIPAL;
 }
 
 // «Mis pedidos» (wizard + historial de los que yo realicé) es visible para
 // toda sucursal que hace pedidos. La bandeja «Pedidos que me realizaron» solo
-// la ven las que PROVEEN a otras: almacenes principales, América y Simón López.
-// Siglo XX no provee: no ve la bandeja (nadie le encarga).
+// la ven las que tienen marcada la casilla «¿Provee a otras?». Quien no la
+// tenga marcada queda solo con «Mis pedidos»: es una sucursal que pide, y no un
+// destino al que le encarguen mercadería.
 function puedeVerBandeja() {
     if (!window.ROL) return false;
     if (esGestionPed()) return true;
@@ -4322,8 +4323,9 @@ function inicializarPestanasPedidos() {
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
     // Solo un almacén principal «puro» (que reparte pero no pide) y el admin se
-    // quedan únicamente con su bandeja. América y Simón López proveen a otras
-    // sucursales PERO también hacen sus propios pedidos: conservan las dos.
+    // quedan únicamente con su bandeja. Las filiales que no tienen marcada la
+    // casilla «¿Provee a otras?» también hacen sus propios pedidos: conservan
+    // las dos pestañas.
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
         || window.ROL === 'preparador' || window.ROL === 'repartidor'
         || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
