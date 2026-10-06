@@ -667,6 +667,31 @@ def migrar_esquema():
         # en_camino -> entregado. Al llegar a 'entregado' se mueve el stock.
         if not _col_existe(cur, "pedidos", "etapa"):
             _add_columna(cur, "pedidos", "etapa VARCHAR(20) NOT NULL DEFAULT 'pendiente'")
+        # Unificación de estados (2026): estado y etapa comparten el MISMO flujo
+        # pendiente -> en_camino -> entregado (+ rechazado desde pendiente).
+        # Se mapean los valores viejos de `estado` (despachado/cumplido) y de
+        # `etapa` (en_preparacion). El estado y la etapa quedan ALINEADOS, como
+        # exige el flujo nuevo. Idempotente: después de la primera corrida no
+        # quedan filas con los valores viejos.
+        _orden = {"pendiente": 0, "en_camino": 1, "entregado": 2}
+        _map_estado = {"pendiente": "pendiente", "despachado": "en_camino",
+                       "cumplido": "entregado"}
+        _map_etapa = {"pendiente": "pendiente", "en_preparacion": "en_camino",
+                      "despachado": "en_camino", "cumplido": "entregado",
+                      "entregado": "entregado", "en_camino": "en_camino",
+                      "rechazado": "pendiente"}
+        for fila in cur.execute(
+                "SELECT id, estado, etapa FROM pedidos").fetchall():
+            _e = _map_estado.get((fila["estado"] or "pendiente").strip().lower(),
+                                 "pendiente")
+            _t = _map_etapa.get((fila["etapa"] or "pendiente").strip().lower(),
+                                "pendiente")
+            # El que esté más avanzado de los dos manda (pedidos en tránsito
+            # tenían etapa 'en_camino' con estado 'pendiente').
+            _final = _e if _orden.get(_e, 0) >= _orden.get(_t, 0) else _t
+            if _final != fila["estado"] or _final != fila["etapa"]:
+                cur.execute("UPDATE pedidos SET estado = %s, etapa = %s WHERE id = %s",
+                            (_final, _final, fila["id"]))
         # Quien conto cada linea del inventario diario. Hay DOS encargados por
         # sucursal y los dos cuentan sobre la MISMA planilla: sin esto, el ultimo
         # que guardaba una linea pisaba en silencio el conteo del otro y no habia

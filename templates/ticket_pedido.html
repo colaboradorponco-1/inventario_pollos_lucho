@@ -69,7 +69,7 @@
         <div class="meta">
             <div><span>Fecha y hora</span><b>{{ data.pedido.fecha }}</b></div>
             <div><span>Sucursal que solicita</span><b>{{ data.pedido.sucursal_nombre or '—' }}</b></div>
-            <div><span>Estado</span><b>{{ data.pedido.estado }}</b></div>
+            <div><span>Estado</span><b>{{ {'pendiente':'Pendiente','en_camino':'En camino','entregado':'Entregado','rechazado':'Rechazado'}.get(data.pedido.estado, data.pedido.estado) }}</b></div>
             <div><span>Usuario</span><b>{{ data.pedido.usuario or '—' }}</b></div>
         </div>
         {% if data.pedido.nota %}

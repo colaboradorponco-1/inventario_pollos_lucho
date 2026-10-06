@@ -7,16 +7,16 @@ import io
 import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.path.insert(0, r"C:\Users\hp\Desktop\inventario_pollos_lucho")
+sys.path.insert(0, r"C:\Users\escal\OneDrive\Desktop\Inventario-Pollos-Lucho")
 
 import core.pedidos as ped  # noqa: E402
 
-# Matriz de avance declarada en el backend.
+# Matriz de avance declarada en el backend (flujo unificado).
 AVANCE = {
-    "preparador": {"pendiente": "en_preparacion"},
-    "repartidor": {"en_preparacion": "en_camino", "en_camino": "entregado"},
+    "preparador": {"pendiente": "en_camino"},
+    "repartidor": {"en_camino": "entregado"},
 }
-ETAPAS = ("pendiente", "en_preparacion", "en_camino", "entregado")
+ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
 
 fallos = 0
 
@@ -45,21 +45,20 @@ for rol in ("preparador", "repartidor"):
                     marca = "  (ya lo continua otro rol)"
                 print(f"  bloqueado      {actual:15s} -> {destino}{marca}")
 
-# El preparador NO puede marcar en_camino ni entregado.
+# El preparador NO puede marcar entregado ni rechazar.
 print("\n" + "=" * 70)
 print("REGLAS CRITICAS")
 print("=" * 70)
 reglas = [
-    ("preparador: pendiente -> en_preparacion", permitido("preparador", "pendiente", "en_preparacion"), True),
-    ("preparador: NO puede -> en_camino", permitido("preparador", "pendiente", "en_camino"), False),
+    ("preparador: pendiente -> en_camino", permitido("preparador", "pendiente", "en_camino"), True),
     ("preparador: NO puede -> entregado", permitido("preparador", "pendiente", "entregado"), False),
-    ("preparador: NO puede saltar en_preparacion", permitido("preparador", "en_preparacion", "entregado"), False),
-    ("repartidor: en_preparacion -> en_camino", permitido("repartidor", "en_preparacion", "en_camino"), True),
+    ("preparador: NO puede rechazar", permitido("preparador", "pendiente", "rechazado"), False),
     ("repartidor: en_camino -> entregado", permitido("repartidor", "en_camino", "entregado"), True),
     ("repartidor: NO puede empezar de cero", permitido("repartidor", "pendiente", "en_camino"), False),
-    ("repartidor: NO puede saltar a entregado", permitido("repartidor", "en_preparacion", "entregado"), False),
+    ("repartidor: NO puede saltar a entregado", permitido("repartidor", "pendiente", "entregado"), False),
     ("nadie puede volver a pendiente", permitido("repartidor", "en_camino", "pendiente"), False),
-    ("nadie puede retroceder", permitido("preparador", "en_preparacion", "pendiente"), False),
+    ("nadie puede retroceder", permitido("preparador", "en_camino", "pendiente"), False),
+    ("rechazado es terminal", permitido("repartidor", "rechazado", "en_camino"), False),
 ]
 for nombre, obtenido, esperado in reglas:
     bien = obtenido == esperado

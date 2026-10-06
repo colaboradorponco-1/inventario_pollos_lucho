@@ -286,15 +286,17 @@ def productos():
         # cientos de consultas en cada carga del catálogo.
         nombres = {r["id"]: r["nombre"] or "" for r in conn.execute(
             "SELECT id, nombre FROM sucursales").fetchall()}
-        # Lo ya apartado en pedidos pendientes, POR DESTINO. Sin esto se
-        # mostraría el stock del destino resuelto sin descontar lo que otros
-        # pedidos ya mineraron de ahí, y dos personas podrían pedir lo mismo.
+        # Lo ya apartado en pedidos pendientes o en camino, POR DESTINO. Sin
+        # esto se mostraría el stock del destino resuelto sin descontar lo que
+        # otros pedidos ya mineraron de ahí, y dos personas podrían pedir lo
+        # mismo. El stock se mueve recién al 'entregado', así que 'en_camino'
+        # sigue reservando hasta que se entrega.
         for r in conn.execute(
             "SELECT d.producto_id AS pid, "
             "       COALESCE(d.destino_id, pd.destino_id) AS dest, "
             "       SUM(d.cantidad) AS c "
             "FROM pedido_detalle d JOIN pedidos pd ON pd.id = d.pedido_id "
-            "WHERE pd.estado = 'pendiente' "
+            "WHERE pd.estado IN ('pendiente', 'en_camino') "
             "GROUP BY d.producto_id, COALESCE(d.destino_id, pd.destino_id)"
         ).fetchall():
             reservas[(int(r["pid"]), r["dest"])] = float(r["c"] or 0)
@@ -416,7 +418,7 @@ def _stock_disponible(conn, destino_id=None):
                 - COALESCE((SELECT SUM(d.cantidad) FROM pedido_detalle d
                             JOIN pedidos pd ON pd.id = d.pedido_id
                             WHERE d.producto_id = l.producto_id
-                              AND pd.estado = 'pendiente' {cond_apartado}), 0)) AS disp
+                              AND pd.estado IN ('pendiente', 'en_camino') {cond_apartado}), 0)) AS disp
         FROM lotes l JOIN productos p ON p.id = l.producto_id
         WHERE l.cantidad > 0 AND p.activo = 1
         GROUP BY l.producto_id""".format(cond_lote=cond_lote, cond_apartado=cond_apartado)

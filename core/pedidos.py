@@ -5,9 +5,10 @@ producto se pide al almacén/sucursal que lo provee (puede haber varios
 proveedores en un mismo pedido). Se genera UN ticket imprimible agrupado
 por proveedor y por categoría.
 
-Estados: pendiente -> despachado -> cumplido.
-Cambiar el estado o despachar puede hacerlo un admin/superadmin o un
-encargado de almacén principal (los que coordinan el inventario).
+Estados unificados para todos los roles: pendiente -> en_camino -> entregado,
+más rechazado (solo desde pendiente). El stock se mueve una sola vez, al
+marcar 'entregado'. Cambiar el estado o despachar puede hacerlo un
+admin/superadmin o un encargado de almacén principal.
 """
 from collections import OrderedDict
 from datetime import datetime
@@ -24,17 +25,20 @@ from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
 
 pedidos_bp = Blueprint("pedidos", __name__)
 
-_ESTADOS = ("pendiente", "despachado", "cumplido")
+# Estados unificados para TODOS los roles: pendiente -> en_camino -> entregado,
+# más rechazado (solo desde pendiente). El stock se mueve UNA sola vez, al
+# marcar 'entregado' (baja del almacén que despachó y suma a la sucursal que
+# recibió). 'en_camino' y 'rechazado' no tocan el inventario.
+_ESTADOS = ("pendiente", "en_camino", "entregado", "rechazado")
 
-# Transiciones válidas de estado. Lo importante es que NO se puede volver a
-# 'pendiente' desde 'despachado' o 'cumplido': en esos estados el stock ya salió
-# del almacén, así que volver a pendiente haría que la reserva volviera a
-# contar (el 'disponible' bajaría otra vez) y el siguiente despacho descontaría
-# una segunda vez.
+# Transiciones válidas. No se puede volver a 'pendiente' ni revivir un pedido
+# ya entregado/rechazado: el stock ya salió (entregado) o la operación se
+# cerró (rechazado). 'rechazado' nace ÚNICAMENTE desde 'pendiente'.
 _TRANSICIONES = {
-    "pendiente": {"pendiente", "despachado", "cumplido"},
-    "despachado": {"despachado", "cumplido"},
-    "cumplido": {"cumplido"},
+    "pendiente": {"pendiente", "en_camino", "entregado", "rechazado"},
+    "en_camino": {"en_camino", "entregado"},
+    "entregado": {"entregado"},
+    "rechazado": {"rechazado"},
 }
 
 
@@ -353,9 +357,13 @@ def pedidos():
                   "EXISTS (SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
             params += [sid, sid, sid]
         # Los admin de sucursal y los superadmin ven todos los pedidos
-    if estado in _ESTADOS:
-        q += " AND p.estado = ?"
-        params.append(estado)
+    # `estado` admite "pendiente,en_camino" (coma separada) para filtrar varios
+    # estados a la vez, como usa el badge de pendientes del menú.
+    estados = [e for e in estado.split(",") if e in _ESTADOS]
+    if estados:
+        marcas = ",".join("?" * len(estados))
+        q += f" AND p.estado IN ({marcas})"
+        params += estados
     if filtro:
         q += " AND (p.nro_ticket LIKE ? OR s.nombre LIKE ? OR p.nota LIKE ? OR d.nombre LIKE ?)"
         params += [f"%{filtro}%"] * 4
@@ -534,8 +542,8 @@ def pedido_estado(pedido_id):
         # pedido (`pedido["sucursal_id"] == sid`), y eso dejaba que el encargado
         # de America advancedor el estado de un pedido que le hizo a Almacen
         # Principal 1: la mercaderia la despacha el almacen, no la sucursal que
-        # la pidio. La sucursal que pidio avanza su ETAPA (preparador/repartidor)
-        # y al entregar el backend pone 'cumplido' solo.
+        # la pidio. La sucursal que pidio avanza eta misma etapa/estado
+        # (preparador/repartidor) y al entregar se mueve el stock una sola vez.
         puede = es_proveedor
     if not puede:
         conn.close()
@@ -555,13 +563,10 @@ def pedido_estado(pedido_id):
     # ver PUT /api/pedidos/<id>/etapa. Aquí el cambio de estado sigue siendo
     # exclusivo de quien coordina el inventario, como siempre.
 
-    # Salir de 'pendiente' a 'despachado' o 'cumplido' mueve el stock de verdad:
-    # descuenta del almacén que lo despacha y lo suma a la sucursal que lo pidió.
-    # Antes este endpoint solo hacía `UPDATE ... SET estado`, así que marcar un
-    # pedido como cumplido liberaba la reserva sin sacar la mercadería del
-    # almacén: el inventario quedaba inflado y el producto volvía a estar
-    # disponible aunque la sucursal nunca lo hubiera recibido.
-    if actual == "pendiente" and estado in ("despachado", "cumplido"):
+    # El stock se mueve SOLO al marcar 'entregado' (baja del almacén que
+    # despacha y suma a la sucursal que lo pidió). 'en_camino' y 'rechazado'
+    # no tocan el inventario.
+    if estado == "entregado" and actual != "entregado":
         # El movimiento de stock solo puede hacerlo el almacén destino del
         # pedido, igual que al entregar. Una filial no puede descontar
         # mercadería del almacén desde el desplegable de estado.
@@ -576,15 +581,16 @@ def pedido_estado(pedido_id):
         if movido[0] == "error":
             conn.close()
             return err(movido[1])
-        conn.execute("UPDATE pedidos SET estado = ?, total = ? WHERE id = ?",
-                     (estado, movido[0], pedido_id))
+        conn.execute("UPDATE pedidos SET estado = ?, etapa = ?, total = ? WHERE id = ?",
+                     (estado, estado, movido[0], pedido_id))
         conn.commit()
         conn.close()
-        registrar_auditoria("Pedido actualizado", f"{pedido['nro_ticket']} -> {estado}")
-        return ok(message=f"Pedido {pedido['nro_ticket']} marcado como {estado}. "
+        registrar_auditoria("Pedido entregado", f"{pedido['nro_ticket']} -> entregado")
+        return ok(message=f"Pedido {pedido['nro_ticket']} entregado. "
                           f"Se descontó el stock del almacén.")
 
-    conn.execute("UPDATE pedidos SET estado = ? WHERE id = ?", (estado, pedido_id))
+    conn.execute("UPDATE pedidos SET estado = ?, etapa = ? WHERE id = ?",
+                 (estado, estado, pedido_id))
     conn.commit()
     conn.close()
     registrar_auditoria("Pedido actualizado", f"{pedido['nro_ticket']} -> {estado}")
@@ -705,9 +711,9 @@ def pedido_despachar(pedido_id):
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
-    if pedido["estado"] != "pendiente":
+    if pedido["estado"] not in ("pendiente", "en_camino"):
         conn.close()
-        return err(f"Este pedido ya no está pendiente (estado actual: {pedido['estado']})", 400)
+        return err(f"Este pedido no se puede despachar (estado actual: {pedido['estado']})", 400)
     if not (es_gestion() or es_encargado_almacen(conn)):
         conn.close()
         return err("No tienes permisos para despachar pedidos", 403)
@@ -718,9 +724,9 @@ def pedido_despachar(pedido_id):
     if not any((d["destino_id"] or pedido["destino_id"]) == sid_op for d in det_prov):
         conn.close()
         return err("Solo puedes despachar pedidos destinados a tu almacén", 403)
-    if pedido["estado"] != "pendiente":
+    if pedido["estado"] not in ("pendiente", "en_camino"):
         conn.close()
-        return err("Solo se pueden despachar pedidos en estado 'pendiente'")
+        return err("Solo se pueden despachar pedidos en estado 'pendiente' o 'en_camino'")
     detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,)).fetchall()
     if not detalle:
         conn.close()
@@ -735,7 +741,7 @@ def pedido_despachar(pedido_id):
     # guardaba un total si lo despachaba el almacen con el desplegable de estado
     # y otro distinto si lo entregaba la logistica con las etapas. Con costo
     # 3,333 x 3 uno guardaba 10.0 y el otro 9.999, y las cuentas no cuadraban.
-    conn.execute("UPDATE pedidos SET estado = 'despachado', total = ? WHERE id = ?",
+    conn.execute("UPDATE pedidos SET estado = 'entregado', etapa = 'entregado', total = ? WHERE id = ?",
                  (total, pedido_id))
     conn.commit()
     conn.close()
@@ -810,12 +816,16 @@ def pedidos_bandeja():
     # real pendiente. Los filtros desde/hasta siguen disponibles para cuando si
     # se quiere acotar a un rango.
     #
-    # El estado tambien es opcional: por defecto solo `pendiente` (lo que hay que
-    # hacer). Los ya despachados/cumplidos se ven en el historial.
+    # El estado tambien es opcional: por defecto se muestra lo que hay que
+    # trabajar (pendiente + en camino). Los entregados/rechazados se ven en el
+    # historial.
     estado = (request.args.get("estado", "") or "pendiente").strip().lower()
     if estado in _ESTADOS:
-        where += " AND p.estado = ?"
-        params.append(estado)
+        if estado == "pendiente":
+            where += " AND p.estado IN ('pendiente', 'en_camino')"
+        else:
+            where += " AND p.estado = ?"
+            params.append(estado)
     desde = (request.args.get("desde", "") or "").strip()
     hasta = (request.args.get("hasta", "") or "").strip()
     if desde:
@@ -897,30 +907,28 @@ def logistica_resumen():
         "sucursal": (nombre or {}).get("nombre") or "",
         "rol": session.get("rol"),
         "por_preparar": _contar(("pendiente",)),
-        "por_entregar": _contar(("en_preparacion", "en_camino")),
-        "total": _contar(("pendiente", "en_preparacion", "en_camino")),
+        "por_entregar": _contar(("en_camino",)),
+        "total": _contar(("pendiente", "en_camino")),
     }
     conn.close()
     return ok(resumen)
 
 
 # ---- Etapa logistica del pedido -------------------------------------------
-# `estado` sigue siendo pendiente/despachado/cumplido para que NADA de los
-# reportes ni filtros existentes cambien. `etapa` es el avance de quien
-# cocina y entrega:
-#     pendiente -> en_preparacion -> en_camino -> entregado
-# Al llegar a 'entregado' el pedido pasa a 'cumplido' y la mercaderia se
-# mueve del proveedor a la sucursal que la pidio, en una sola transaccion.
-_ETAPAS = ("pendiente", "en_preparacion", "en_camino", "entregado")
+# `etapa` es/está alineada con `estado`: el flujo es UNO solo para todos los
+# roles (pendiente -> en_camino -> entregado, mas rechazado desde pendiente).
+# El stock se mueve al llegar a 'entregado'.
+_ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
 
-_AVANCE_PREPARADOR = {"pendiente": "en_preparacion"}
-_AVANCE_REPARTIDOR = {"en_preparacion": "en_camino", "en_camino": "entregado"}
+_AVANCE_PREPARADOR = {"pendiente": "en_camino"}
+_AVANCE_REPARTIDOR = {"en_camino": "entregado"}
+_AVANCE_ORDENANTE = {"pendiente": "en_camino", "en_camino": "entregado"}
 
 _ETIQUETA_ETAPA = {
-    "pendiente": "Sin empezar",
-    "en_preparacion": "En preparación",
+    "pendiente": "Pendiente",
     "en_camino": "En camino",
     "entregado": "Entregado",
+    "rechazado": "Rechazado",
 }
 
 
@@ -970,13 +978,19 @@ def pedido_etapa(pedido_id):
         conn.close()
         return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
 
-    # Cada rol solo puede avanzar SU paso, y hacia adelante.
+    # Cada rol solo puede avanzar SU paso, y hacia adelante. El rechazo es un
+    # caso aparte: solo el ordenante/coordinador puede rechazar, y solo desde
+    # 'pendiente' (el pedido recién entra, no se movió nada). Un pedido ya
+    # 'en_camino' o 'entregado' no se puede rechazar.
     if rol == "preparador":
         permitido = _AVANCE_PREPARADOR.get(actual_etapa)
     elif rol == "repartidor":
         permitido = _AVANCE_REPARTIDOR.get(actual_etapa)
     else:
-        permitido = destino_etapa if destino_etapa != "pendiente" else None
+        if destino_etapa == "rechazado":
+            permitido = "rechazado" if actual_etapa == "pendiente" else None
+        else:
+            permitido = _AVANCE_ORDENANTE.get(actual_etapa)
 
     if permitido != destino_etapa:
         conn.close()
@@ -988,8 +1002,9 @@ def pedido_etapa(pedido_id):
         return err(f"No se puede pasar de '{_ETIQUETA_ETAPA[actual_etapa]}' "
                    f"a '{_ETIQUETA_ETAPA[destino_etapa]}'", 403)
 
-    # Un pedido ya despachado/cumplido no vuelve a mover stock.
-    stock_ya_movido = pedido["estado"] in ("despachado", "cumplido")
+    # El stock se mueve UNA sola vez, al llegar a 'entregado'. Un pedido ya
+    # entregado no vuelve a mover stock.
+    stock_ya_movido = pedido["estado"] == "entregado"
 
     if destino_etapa == "entregado" and not stock_ya_movido:
         movido = _despachar_stock(conn, pedido, origen_propio=False)
@@ -1000,8 +1015,8 @@ def pedido_etapa(pedido_id):
         # Sin round(): las columnas son DOUBLE y el movimiento ya viene
         # valuado con la precision del lote. Redondear a 2 decimales alteraba el
         # total real del pedido (3 x 3.333 = 9.999 se guardaba como 10.0).
-        conn.execute("UPDATE pedidos SET etapa = ?, estado = 'cumplido', total = ? WHERE id = ?",
-                     (destino_etapa, movido[0], pedido_id))
+        conn.execute("UPDATE pedidos SET etapa = ?, estado = ?, total = ? WHERE id = ?",
+                     (destino_etapa, "entregado", movido[0], pedido_id))
         conn.commit()
         conn.close()
         registrar_auditoria("Pedido entregado",
@@ -1009,12 +1024,18 @@ def pedido_etapa(pedido_id):
         return ok(message=f"Pedido {pedido['nro_ticket']} entregado. "
                           f"Se movio el stock a tu sucursal.")
 
-    # Si el stock ya se movio al despachar, marcar entregado solo cierra la etapa.
-    nuevo_estado = pedido["estado"]
-    if destino_etapa == "entregado" and stock_ya_movido:
-        nuevo_estado = "cumplido"
+    # Rechazo: desde pendiente, sin tocar stock.
+    if destino_etapa == "rechazado":
+        conn.execute("UPDATE pedidos SET etapa = ?, estado = ? WHERE id = ?",
+                     (destino_etapa, "rechazado", pedido_id))
+        conn.commit()
+        conn.close()
+        registrar_auditoria("Pedido rechazado",
+                            f"{pedido['nro_ticket']} rechazado desde pendiente")
+        return ok(message=f"Pedido {pedido['nro_ticket']} rechazado.")
+
     conn.execute("UPDATE pedidos SET etapa = ?, estado = ? WHERE id = ?",
-                 (destino_etapa, nuevo_estado, pedido_id))
+                 (destino_etapa, destino_etapa, pedido_id))
     conn.commit()
     conn.close()
     registrar_auditoria("Pedido actualizado",

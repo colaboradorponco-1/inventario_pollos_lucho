@@ -440,6 +440,7 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 .badge-pendiente { background: #fff7e6; color: #b45309; }
 .badge-despachado { background: #e8f0fe; color: #1a73e8; }
 .badge-cumplido { background: #e8f5e9; color: #15803d; }
+.badge-rechazado { background: #fdecea; color: #b3261e; }
 
 .items-detalle {
     max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

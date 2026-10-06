@@ -913,7 +913,7 @@
                         <input type="date" id="pedido-realizados-desde" title="Desde">
                         <input type="date" id="pedido-realizados-hasta" title="Hasta">
                         <input type="text" id="pedido-filtro" placeholder="Buscar ticket, sucursal, nota...">
-                        <select id="pedido-estado"><option value="">Todos los estados</option><option value="pendiente">Sin empezar</option><option value="despachado">En camino</option><option value="cumplido">Entregado</option></select>
+                        <select id="pedido-estado"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="en_camino">En camino</option><option value="entregado">Entregado</option><option value="rechazado">Rechazado</option></select>
                         <select id="pedido-sucursal-realizados" style="max-width:220px"></select>
                         <button class="btn" id="btn-filtrar-realizados">Filtrar</button>
                     </div>
@@ -972,7 +972,7 @@
                     <button class="btn" id="btn-pedido-ticket" type="button">Imprimir ticket</button>
                     <button class="btn btn-primary" id="btn-pedido-despachar" type="button">Despachar (crear reparto)</button>
                     <span id="det-pedido-etapa-ctrl"></span>
-                    <select id="pedido-cambiar-estado"><option value="">Cambiar estado...</option><option value="pendiente">Sin empezar</option><option value="despachado">En camino</option><option value="cumplido">Entregado</option></select>
+                    <select id="pedido-cambiar-estado"><option value="">Cambiar estado...</option><option value="pendiente">Pendiente</option><option value="en_camino">En camino</option><option value="entregado">Entregado</option><option value="rechazado">Rechazado</option></select>
                 </div>
             </div>
         </div>
@@ -1377,7 +1377,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610061300"></script>
+    <script src="/static/app.js?v=202610062130"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
