@@ -2708,7 +2708,7 @@ async function loadUsuarios() {
             <tr>
                 <td><strong>${u.usuario}</strong></td>
                 <td>${u.nombre || '—'}</td>
-                <td><span class="badge ${u.rol === 'superadmin' ? 'badge-info' : u.rol === 'admin' ? 'badge-bajo' : 'badge-entrada'}">${u.rol === 'superadmin' ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : 'Encargado'}</span></td>
+                <td><span class="badge ${u.rol === 'superadmin' ? 'badge-info' : u.rol === 'admin' ? 'badge-bajo' : 'badge-entrada'}">${u.receptor ? 'Receptor' : u.rol === 'superadmin' ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : u.rol === 'preparador' ? 'Preparador' : u.rol === 'repartidor' ? 'Repartidor' : 'Encargado'}</span></td>
                 <td>${u.sucursal_nombre ? `<span class="badge badge-ciudad">${esc(u.sucursal_nombre)}</span>` : '—'}</td>
                 <td><span class="badge ${u.activo ? 'badge-entrada' : 'badge-salida'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
                 <td>
@@ -2724,16 +2724,9 @@ async function loadUsuarios() {
             $('#user-usuario').disabled = true;
             $('#user-nombre').value = u.nombre;
             const rolSel = $('#user-rol');
-            const opcAdmin = rolSel.querySelector('option[value="admin"]');
-            const opcSuper = rolSel.querySelector('option[value="superadmin"]');
-            if (window.ROL === 'superadmin') {
-                opcAdmin.style.display = '';
-                opcSuper.style.display = '';
-            } else {
-                opcAdmin.style.display = 'none';
-                opcSuper.style.display = 'none';
-            }
-            rolSel.value = u.rol;
+            const esSob = window.ROL === 'superadmin';
+            rolSel.querySelectorAll('option[data-sobreadmin]').forEach((o) => { o.style.display = esSob ? '' : 'none'; });
+            rolSel.value = u.receptor ? 'receptor' : u.rol;
             const userSucSel = $('#user-sucursal');
             if (userSucSel) userSucSel.value = u.sucursal_id || '';
             $('#user-activo').value = u.activo ? '1' : '0';
@@ -2761,17 +2754,9 @@ $('#btn-nuevo-usuario').addEventListener('click', () => {
     const form = $('#form-usuario');
     form.reset();
     const rolSel = $('#user-rol');
-    const opcAdmin = rolSel.querySelector('option[value="admin"]');
-    const opcSuper = rolSel.querySelector('option[value="superadmin"]');
-    if (window.ROL === 'superadmin') {
-        opcAdmin.style.display = '';
-        opcSuper.style.display = '';
-        rolSel.value = 'encargado';
-    } else {
-        opcAdmin.style.display = 'none';
-        opcSuper.style.display = 'none';
-        rolSel.value = 'encargado';
-    }
+    const esSob = window.ROL === 'superadmin';
+    rolSel.querySelectorAll('option[data-sobreadmin]').forEach((o) => { o.style.display = esSob ? '' : 'none'; });
+    rolSel.value = 'encargado';
     $('#user-id').value = '';
     $('#user-usuario').disabled = false;
     const userSucSel = $('#user-sucursal');

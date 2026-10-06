@@ -28,8 +28,15 @@ def usuarios():
         rol = data.get("rol", "encargado")
         password = data.get("password") or ""
         sucursal_id = data.get("sucursal_id")
+        # El rol "receptor" es un encargado de sucursal proveedora (p. ej.
+        # "AS America"/"AS Simon Lopez"): su panel es la bandeja y sus datos.
+        # En BD vive como rol encargado + flag receptor, no como rol aparte.
+        receptor = rol == "receptor"
+        if receptor:
+            rol = "encargado"
         if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor"):
             rol = "encargado"
+            receptor = False
         if not es_superadmin() and rol != "encargado":
             conn.close()
             return err("Solo el superadministrador puede asignar ese rol", 403)
@@ -40,10 +47,10 @@ def usuarios():
             return err("Usuario inválido o contraseña muy corta (mínimo 4)")
         try:
             conn.execute("""
-                INSERT INTO usuarios (usuario, password_hash, nombre, rol, activo, sucursal_id)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO usuarios (usuario, password_hash, nombre, rol, activo, sucursal_id, receptor)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (usuario, generate_password_hash(password), nombre, rol,
-                  data.get("activo", 1), sucursal_id))
+                  data.get("activo", 1), sucursal_id, 1 if receptor else 0))
             conn.commit()
         except pymysql.err.IntegrityError:
             conn.close()
@@ -54,13 +61,13 @@ def usuarios():
 
     if es_superadmin():
         rows = conn.execute("""
-            SELECT u.id, u.usuario, u.nombre, u.rol, u.activo, u.sucursal_id, s.nombre AS sucursal_nombre
+            SELECT u.id, u.usuario, u.nombre, u.rol, u.receptor, u.activo, u.sucursal_id, s.nombre AS sucursal_nombre
             FROM usuarios u LEFT JOIN sucursales s ON s.id = u.sucursal_id
             ORDER BY u.usuario""").fetchall()
     else:
         sid = sucursal_actual()
         rows = conn.execute("""
-            SELECT u.id, u.usuario, u.nombre, u.rol, u.activo, u.sucursal_id, s.nombre AS sucursal_nombre
+            SELECT u.id, u.usuario, u.nombre, u.rol, u.receptor, u.activo, u.sucursal_id, s.nombre AS sucursal_nombre
             FROM usuarios u LEFT JOIN sucursales s ON s.id = u.sucursal_id
             WHERE u.sucursal_id = ?
             ORDER BY u.usuario""", (sid,)).fetchall()
@@ -101,9 +108,14 @@ def usuario(user_id):
     rol = data.get("rol", "encargado")
     activo = 1 if data.get("activo", 1) else 0
     sucursal_id = data.get("sucursal_id")
+    # Igual que en el POST: "receptor" es un encargado con flag receptor.
+    receptor = rol == "receptor"
+    if receptor:
+        rol = "encargado"
     if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor"):
         rol = "encargado"
-    target = conn.execute("SELECT rol FROM usuarios WHERE id = ?", (user_id,)).fetchone()
+        receptor = False
+    target = conn.execute("SELECT rol, receptor FROM usuarios WHERE id = ?", (user_id,)).fetchone()
     if not target:
         conn.close()
         return err("Usuario no encontrado", 404)
@@ -119,9 +131,11 @@ def usuario(user_id):
         if rol != "encargado":
             conn.close()
             return err("Solo el superadministrador puede asignar ese rol", 403)
+        # Un admin no cambia la bandera receptor: se conserva la que ya tenía.
+        receptor = bool(target["receptor"])
         sucursal_id = sucursal_actual()
-    conn.execute("UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, sucursal_id = ? WHERE id = ?",
-                 (nombre, rol, activo, sucursal_id, user_id))
+    conn.execute("UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, sucursal_id = ?, receptor = ? WHERE id = ?",
+                 (nombre, rol, activo, sucursal_id, 1 if receptor else 0, user_id))
     password = data.get("password") or ""
     if password:
         if len(password) < 4:
