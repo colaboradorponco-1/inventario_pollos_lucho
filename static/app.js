@@ -872,26 +872,18 @@ function sucursalesFiltroBandeja(lista) {
     if (puedeVerTodasSucursales()) return base;
     const nombreSuc = (window.SUCURSAL_NOMBRE || '').toLowerCase();
     const esLaPaz = nombreSuc.includes('la paz') || nombreSuc.includes('miraflores') || nombreSuc.includes('sopocachi');
-    const esReceptor = nombreSuc.includes('as ') || nombreSuc.startsWith('as');
 
     return base.filter((s) => {
         const n = (s.nombre || '').toLowerCase();
+        // NUNCA mostrar ningún AS en los filtros de bandeja de encargados/receptores
+        if (n.startsWith('as ') || n.includes('as ')) return false;
+
         if (esLaPaz) {
-            if (esReceptor) {
-                // Receptor de La Paz: Sopocachi, Miraflores
-                return n.includes('sopocachi') || n.includes('miraflores');
-            } else {
-                // Encargados sucursales La Paz: Almacén Principal 1, 2 y AS 6 de Agosto
-                return s.principal || n.includes('6 de agosto') || Number(s.id) === Number(window.SUCURSAL_ID);
-            }
+            // Receptor / encargados de La Paz: ver Sopocachi, Miraflores, 6 de agosto y almacenes principales
+            return s.principal || n.includes('sopocachi') || n.includes('miraflores') || n.includes('6 de agosto');
         } else {
-            if (esReceptor) {
-                // Receptores Cochabamba (AS America, AS Simon Lopez): America, Siglo XX, Simon Lopez
-                return n.includes('america') || n.includes('siglo xx') || n.includes('simón') || n.includes('simon');
-            } else {
-                // Encargados filiales Cochabamba: Almacén Principal 1, 2 y AS America, AS Simon Lopez
-                return s.principal || n.includes('as america') || n.includes('as simón') || n.includes('as simon') || Number(s.id) === Number(window.SUCURSAL_ID);
-            }
+            // Receptores / encargados de Cochabamba: ver America, Siglo XX, Simon Lopez y almacenes principales
+            return s.principal || n.includes('america') || n.includes('siglo xx') || n.includes('simón') || n.includes('simon');
         }
     });
 }
