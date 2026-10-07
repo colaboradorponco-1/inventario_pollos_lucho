@@ -217,27 +217,36 @@ def productos():
     # stock_sucursal: fuerza el stock de UNA sucursal concreta (p. ej. el desplegable
     # de ventas/repartos usa el stock de la sucursal del usuario, no el total).
     stock_sid = None
+    join_own_sucursal = False
     if request.args.get("stock_sucursal", "").strip():
         stock_sid, e = _stock_sucursal_permitido(conn, ver_todo, sid)
         if e:
             conn.close()
             return e
-    elif sucursal is not None:
-        # La pestaña de sucursal del listado muestra el stock DE ESA sucursal
-        # (ella + su AS), no el de la sucursal del usuario. Si no, al filtrar por
-        # otra sucursal los estados "con stock"/"agotado"/"stock bajo"/"por
-        # vencer" se calculaban contra los lotes del usuario y la lista salía en 0
-        # (pasa en los paneles AS y en los de cualquier filial).
-        stock_sid = sucursal
-    elif not ver_todo and sid is not None:
-        stock_sid = sid
-    if stock_sid is not None:
         ids_stock = [int(x) for x in ids_sucursal_consolidada(conn, int(stock_sid))]
         ph_in = ",".join(str(x) for x in ids_stock)
         join_stock = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad "
                       "FROM lotes WHERE sucursal_id IN (" + ph_in + ") GROUP BY producto_id) s ON s.producto_id = p.id")
         lote_cond = " AND l2.sucursal_id IN (" + ph_in + ")"
-    else:
+    elif not ver_todo and sid is not None and sucursal is None:
+        # Vista de una filial sin pestaña elegida: cada producto muestra el stock
+        # de SU PROPIA sucursal (producción en la AS, venta en la tienda).
+        join_own_sucursal = True
+    elif sucursal is not None:
+        # Pestaña de sucursal: la LISTA es consolidada (tienda + su AS) pero el
+        # stock de cada producto es el de su propia sucursal. Antes se sumaban los
+        # lotes de la tienda y del AS del MISMO artículo: al pedir 15 de la
+        # producción para la venta, el total seguía igual (45 -> 45) y parecía un
+        # ciclo que ni quita ni aumenta, cuando en realidad la AS baja y la venta
+        # sube (45 -> 30 la producción, 0 -> 15 la venta).
+        join_own_sucursal = True
+    if join_own_sucursal:
+        join_stock = ("LEFT JOIN (SELECT l.producto_id, SUM(l.cantidad) AS cantidad "
+                      "FROM lotes l JOIN productos pr2 ON pr2.id = l.producto_id "
+                      "WHERE l.cantidad > 0 AND l.sucursal_id = pr2.sucursal_id "
+                      "GROUP BY l.producto_id) s ON s.producto_id = p.id")
+        lote_cond = " AND l2.sucursal_id = p.sucursal_id"
+    elif stock_sid is None:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
     q = """
