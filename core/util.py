@@ -179,6 +179,29 @@ def sucursal_almacen_as(conn, sucursal_id):
     return int(cur.lastrowid)
 
 
+def ids_sucursal_consolidada(conn, sucursal_id):
+    """Ids que pertenecen a una sucursal para contar/ver su inventario.
+
+    Una tienda con almacén de producción separado (América, Simón López,
+    6 de Agosto-La Paz) tiene su sucursal AS hija: sus productos y lotes viven
+    ahí. Para que LA SUCURSAL siga mostrando sus productos (panel, listado,
+    planilla diaria), el alcance de "la sucursal" es ella + sus AS hijas.
+    Nunca toca datos: solo amplía los ids con que se consultan.
+    """
+    try:
+        sucursal_id = int(sucursal_id or 0)
+    except (TypeError, ValueError):
+        return [sucursal_id]
+    if not sucursal_id:
+        return [sucursal_id]
+    ids = [sucursal_id]
+    for r in conn.execute(
+            "SELECT id FROM sucursales WHERE padre_id = ? AND es_as = 1",
+            (sucursal_id,)).fetchall():
+        ids.append(int(r["id"]))
+    return ids
+
+
 # Endpoints que un preparador/repartidor JAMAŚ debe tocar: todo lo que no sea
 # su cola de pedidos. Los pedidos (bandeja + etapa) quedan fuera.
 RUTAS_BLOQUEADAS_LOGISTICA = (

@@ -28,7 +28,8 @@ from database import get_conn
 from .lotes import stock_lotes
 from .util import (ok, err, login_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen,
-                   registrar_auditoria, registrar_movimiento, flotante)
+                   registrar_auditoria, registrar_movimiento, flotante,
+                   ids_sucursal_consolidada)
 
 inventario_bp = Blueprint("inventario", __name__)
 
@@ -122,12 +123,18 @@ def _detalle(conn, inv_id):
     """, (inv_id,)).fetchall()
 
 
-def _productos_planilla(conn, sid, fecha, cat_id):
-    """Productos que debería contener una planilla de esa sucursal/fecha.
+def _productos_planilla(conn, ids, fecha, cat_id):
+    """Productos que entran a la planilla de inventario.
+
+    Recibe los ids consolidados de la sucursal (ella + sus AS hijas): en los
+    almacenes de La Paz (América/Simón López/6 de Agosto) los productos
+    viven físicamente en la sucursal AS hija, así que la planilla del encargado
+    debe listarlos y leer su stock desde las dos.
 
     Comparte la consulta entre crear y abrir, para que al abrir una planilla se
     puedan agregar los productos que entraron a la categoría después de creada."""
-    return conn.execute("""
+    ph = ",".join(["%s"] * len(ids))
+    return conn.execute(f"""
         SELECT p.id, p.codigo, p.nombre, p.unidad, p.costo_promedio, p.precio_venta,
                p.categoria_id, c.nombre AS categoria_nombre,
                COALESCE(l.stock, 0) AS stock,
@@ -138,26 +145,26 @@ def _productos_planilla(conn, sid, fecha, cat_id):
         FROM productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS stock FROM lotes
-                   WHERE sucursal_id = %s GROUP BY producto_id) l ON l.producto_id = p.id
+                   WHERE sucursal_id IN ({ph}) GROUP BY producto_id) l ON l.producto_id = p.id
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ingreso FROM movimientos
-                   WHERE sucursal_id = %s AND tipo = 'entrada' AND DATE(fecha) = %s
+                   WHERE sucursal_id IN ({ph}) AND tipo = 'entrada' AND DATE(fecha) = %s
                    GROUP BY producto_id) ent ON ent.producto_id = p.id
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS salida FROM movimientos
-                   WHERE sucursal_id = %s AND tipo = 'salida' AND DATE(fecha) = %s
+                   WHERE sucursal_id IN ({ph}) AND tipo = 'salida' AND DATE(fecha) = %s
                    GROUP BY producto_id) sa ON sa.producto_id = p.id
         LEFT JOIN (SELECT producto_id, SUM(cantidad) AS ajuste FROM movimientos
-                   WHERE sucursal_id = %s AND tipo = 'ajuste' AND DATE(fecha) = %s
+                   WHERE sucursal_id IN ({ph}) AND tipo = 'ajuste' AND DATE(fecha) = %s
                    GROUP BY producto_id) aj ON aj.producto_id = p.id
         LEFT JOIN (SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad
                    ELSE cantidad END) AS post FROM movimientos
-                   WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste')
+                   WHERE sucursal_id IN ({ph}) AND tipo IN ('entrada', 'salida', 'ajuste')
                      AND DATE(fecha) > %s
                    GROUP BY producto_id) po ON po.producto_id = p.id
         WHERE p.activo = 1 AND (l.stock > 0 OR ent.ingreso > 0 OR sa.salida > 0
-                                OR p.sucursal_id = %s OR p.sucursal_id IS NULL)
+                                OR p.sucursal_id IN ({ph}) OR p.sucursal_id IS NULL)
           AND (%s = 0 OR p.categoria_id = %s)
         ORDER BY c.nombre, p.nombre
-    """, (sid, sid, fecha, sid, fecha, sid, fecha, sid, fecha, sid, cat_id, cat_id)).fetchall()
+    """, (*list(ids) * 5, fecha, fecha, fecha, fecha, *ids, cat_id, cat_id)).fetchall()
 
 
 def _misma_cantidad(a, b):
@@ -179,7 +186,7 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
                        (inv_id,)).fetchone()
     if not inv or inv["estado"] == "cerrado":
         return 0
-    filas = _productos_planilla(conn, sid, fecha, cat_id)
+    filas = _productos_planilla(conn, ids_sucursal_consolidada(conn, sid), fecha, cat_id)
     det = _detalle(conn, inv_id)
     por_prod = {d["producto_id"]: d for d in det}
     cambios = 0
@@ -248,15 +255,16 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
     return cambios
 
 
-def _stocks_actuales(conn, sucursal_id):
-    """{producto_id: stock en lotes} de la sucursal, en una sola consulta."""
+def _stocks_actuales(conn, ids):
+    """{producto_id: stock en lotes} de la sucursal (con sus AS), en UNA consulta."""
+    ph = ",".join(["%s"] * len(ids))
     return {r["producto_id"]: r["c"] or 0.0 for r in conn.execute(
-        "SELECT producto_id, COALESCE(SUM(cantidad), 0) AS c FROM lotes "
-        "WHERE sucursal_id = %s GROUP BY producto_id", (sucursal_id,)).fetchall()}
+        f"SELECT producto_id, COALESCE(SUM(cantidad), 0) AS c FROM lotes "
+        f"WHERE sucursal_id IN ({ph}) GROUP BY producto_id", list(ids)).fetchall()}
 
 
-def _ingresos_del_dia(conn, sucursal_id, fecha):
-    """{producto_id: total que ENTRÓ} a la sucursal en ese día, según el SISTEMA.
+def _ingresos_del_dia(conn, ids, fecha):
+    """{producto_id: total que ENTRÓ} a la sucursal (con sus AS) en ese día, según el SISTEMA.
 
     Es la parte automática del "ingreso del día": todo lo que se registró como
     movimiento 'entrada', o sea las compras y los pedidos que otro almacén le
@@ -267,10 +275,11 @@ def _ingresos_del_dia(conn, sucursal_id, fecha):
     Lo que sí llega por vías que no pasan por el sistema (compra directa en el
     mercado, devolución, mercadería traída de la casa) se anota aparte, en el
     campo de ingreso manual, y se SUMA a este."""
+    ph = ",".join(["%s"] * len(ids))
     return {r["producto_id"]: r["i"] or 0.0 for r in conn.execute(
-        "SELECT producto_id, SUM(cantidad) AS i FROM movimientos "
-        "WHERE sucursal_id = %s AND tipo = 'entrada' AND DATE(fecha) = %s "
-        "GROUP BY producto_id", (sucursal_id, fecha)).fetchall()}
+        f"SELECT producto_id, SUM(cantidad) AS i FROM movimientos "
+        f"WHERE sucursal_id IN ({ph}) AND tipo = 'entrada' AND DATE(fecha) = %s "
+        f"GROUP BY producto_id", (*ids, fecha)).fetchall()}
 
 
 def _ingresos_de_linea(ingresos, fila, abierto):
@@ -291,9 +300,12 @@ def _ingresos_de_linea(ingresos, fila, abierto):
     return sistema, manual, sistema + manual
 
 
-def _movimientos_posteriores(conn, sucursal_id, fecha, hora_corte=None):
+def _movimientos_posteriores(conn, ids, fecha, hora_corte=None):
     """Efecto neto en el stock de los movimientos registrados DESPUÉS del corte de la
     planilla: ya están en el stock actual pero no en el conteo físico.
+
+    Recibe los ids consolidados (sucursal + sus AS): los movimientos de los
+    productos de esos almacenes viven en la AS hija.
 
     Son los de fechas posteriores a `fecha` y, si `hora_corte` viene informado, los
     del mismo día posteriores a esa hora. Sin esto, una planilla abierta a las 07:00 y
@@ -306,14 +318,15 @@ def _movimientos_posteriores(conn, sucursal_id, fecha, hora_corte=None):
     Por eso el neto NO es un SUM(cantidad) pelado: hay que restar las salidas, o el
     stock de referencia saldría corrido en el doble de lo vendido después del corte."""
     cond = "DATE(fecha) > %s"
-    params = [sucursal_id, fecha]
+    ph = ",".join(["%s"] * len(ids))
+    params = [*ids, fecha]
     if hora_corte:
         cond = "(DATE(fecha) > %s OR (DATE(fecha) = %s AND TIME(fecha) > %s))"
-        params = [sucursal_id, fecha, fecha, hora_corte]
+        params = [*ids, fecha, fecha, hora_corte]
     return {r["producto_id"]: r["s"] or 0.0 for r in conn.execute(
-        "SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad "
-        "ELSE cantidad END) AS s FROM movimientos "
-        "WHERE sucursal_id = %s AND tipo IN ('entrada', 'salida', 'ajuste') "
+        f"SELECT producto_id, SUM(CASE WHEN tipo = 'salida' THEN -cantidad "
+        f"ELSE cantidad END) AS s FROM movimientos "
+        f"WHERE sucursal_id IN ({ph}) AND tipo IN ('entrada', 'salida', 'ajuste') "
         f"AND {cond} GROUP BY producto_id", params).fetchall()}
 
 
@@ -432,7 +445,7 @@ def inventario_crear():
     # entregados, que sincronizan solos cuando se marcan como Entregado). Así el
     # encargado cuenta contra lo que el sistema dice que hay y no anota dos veces
     # lo que ya llegó por pedido.
-    filas = _productos_planilla(conn, sid, fecha, cat_id)
+    filas = _productos_planilla(conn, ids_sucursal_consolidada(conn, sid), fecha, cat_id)
 
     for f in filas:
         # 'stock' es el stock de HOY. Si la planilla es de un día anterior, primero
@@ -481,9 +494,10 @@ def inventario_detalle(inv_id):
         _sincronizar_detalle(conn, inv_id, inv["sucursal_id"],
                              _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
     filas = _detalle(conn, inv_id)
-    stocks = _stocks_actuales(conn, inv["sucursal_id"])
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], inv["hora_corte"])
-    ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
+    ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
+    stocks = _stocks_actuales(conn, ids_planilla)
+    posteriores = _movimientos_posteriores(conn, ids_planilla, inv["fecha"], inv["hora_corte"])
+    ingresos = _ingresos_del_dia(conn, ids_planilla, inv["fecha"])
     abierto = inv["estado"] != "cerrado"
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (inv["sucursal_id"],)).fetchone()
@@ -616,8 +630,9 @@ def inventario_guardar(inv_id):
         return v
 
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
-    stocks = _stocks_actuales(conn, inv["sucursal_id"])
-    ingresos = _ingresos_del_dia(conn, inv["sucursal_id"], inv["fecha"])
+    ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
+    stocks = _stocks_actuales(conn, ids_planilla)
+    ingresos = _ingresos_del_dia(conn, ids_planilla, inv["fecha"])
     usuario_actual = session.get("usuario", "") or ""
     # Si la columna `contado_por` todavia no esta en la base, `_detalle` (que
     # hace SELECT d.*) no la trae en las filas y se detecta solo, sin consulta
@@ -637,7 +652,7 @@ def inventario_guardar(inv_id):
         conn.close()
         return err("La hora de corte no tiene un formato válido (debe ser HH:MM)", 400)
     hora_corte = hora_nueva or inv["hora_corte"] or None
-    posteriores = _movimientos_posteriores(conn, inv["sucursal_id"], inv["fecha"], hora_corte)
+    posteriores = _movimientos_posteriores(conn, ids_planilla, inv["fecha"], hora_corte)
     try:
         for item in lineas:
             if not isinstance(item, dict):
@@ -866,6 +881,18 @@ def inventario_cerrar(inv_id):
     sobrantes = 0
     valor_dif = 0.0
     dif_por_linea = {}
+    # El disparo del ajuste va a la sucursal donde VIVE el lote del producto:
+    # en los almacenes con AS hija (América/Simón López/6 de Agosto) el stock
+    # físico está en la AS, así que el movimiento debe firmarse contra ella, no
+    # contra la tienda.
+    ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
+    owner = {}
+    if len(ids_planilla) > 1:
+        ph = ",".join(["%s"] * len(ids_planilla))
+        for r in conn.execute(
+                f"SELECT id, sucursal_id FROM productos WHERE sucursal_id IN ({ph})",
+                ids_planilla).fetchall():
+            owner[r["id"]] = int(r["sucursal_id"])
     for f in filas:
         final = f["final"]
         if final is None:
@@ -891,7 +918,7 @@ def inventario_cerrar(inv_id):
                 f["costo_promedio"] or 0, fecha_mov,
                 f"Inventario diario {inv['fecha']} (ajuste "
                 f"{'faltante' if dif < 0 else 'sobrante'})",
-                session.get("usuario", ""), inv["sucursal_id"])
+                session.get("usuario", ""), owner.get(f["producto_id"], inv["sucursal_id"]))
         except Exception as e:
             # Un ajuste a la baja no puede dejar el stock en negativo o hay otro error.
             # Se revierte TODO, incluyendo los ajustes ya aplicados: la planilla queda

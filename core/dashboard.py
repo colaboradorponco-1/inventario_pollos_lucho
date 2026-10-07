@@ -6,18 +6,27 @@ from database import get_conn
 from .lotes import destinos_validos
 from .util import (ok, login_requerido, sucursal_actual, sucursal_operativa, es_gestion,
                    es_encargado_almacen, ids_ciudad_permitidos, sucursal_filtro_permitida,
-                   cond_ciudad)
+                   cond_ciudad, ids_sucursal_consolidada)
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
 
-def _cls(col):
+def _cls(col, conn=None):
     """Devuelve (condición SQL, params) para filtrar por la sucursal del usuario.
     Quien ve todo (sin sucursal asignada) puede restringir por ciudad si el
-    usuario seleccionó una en la vista (?ciudad=cochabamba|la-paz)."""
+    usuario seleccionó una en la vista (?ciudad=cochabamba|la-paz).
+
+    Para una tienda con sucursal AS hija (América, Simón López, 6 de Agosto-La
+    Paz), el alcance de la sucursal es ELLA + SU AS: sus productos, lotes y
+    movimientos pertenecen a la sucursal y se ven en su panel."""
     sid = sucursal_actual()
     if sid is not None:
-        return f" AND {col} = %s", [sid]
+        if conn is not None:
+            ids = ids_sucursal_consolidada(conn, sid)
+        else:
+            ids = [sid]
+        ph = ",".join(["%s"] * len(ids))
+        return f" AND {col} IN ({ph})", list(ids)
     cids = getattr(g, "ciudad_ids", None)
     if cids:
         return cond_ciudad(col, cids)
@@ -45,7 +54,7 @@ def dashboard():
 
     # Helper que a partir del where base construye query + params con filtro de sucursal
     def scoped(sql_where, sql_extra="", params_extra=None):
-        cond, cls_params = _cls(sql_where)
+        cond, cls_params = _cls(sql_where, conn)
         q = " WHERE 1=1" + cond + sql_extra
         params = cls_params + (params_extra or [])
         return q, params
@@ -63,11 +72,13 @@ def dashboard():
         else:
             total_productos = conn.execute("SELECT COUNT(*) c FROM productos WHERE activo = 1").fetchone()["c"]
     else:
+        ids_cons = ids_sucursal_consolidada(conn, sid)
+        ph = ",".join(["%s"] * len(ids_cons))
         total_productos = conn.execute("""
             SELECT COUNT(DISTINCT l.producto_id) c
             FROM lotes l JOIN productos p ON p.id = l.producto_id
-            WHERE p.activo = 1 AND l.sucursal_id = %s
-        """, (sid,)).fetchone()["c"]
+            WHERE p.activo = 1 AND l.sucursal_id IN (""" + ph + """)
+        """, list(ids_cons)).fetchone()["c"]
 
     stock_cond, stock_params = cond_ciudad("l.sucursal_id", cids)
     if sid is None:
@@ -79,15 +90,17 @@ def dashboard():
             FROM lotes l JOIN productos p ON p.id = l.producto_id
             WHERE l.cantidad > 0 AND p.activo = 1""" + stock_cond, stock_params).fetchone()["valor"]
     else:
+        ids_cons = ids_sucursal_consolidada(conn, sid)
+        ph = ",".join(["%s"] * len(ids_cons))
         stock_total = conn.execute("""
             SELECT COUNT(*) c FROM lotes l JOIN productos p ON p.id = l.producto_id
-            WHERE l.cantidad > 0 AND p.activo = 1 AND l.sucursal_id = %s
-        """, (sid,)).fetchone()["c"]
+            WHERE l.cantidad > 0 AND p.activo = 1 AND l.sucursal_id IN (""" + ph + """)
+        """, list(ids_cons)).fetchone()["c"]
         valor = conn.execute("""
             SELECT COALESCE(SUM(l.cantidad * p.costo_promedio), 0) AS valor
             FROM lotes l JOIN productos p ON p.id = l.producto_id
-            WHERE l.cantidad > 0 AND p.activo = 1 AND l.sucursal_id = %s
-        """, (sid,)).fetchone()["valor"]
+            WHERE l.cantidad > 0 AND p.activo = 1 AND l.sucursal_id IN (""" + ph + """)
+        """, list(ids_cons)).fetchone()["valor"]
 
     # Joins para las alertas de stock (globales si el usuario las ve de todas las sucursales)
     if cids:
@@ -101,24 +114,27 @@ def dashboard():
         stock_where = ""
         stock_params = []
     else:
-        stock_join = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = %s GROUP BY producto_id) s ON s.producto_id = p.id"
+        ids_cons = ids_sucursal_consolidada(conn, sid)
+        ph = ",".join(["%s"] * len(ids_cons))
+        stock_join = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes "
+                      "WHERE sucursal_id IN (" + ph + ") GROUP BY producto_id) s ON s.producto_id = p.id")
         stock_where = " AND s.producto_id IS NOT NULL"
-        stock_params = [sid]
+        stock_params = list(ids_cons)
 
     # Top entradas/salidas
     top_entrada = conn.execute("""
         SELECT p.nombre, p.unidad, SUM(m.cantidad) AS total
         FROM movimientos m JOIN productos p ON p.id = m.producto_id
-        WHERE m.tipo = 'entrada'""" + (_cls("m.sucursal_id")[0] or "") + """
+        WHERE m.tipo = 'entrada'""" + (_cls("m.sucursal_id", conn)[0] or "") + """
         GROUP BY m.producto_id ORDER BY total DESC LIMIT 5
-    """, _cls("m.sucursal_id")[1]).fetchall()
+    """, _cls("m.sucursal_id", conn)[1]).fetchall()
 
     top_salida = conn.execute("""
         SELECT p.nombre, p.unidad, SUM(m.cantidad) AS total
         FROM movimientos m JOIN productos p ON p.id = m.producto_id
-        WHERE m.tipo = 'salida'""" + (_cls("m.sucursal_id")[0] or "") + """
+        WHERE m.tipo = 'salida'""" + (_cls("m.sucursal_id", conn)[0] or "") + """
         GROUP BY m.producto_id ORDER BY total DESC LIMIT 5
-    """, _cls("m.sucursal_id")[1]).fetchall()
+    """, _cls("m.sucursal_id", conn)[1]).fetchall()
 
     stock_bajo = conn.execute("""
         SELECT p.id, p.nombre, p.codigo, p.stock_minimo, p.unidad, p.costo_promedio, p.precio_venta,
@@ -138,8 +154,10 @@ def dashboard():
         por_extra = ""
         por_params = [hoy, hoy, hoy]
     else:
-        por_extra = " AND l.sucursal_id = %s"
-        por_params = [hoy, hoy, hoy, sid]
+        ids_cons = ids_sucursal_consolidada(conn, sid)
+        ph = ",".join(["%s"] * len(ids_cons))
+        por_extra = " AND l.sucursal_id IN (" + ph + ")"
+        por_params = [hoy, hoy, hoy] + list(ids_cons)
 
     por_vencer = conn.execute("""
         SELECT p.id, p.nombre, l.fecha_vencimiento AS vencimiento, p.unidad, SUM(l.cantidad) AS stock,
@@ -181,8 +199,10 @@ def dashboard():
         por_hoy_sql = " AND l.sucursal_id IN (" + ph + ")"
         por_hoy_params = (hoy,) + tuple(cids)
     elif not alerta_global:
-        por_hoy_sql = " AND l.sucursal_id = %s"
-        por_hoy_params = (hoy, sid)
+        ids_cons = ids_sucursal_consolidada(conn, sid)
+        ph = ",".join(["%s"] * len(ids_cons))
+        por_hoy_sql = " AND l.sucursal_id IN (" + ph + ")"
+        por_hoy_params = (hoy,) + tuple(ids_cons)
     else:
         por_hoy_sql = " AND 1=1"
         por_hoy_params = (hoy,)
@@ -202,15 +222,17 @@ def dashboard():
     num_ventas_mes = count_scoped((
         "SELECT COUNT(*) c FROM ventas v" + scoped("v.sucursal_id", " AND substr(v.fecha, 1, 7) = substr(%s, 1, 7)", [hoy])[0],
         scoped("v.sucursal_id", " AND substr(v.fecha, 1, 7) = substr(%s, 1, 7)", [hoy])[1]))
+    cons_ids = ids_sucursal_consolidada(conn, sid) if sid is not None else []
     if sid is None:
         repartos_mes = count_scoped((
             "SELECT COUNT(*) c FROM repartos r" + scoped("r.sucursal_id", " AND substr(r.fecha, 1, 7) = substr(%s, 1, 7)", [hoy])[0],
             scoped("r.sucursal_id", " AND substr(r.fecha, 1, 7) = substr(%s, 1, 7)", [hoy])[1]))
     else:
+        ph = ",".join(["%s"] * len(cons_ids))
         repartos_mes = count_scoped((
-            "SELECT COUNT(*) c FROM repartos r WHERE (r.sucursal_id = %s OR r.origen_sucursal_id = %s)"
+            f"SELECT COUNT(*) c FROM repartos r WHERE (r.sucursal_id IN ({ph}) OR r.origen_sucursal_id IN ({ph}))"
             " AND substr(r.fecha, 1, 7) = substr(%s, 1, 7)",
-            [sid, sid, hoy]))
+            list(cons_ids) + list(cons_ids) + [hoy]))
 
     q, p = scoped("v.sucursal_id", " AND substr(v.fecha, 1, 4) = substr(%s, 1, 4)", [hoy])
     num_ventas_año = count_scoped(("SELECT COUNT(*) c FROM ventas v" + q, p))
@@ -223,17 +245,17 @@ def dashboard():
             scoped("r.sucursal_id", " AND substr(r.fecha, 1, 4) = substr(%s, 1, 4)", [hoy])[1]))
     else:
         repartos_hoy = count_scoped((
-            "SELECT COUNT(*) c FROM repartos r WHERE (r.sucursal_id = %s OR r.origen_sucursal_id = %s)"
+            f"SELECT COUNT(*) c FROM repartos r WHERE (r.sucursal_id IN ({ph}) OR r.origen_sucursal_id IN ({ph}))"
             " AND substr(r.fecha, 1, 10) = %s",
-            [sid, sid, hoy]))
+            list(cons_ids) + list(cons_ids) + [hoy]))
         repartos_año = count_scoped((
-            "SELECT COUNT(*) c FROM repartos r WHERE (r.sucursal_id = %s OR r.origen_sucursal_id = %s)"
+            f"SELECT COUNT(*) c FROM repartos r WHERE (r.sucursal_id IN ({ph}) OR r.origen_sucursal_id IN ({ph}))"
             " AND substr(r.fecha, 1, 4) = substr(%s, 1, 4)",
-            [sid, sid, hoy]))
+            list(cons_ids) + list(cons_ids) + [hoy]))
 
     def util_scoped(base_where_seg):
-        where_cls = _cls("v.sucursal_id")[0]
-        params = _cls("v.sucursal_id")[1] + base_where_seg[1]
+        where_cls = _cls("v.sucursal_id", conn)[0]
+        params = _cls("v.sucursal_id", conn)[1] + base_where_seg[1]
         q = (" WHERE 1=1" + where_cls + " AND " + base_where_seg[0])
         return esc(("SELECT COALESCE(SUM((d.precio_unitario - d.costo_unitario) * d.cantidad), 0) AS t "
                     "FROM venta_detalle d JOIN ventas v ON v.id = d.venta_id" + q, params))
@@ -242,7 +264,7 @@ def dashboard():
     utilidad_mes = util_scoped(("substr(v.fecha, 1, 7) = substr(%s, 1, 7)", [hoy]))
     utilidad_año = util_scoped(("substr(v.fecha, 1, 4) = substr(%s, 1, 4)", [hoy]))
 
-    cls_mov, params_mov = _cls("m.sucursal_id")
+    cls_mov, params_mov = _cls("m.sucursal_id", conn)
     mov_recientes = conn.execute("""
         SELECT m.fecha, m.tipo, m.cantidad, m.precio_unitario, m.nota, m.usuario,
                m.proveedor_id,
@@ -316,13 +338,13 @@ def dashboard_graficos():
     sid = sucursal_actual()
     g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     cids = g.ciudad_ids
-    cond, cls_params = _cls("v.sucursal_id")
-    cond_m, cls_params_m = _cls("m.sucursal_id")
+    cond, cls_params = _cls("v.sucursal_id", conn)
+    cond_m, cls_params_m = _cls("m.sucursal_id", conn)
 
     partes = []
     params = []
     for tabla in ("ventas", "gastos", "movimientos"):
-        cond_b, cls_params_b = _cls("sucursal_id")
+        cond_b, cls_params_b = _cls("sucursal_id", conn)
         partes.append("SELECT MIN(SUBSTRING(fecha, 1, 7)) AS m FROM " + tabla + " WHERE 1=1" + cond_b)
         params.extend(cls_params_b)
     primer_mes = conn.execute("SELECT MIN(m) AS m FROM (" + " UNION ALL ".join(partes) + ") t", params).fetchone()["m"]
@@ -343,8 +365,8 @@ def dashboard_graficos():
             cls_params + [clave]).fetchone()["t"]
         gastos = conn.execute("""
             SELECT COALESCE(SUM(g.monto), 0) AS t FROM gastos g
-            WHERE 1=1""" + _cls("g.sucursal_id")[0] + " AND substr(g.fecha, 1, 7) = %s",
-            _cls("g.sucursal_id")[1] + [clave]).fetchone()["t"]
+            WHERE 1=1""" + _cls("g.sucursal_id", conn)[0] + " AND substr(g.fecha, 1, 7) = %s",
+            _cls("g.sucursal_id", conn)[1] + [clave]).fetchone()["t"]
         utilidad = conn.execute("""
             SELECT COALESCE(SUM((d.precio_unitario - d.costo_unitario) * d.cantidad), 0) AS t
             FROM venta_detalle d JOIN ventas v ON v.id = d.venta_id
@@ -363,7 +385,7 @@ def dashboard_graficos():
     """, cls_params).fetchall()
 
     if sid is None:
-        cond_r, params_r = _cls("r.sucursal_id")
+        cond_r, params_r = _cls("r.sucursal_id", conn)
         if cids:
             ph = ",".join(["%s"] * len(cids))
             cond_r = cond_r + " AND s.id IN (" + ph + ")"

@@ -10,7 +10,8 @@ from .lotes import (destinos_validos, elegir_destino, stock_por_destino,
                     _ids_proveedores_misma_ciudad)
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    ok_paginado, paginar_params, sucursal_actual, sucursal_operativa,
-                   clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen)
+                   clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen,
+                   ids_sucursal_consolidada)
 
 productos_bp = Blueprint("productos", __name__)
 
@@ -215,8 +216,11 @@ def productos():
     elif not ver_todo and sid is not None:
         stock_sid = sid
     if stock_sid is not None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = ? GROUP BY producto_id) s ON s.producto_id = p.id"
-        lote_cond = " AND l2.sucursal_id = " + str(int(stock_sid))
+        ids_stock = [int(x) for x in ids_sucursal_consolidada(conn, int(stock_sid))]
+        ph_in = ",".join(str(x) for x in ids_stock)
+        join_stock = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad "
+                      "FROM lotes WHERE sucursal_id IN (" + ph_in + ") GROUP BY producto_id) s ON s.producto_id = p.id")
+        lote_cond = " AND l2.sucursal_id IN (" + ph_in + ")"
     else:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
@@ -241,8 +245,6 @@ def productos():
         WHERE p.activo = ?
     """.format(join_stock=join_stock, lote_cond=lote_cond)
     params = []
-    if stock_sid is not None:
-        params.append(stock_sid)
     if estado == "inactivos":
         params.append(0)
     else:
@@ -265,9 +267,12 @@ def productos():
         if sucursal == 0:
             q += " AND p.sucursal_id IS NULL"
         else:
-            # El scope de visibilidad limita a filiales: solo lo que pueden ver
-            q += " AND p.sucursal_id = ?"
-            params.append(sucursal)
+            # La sucursal incluye sus AS hijas (América/Simón López/6 de Agosto):
+            # sus productos viven en la AS y se cuentan/listan en la tienda.
+            ids_suc = ids_sucursal_consolidada(conn, sucursal)
+            ph = ",".join(["?"] * len(ids_suc))
+            q += " AND p.sucursal_id IN (" + ph + ")"
+            params.extend(ids_suc)
     # El formulario de pedidos SOLO ofrece lo marcado «para proveer» (más lo
     # global y lo del almacén principal, de donde cualquier sucursal puede
     # pedir). Lo de «solo inventario» se ve en el inventario general pero no se
@@ -392,8 +397,11 @@ def producto_por_codigo():
     elif not ver_todo and sid is not None:
         stock_sid = sid
     if stock_sid is not None:
-        join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes WHERE sucursal_id = ? GROUP BY producto_id) s ON s.producto_id = p.id"
-        lote_cond = " AND l2.sucursal_id = " + str(int(stock_sid))
+        ids_stock = [int(x) for x in ids_sucursal_consolidada(conn, int(stock_sid))]
+        ph_in = ",".join(str(x) for x in ids_stock)
+        join_stock = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad "
+                      "FROM lotes WHERE sucursal_id IN (" + ph_in + ") GROUP BY producto_id) s ON s.producto_id = p.id")
+        lote_cond = " AND l2.sucursal_id IN (" + ph_in + ")"
     else:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
@@ -413,7 +421,7 @@ def producto_por_codigo():
         WHERE LOWER(p.codigo) = LOWER(?) AND p.activo = 1
         {scope}
     """.format(join_stock=join_stock, lote_cond=lote_cond, scope=scope_sql),
-        (([stock_sid] if stock_sid is not None else []) + [codigo]) + scope_params).fetchone()
+        ([codigo] + scope_params)).fetchone()
     conn.close()
     if not row:
         return err("Producto no encontrado con ese código", 404)

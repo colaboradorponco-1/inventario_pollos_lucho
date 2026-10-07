@@ -941,13 +941,21 @@ async function loadProductos() {
         container.innerHTML = '';
 
         const grupos = ordenarSucursales(sucursalesTienda(catalogos.sucursales)).map((s) => ({ id: s.id, nombre: s.nombre }));
+        // Los productos de una sucursal AS hija pertenecen a su tienda (padre):
+        // se agrupan/muestran bajo América/Simón López/6 de Agosto.
+        const sucsById = Object.fromEntries((catalogos.sucursales || []).map((s) => [String(s.id), s]));
+        const grupoDe = (p) => {
+            const s = sucsById[String(p.sucursal_id)];
+            if (s && s.padre_id) return Number(s.padre_id);
+            return p.sucursal_id;
+        };
         const cats = [{ id: 0, nombre: 'Sin categoría' }]
             .concat((catalogos.categorias || []).map((c) => ({ id: c.id, nombre: c.nombre })));
         let visibles = _prodSuc === '' ? grupos : grupos.filter((g) => String(g.id) === _prodSuc);
         let hay = false;
 
         visibles.forEach((g) => {
-            const items = prods.filter((p) => p.sucursal_id === g.id);
+            const items = prods.filter((p) => grupoDe(p) === g.id);
             if (!items.length) return;
             hay = true;
             renderSucursal(g, items);
@@ -970,7 +978,7 @@ async function loadProductos() {
 
             const filas = (it) => it.map(p => {
                 const esFilial = window.ROL === 'encargado' && !esGestion && !esAlmacenPpal();
-                const esPropio = window.ROL === 'encargado' && p.sucursal_id === window.SUCURSAL_ID;
+                const esPropio = window.ROL === 'encargado' && grupoDe(p) === Number(window.SUCURSAL_ID);
                 // En una filial, los productos que no son de su sucursal muestran el
                 // "disponible" del proveedor (lo real, no 0) con el nombre de quién lo tiene.
                 const provVista = esFilial && !esPropio;
