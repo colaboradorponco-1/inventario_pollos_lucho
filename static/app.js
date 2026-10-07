@@ -230,22 +230,22 @@ $$('.menu-btn').forEach((btn) => {
 });
 
 function loadView(name) {
-    if (name === 'logistica') loadLogistica();
-    if (name === 'dashboard') loadDashboard();
-    if (name === 'productos') { pintarProdScope(); loadProductos(); enfocarEscanorSiEscritorio('#prod-escaneo'); }
-    if (name === 'movimientos') { window.__MODO_COMPRA = false; loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
-    if (name === 'compras') { window.__MODO_COMPRA = true; loadMovimientos(); enfocarEscanorSiEscritorio('#qr-escaneo'); }
-    if (name === 'proveedores') loadProveedores();
-    if (name === 'gastos') loadGastos();
-    if (name === 'reportes') { sincronizarSelectoresSucursal(); loadReportes(); }
-    if (name === 'ventas') { loadVentas(); enfocarEscanorSiEscritorio('#venta-escaneo'); }
-    if (name === 'repartos') { loadRepartos(); enfocarEscanorSiEscritorio('#reparto-escaneo'); }
-    if (name === 'pedidos') loadPedidos();
-    if (name === 'inventario') loadInventario();
-    if (name === 'usuarios') loadUsuarios();
-    if (name === 'auditoria') loadAuditoria();
-    if (name === 'almacenes') loadAlmacenes();
-    if (name === 'categorias') loadCategorias();
+    if (name === 'logistica') return loadLogistica();
+    if (name === 'dashboard') return loadDashboard();
+    if (name === 'productos') { pintarProdScope(); enfocarEscanorSiEscritorio('#prod-escaneo'); return loadProductos(); }
+    if (name === 'movimientos') { window.__MODO_COMPRA = false; enfocarEscanorSiEscritorio('#qr-escaneo'); return loadMovimientos(); }
+    if (name === 'compras') { window.__MODO_COMPRA = true; enfocarEscanorSiEscritorio('#qr-escaneo'); return loadMovimientos(); }
+    if (name === 'proveedores') return loadProveedores();
+    if (name === 'gastos') return loadGastos();
+    if (name === 'reportes') { sincronizarSelectoresSucursal(); return loadReportes(); }
+    if (name === 'ventas') { enfocarEscanorSiEscritorio('#venta-escaneo'); return loadVentas(); }
+    if (name === 'repartos') { enfocarEscanorSiEscritorio('#reparto-escaneo'); return loadRepartos(); }
+    if (name === 'pedidos') return loadPedidos();
+    if (name === 'inventario') return loadInventario();
+    if (name === 'usuarios') return loadUsuarios();
+    if (name === 'auditoria') return loadAuditoria();
+    if (name === 'almacenes') return loadAlmacenes();
+    if (name === 'categorias') return loadCategorias();
 }
 
 // ---------------- Refrescar ----------------
@@ -254,16 +254,22 @@ const AUTOREFRESCO_EXCLUIDAS = ['reportes', 'auditoria', 'respaldo'];
 let CIUDAD_ACTUAL = '';
 
 function nombreVistaActiva() {
+    const botonActivo = document.querySelector('.menu-btn.active[data-view]');
+    if (botonActivo) return botonActivo.dataset.view;
     const v = document.querySelector('.view.active');
     return v ? v.id.replace('view-', '') : '';
 }
 
-function refrescarPanelActivo() {
+async function refrescarPanelActivo() {
     if (_refrescoActivo) return;
     const nombre = nombreVistaActiva();
     if (!nombre) return;
     if (nombre === 'respaldo') {
         toast('La pantalla de respaldo no necesita refrescarse', 'info');
+        return;
+    }
+    if (document.querySelector('.modal.open')) {
+        toast('Cierra la ventana abierta antes de actualizar la pantalla', 'err');
         return;
     }
     if (nombre === 'ventas' && ventaItems.length) {
@@ -275,15 +281,28 @@ function refrescarPanelActivo() {
         return;
     }
     _refrescoActivo = true;
+    const boton = document.getElementById('btn-refrescar-top');
+    if (boton) {
+        boton.disabled = true;
+        boton.classList.add('is-loading');
+        boton.setAttribute('aria-busy', 'true');
+    }
     try {
-        loadView(nombre);
+        await loadView(nombre);
         toast('Pantalla actualizada', 'ok');
+    } catch (e) {
+        toast(e.message || 'No se pudieron actualizar los datos', 'err');
     } finally {
+        if (boton) {
+            boton.disabled = false;
+            boton.classList.remove('is-loading');
+            boton.removeAttribute('aria-busy');
+        }
         _refrescoActivo = false;
     }
 }
 
-function autoRefrescar() {
+async function autoRefrescar() {
     if (_recargaPendiente && estadoSeguroParaRecargar()) {
         _recargaPendiente = false;
         recargarNuevaVersion();
@@ -300,7 +319,9 @@ function autoRefrescar() {
     if (_refrescoActivo) return;
     _refrescoActivo = true;
     try {
-        loadView(nombre);
+        await loadView(nombre);
+    } catch (e) {
+        toast(e.message || 'No se pudieron actualizar los datos', 'err');
     } finally {
         _refrescoActivo = false;
     }

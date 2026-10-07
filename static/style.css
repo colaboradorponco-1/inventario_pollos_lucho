@@ -149,6 +149,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px; margin-left: 240px; }
 }
 @media (min-width: 901px) { .salir-top { display: none !important; } }
 
+.app-global-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 0 12px;
+}
+
 .refrescar-top {
     display: inline-flex;
     position: fixed; top: 12px; right: 76px; z-index: 80;
@@ -420,7 +426,7 @@ input:focus, select:focus, textarea:focus { outline: 3px solid var(--red); outli
 button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-visible,
 .wiz-paso:focus-visible, .ste:focus-visible, .close:focus-visible,
 .pagination button:focus-visible, .menu-btn:focus-visible, .prod-card:focus-within,
-.salir-top:focus-visible, .hamburger:focus-visible {
+.salir-top:focus-visible, .hamburger:focus-visible, .btn-refrescar:focus-visible {
     outline: 3px solid var(--red); outline-offset: 2px;
 }
 
@@ -500,24 +506,23 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 .toast.err { background: var(--red); }
 .toast.warn { background: var(--orange, #d97706); }
 
-/* Botón flotante de refrescar: vive en la esquina inferior derecha, fuera de
-   cualquier panel, pequeño y translúcido para no estorbar la vista. Se dibuja
-   POR DEBAJO de los modales (z-index 100) y de los toasts (200), así nunca
-   queda oculto detrás ni tapa lo que está abierto. Refresca el panel activo. */
 .btn-refrescar {
-    position: fixed; right: 16px; bottom: 16px;
-    width: 44px; height: 44px; border-radius: 50%;
-    border: none; cursor: pointer; z-index: 90;
-    background: rgba(31, 41, 55, .60); color: #fff;
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, .25);
-    opacity: .85; transition: opacity .15s, background .15s, transform .1s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 40px; padding: 8px 14px;
+    border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+    background: var(--panel); color: var(--text);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
+    font: inherit; font-weight: 600;
+    transition: background .15s, box-shadow .15s, transform .1s;
 }
-.btn-refrescar:hover { opacity: 1; background: rgba(31, 41, 55, .85); }
+.btn-refrescar:hover { background: var(--primary-light); box-shadow: 0 2px 7px rgba(0, 0, 0, .14); }
 .btn-refrescar:active { transform: scale(.95); }
-.btn-refrescar svg { width: 20px; height: 20px; }
-@media (max-width: 900px) {
-    .btn-refrescar { width: 40px; height: 40px; right: 12px; bottom: 12px; }
+.btn-refrescar svg { width: 18px; height: 18px; flex: 0 0 auto; }
+.btn-refrescar:disabled { cursor: wait; opacity: .7; }
+.btn-refrescar.is-loading svg { animation: giro-refresco .8s linear infinite; }
+@keyframes giro-refresco { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .btn-refrescar.is-loading svg { animation-duration: 2s; }
 }
 
 .empty { text-align: center; color: var(--muted); padding: 20px; font-style: italic; }
@@ -794,7 +799,7 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 /* Impresión de reportes: solo se imprime la vista activa, sin deformarse */
 @media print {
     body { background: #fff; margin: 0; padding: 0; }
-    .sidebar, .topbar, .hamburger, .sidebar-overlay, .pagination { display: none !important; }
+    .sidebar, .topbar, .hamburger, .sidebar-overlay, .pagination, .app-global-actions { display: none !important; }
     main { margin-left: 0; padding: 0; width: 100%; }
     .view { display: none !important; }
     .view.active { display: block !important; width: 100%; }
