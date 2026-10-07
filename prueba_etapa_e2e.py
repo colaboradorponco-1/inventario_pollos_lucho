@@ -48,11 +48,8 @@ class ConexionTransactional:
     Asi el endpoint escribe sobre la MISMA transaccion que lee la prueba, que es
     la unica forma de medir el efecto.
 
-    OJO con el rollback() en no-op: `_despachar_stock()` llama a `conn.rollback()`
-    para descartar una lectura antes de mover el stock. Si eso fuera de verdad,
-    borraria TODO el setup de la prueba (los pedidos y el stock ficticio ya
-    insertados) y no habria nada que medir. Anulado, la unica llamada real a
-    rollback() es la del `finally` de main(), sobre CONN._conn."""
+    El wrapper no-op evita que los commit() de los endpoints persistan datos
+    durante la prueba. Al final hay un unico rollback real sobre CONN._conn."""
 
     def __init__(self, conn):
         self._conn = conn

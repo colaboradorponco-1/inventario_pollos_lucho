@@ -4,6 +4,7 @@ Verifica la matriz de permisos: qué rol puede pasar de qué etapa a cuál, y qu
 al llegar a 'entregado' se intente mover el stock una sola vez.
 """
 import io
+import inspect
 import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -19,6 +20,13 @@ AVANCE = {
 ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
 
 fallos = 0
+
+
+def check(nombre, condicion):
+    global fallos
+    if not condicion:
+        fallos += 1
+    print(f"  {'OK ' if condicion else 'FALLA'} {nombre}")
 
 
 def permitido(rol, actual, destino):
@@ -72,8 +80,17 @@ print("ENTREGAR DOS VECES (debe quedar bloqueado por etapa, no por stock)")
 print("=" * 70)
 doble = permitido("repartidor", "entregado", "entregado")
 print(f"  entregado -> entregado: {'idempotente (sin mover stock)' if doble else 'bloqueado'}")
-# El endpoint tiene la guarda extra: si estado ya es despachado/cumplido no mueve stock.
-print("  guarda extra en backend: 'stock_ya_movido' -> no repite _despachar_stock")
+# Los endpoints de entrega comparten el bloqueo de la fila del pedido y el
+# helper no debe hacer rollback, que liberaría el bloqueo antes del commit.
+fuente = inspect.getsource(ped._despachar_stock)
+sin_rollback = ".rollback(" not in fuente
+check("el despacho no libera el bloqueo con rollback", sin_rollback)
+
+for nombre in ("pedido_despachar", "pedido_estado", "pedido_etapa"):
+    vista = getattr(ped, nombre)
+    bloquea_pedido = "FOR UPDATE" in inspect.getsource(vista)
+    check(f"{nombre} bloquea el pedido antes de cambiar stock/estado",
+          bloquea_pedido)
 
 print("\n" + "=" * 70)
 print("FALLOS:", fallos)

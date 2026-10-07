@@ -561,7 +561,8 @@ def pedido_ticket_pagina(pedido_id):
 @login_requerido
 def pedido_estado(pedido_id):
     conn = get_conn()
-    pedido = conn.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone()
+    pedido = conn.execute(
+        "SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
@@ -690,7 +691,6 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
                 return "error", (f"Stock insuficiente de {d['producto_nombre']} en "
                                  f"{org['nombre']}. Disponible: {stock}")
 
-    conn.rollback()  # descartar transacción de lectura implícita
     # La mercadería se mueve HOY, no el día en que se hizo el pedido.
     # Si se usara `pedido["fecha"]`, un pedido del 30-sep entregado el 01-oct
     # contabilizaría la entrada en la planilla del 30-sep (que puede estar
@@ -748,10 +748,8 @@ def pedido_despachar(pedido_id):
     # FOR UPDATE: bloquea la fila del pedido. Si dos usuarios dan clic en
     # "Despachar" al mismo tiempo (o hay un doble clic rápido), el segundo
     # intento frena acá y no duplica el descuento de stock ni los repartos.
-    try:
-        pedido = conn.execute("SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
-    except Exception:
-        pedido = conn.execute("SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone()
+    pedido = conn.execute(
+        "SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
