@@ -870,23 +870,23 @@ function nombreSucursalPedido(s) {
 function sucursalesFiltroBandeja(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (puedeVerTodasSucursales()) return base;
-    const nombreSuc = (window.SUCURSAL_NOMBRE || '').toLowerCase();
+    const nombreSuc = (window.SUCURSAL || '').toLowerCase();
+    const esReceptor = !!window.RECEPTOR || nombreSuc.includes('as ') || nombreSuc.startsWith('as');
     const esLaPaz = nombreSuc.includes('la paz') || nombreSuc.includes('miraflores') || nombreSuc.includes('sopocachi');
-    const esReceptor = nombreSuc.includes('as ') || nombreSuc.startsWith('as');
 
     return base.filter((s) => {
         const n = (s.nombre || '').toLowerCase();
         if (n.startsWith('as ') || n.includes('as ')) return false;
 
         if (esReceptor) {
-            // Paneles de receptores (AS): mostrar UNICAMENTE America, Siglo XX, Simon Lopez (o Sopocachi/Miraflores)
+            // Paneles de receptores: mostrar UNICAMENTE America, Siglo XX, Simon Lopez (o Sopocachi/Miraflores)
             if (esLaPaz) {
                 return n.includes('sopocachi') || n.includes('miraflores');
             } else {
                 return n.includes('america') || n.includes('siglo xx') || n.includes('simón') || n.includes('simon');
             }
         } else {
-            // Encargados normales de sucursales: ver Almacen Principal 1, 2 y su respectivo AS
+            // Encargados normales de sucursales
             if (esLaPaz) {
                 return s.principal || n.includes('6 de agosto');
             } else {
