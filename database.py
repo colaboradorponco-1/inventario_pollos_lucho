@@ -499,7 +499,29 @@ def _nombre_norm(nombre):
     return " ".join(n.split())
 
 
-def _destruir_sucursales_as(cur):
+def _limpiar_pedidos_huerfanos(cur):
+    """Limpia destinos huérfanos en pedidos y pedido_detalle tras la eliminación de los AS,
+    asegurando que lleguen al Almacén Principal o a la sucursal activa correspondiente."""
+    # Buscar un almacén principal por defecto (ej. Almacen Principal 1 o principal=1)
+    cur.execute("SELECT id FROM sucursales WHERE principal = 1 ORDER BY id LIMIT 1")
+    ppal = cur.fetchone()
+    ppal_id = ppal["id"] if ppal else 1
+
+    # Actualizar pedidos con destino_id nulo o que apunte a una sucursal inexistente
+    cur.execute("""
+        UPDATE pedidos p 
+        SET p.destino_id = ? 
+        WHERE p.destino_id IS NULL 
+           OR p.destino_id NOT IN (SELECT id FROM sucursales)
+    """, (ppal_id,))
+
+    # Actualizar pedido_detalle con destino_id huérfano
+    cur.execute("""
+        UPDATE pedido_detalle pd
+        SET pd.destino_id = ?
+        WHERE pd.destino_id IS NULL
+           OR pd.destino_id NOT IN (SELECT id FROM sucursales)
+    """, (ppal_id,))
     """ELIMINA TODO rastro de las sucursales AS (de producción) y deja cada
     ciudad como UN SOLO almacén normal, CON SUS STOCK, como estaba antes.
 
@@ -1079,6 +1101,8 @@ def migrar_esquema():
         # Todo lo del AS (productos, lotes, movimientos, usuarios) pasa a la
         # sucursal madre y la fila AS se borra. Idempotente.
         _destruir_sucursales_as(cur)
+        # Limpieza de pedidos huérfanos para asegurar que aparezcan en las bandejas
+        _limpiar_pedidos_huerfanos(cur)
         db.commit()
     finally:
         db.close()
