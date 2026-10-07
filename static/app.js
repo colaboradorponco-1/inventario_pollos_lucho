@@ -1236,7 +1236,9 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-almacen').disabled = true;
     }
     // Cargar en el selector "Almacén" solo los almacenes de la sucursal elegida.
-    poblarAlmacenes(+$('#prod-sucursal').value || 0);
+    // Si el selector no contiene la sucursal del usuario (las AS no figuran en
+    // las opciones), se usa `window.SUCURSAL_ID`.
+    poblarAlmacenes(+$('#prod-sucursal').value || Number(window.SUCURSAL_ID) || 0);
 
     if (id) {
         const p = lista.find((x) => x.id === id);
@@ -1335,7 +1337,20 @@ function poblarAlmacenes(sid) {
     const alm = $('#prod-almacen');
     if (!alm) return;
     const previo = alm.value;
-    const lista = sid ? (catalogos.almacenes || []).filter((a) => +a.sucursal_id === +sid)
+    // Alcance ampliado, igual que `ids_sucursal_consolidada` del servidor: la
+    // sucursal + sus AS hijas, y para un AS también los almacenes de su tienda
+    // madre (el "AS America" elige los mismos almacenes que América).
+    let sids = sid ? [Number(sid)] : [];
+    if (sid) {
+        const todas = (catalogos && catalogos.sucursales) || [];
+        const me = todas.find((s) => +s.id === +sid);
+        if (me) {
+            if (me.padre_id) sids.push(+me.padre_id);
+            todas.forEach((s) => { if (+s.padre_id === +sid && s.es_as) sids.push(+s.id); });
+        }
+    }
+    sids = Array.from(new Set(sids));
+    const lista = sid ? (catalogos.almacenes || []).filter((a) => sids.includes(+a.sucursal_id))
                       : (catalogos.almacenes || []);
     alm.innerHTML = '<option value="">— Sin almacén —</option>' +
         lista.map((a) => `<option value="${a.id}">${esc(a.nombre)}</option>`).join('');

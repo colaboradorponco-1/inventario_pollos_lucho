@@ -137,8 +137,15 @@ def productos():
         if data.get("almacen_id"):
             # Mismo criterio ampliado que al editar: valen los almacenes de la
             # sucursal elegida y de sus AS hijas (el producto "para proveer"
-            # terminará viviendo en la AS y usa los almacenes de la tienda).
+            # terminará viviendo en la AS y usa los almacenes de la tienda), y
+            # también los de la tienda madre cuando la sucursal ES una AS: el
+            # usuario "AS America" elige los almacenes de su tienda.
             sc = list(ids_sucursal_consolidada(conn, sid))
+            if len(sc) == 1:
+                pr = conn.execute("SELECT padre_id FROM sucursales WHERE id = ? AND es_as = 1",
+                                  (sid,)).fetchone()
+                if pr and pr["padre_id"]:
+                    sc.append(int(pr["padre_id"]))
             if not conn.execute(
                     "SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id IN ("
                     + ",".join(["?"] * len(sc)) + ")",
