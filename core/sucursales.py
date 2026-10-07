@@ -33,9 +33,13 @@ def sucursales():
                 "INSERT INTO sucursales (nombre, direccion, principal, provee) VALUES (?, ?, ?, ?)",
                 (nombre, data.get("direccion", ""), principal, provee))
             new_id = cur.lastrowid
-            # Cada sucursal tiene su propio almacén (mantener sincronizados)
-            conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
-                         (nombre, data.get("direccion", ""), new_id))
+            # Cada sucursal tiene su propio almacén (si ya existe por nombre, no choca)
+            try:
+                conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
+                             (nombre, data.get("direccion", ""), new_id))
+            except Exception:
+                conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
+                             (nombre + " (" + str(new_id) + ")", data.get("direccion", ""), new_id))
             conn.commit()
             conn.close()
             registrar_auditoria("Sucursal creada", nombre)
@@ -106,7 +110,20 @@ def sucursal(suc_id):
     conn.execute("UPDATE sucursales SET nombre = ?, direccion = ?, principal = ?, provee = ? WHERE id = ?",
                  (nombre, data.get("direccion", ""), 1 if data.get("principal") else 0,
                   1 if data.get("provee") else 0, suc_id))
-    conn.execute("UPDATE almacenes SET nombre = ? WHERE sucursal_id = ?", (nombre, suc_id))
+    # Actualizar o crear almacén vinculado
+    alm = conn.execute("SELECT id FROM almacenes WHERE sucursal_id = ?", (suc_id,)).fetchone()
+    if alm:
+        try:
+            conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ? WHERE id = ?",
+                         (nombre, data.get("direccion", ""), alm["id"]))
+        except Exception:
+            pass
+    else:
+        try:
+            conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
+                         (nombre, data.get("direccion", ""), suc_id))
+        except Exception:
+            pass
     conn.commit()
     conn.close()
     registrar_auditoria("Sucursal actualizada", nombre)
