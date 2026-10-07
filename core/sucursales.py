@@ -101,20 +101,28 @@ def sucursal(suc_id):
     conn.execute("UPDATE sucursales SET nombre = ?, direccion = ?, principal = ?, provee = ? WHERE id = ?",
                  (nombre, data.get("direccion", ""), 1 if data.get("principal") else 0,
                   1 if data.get("provee") else 0, suc_id))
-    # Actualizar o crear almacén vinculado
+    # Actualizar o crear almacén vinculado de forma segura (sin romper si el nombre colisiona)
     alm = conn.execute("SELECT id FROM almacenes WHERE sucursal_id = ?", (suc_id,)).fetchone()
     if alm:
         try:
             conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ? WHERE id = ?",
                          (nombre, data.get("direccion", ""), alm["id"]))
         except Exception:
-            pass
+            try:
+                conn.execute("UPDATE almacenes SET nombre = ?, ubicacion = ? WHERE id = ?",
+                             (nombre + " (" + str(suc_id) + ")", data.get("direccion", ""), alm["id"]))
+            except Exception:
+                pass
     else:
         try:
             conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
                          (nombre, data.get("direccion", ""), suc_id))
         except Exception:
-            pass
+            try:
+                conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) VALUES (?, ?, ?)",
+                             (nombre + " (" + str(suc_id) + ")", data.get("direccion", ""), suc_id))
+            except Exception:
+                pass
     conn.commit()
     conn.close()
     registrar_auditoria("Sucursal actualizada", nombre)
