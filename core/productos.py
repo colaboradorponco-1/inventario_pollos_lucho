@@ -586,6 +586,22 @@ def producto(prod_id):
         conn.close()
         return err("Debes asignar una sucursal al producto", 400)
     sid_p = int(sid_p)
+    para_final = (_para_proveer(data) if data.get("para_proveer") is not None
+                  else int(fila.get("para_proveer") or 1))
+    if para_final:
+        # Al marcar «para proveer» en una tienda con almacén de producción
+        # (América/Simón López/6 de Agosto) el producto y SU STOCK se mueven a
+        # la AS. Antes solo se giraba la casilla: la llajua seguía con sus kilos
+        # físicamente en la tienda, el pedido se despachaba de ahí y al
+        # recibirlo se devolvía a lo mismo (45 -> 30 -> 45, ciclo sin mover nada).
+        from .util import sucursal_almacen_as
+        sid_as = sucursal_almacen_as(conn, sid_p)
+        if sid_as != sid_p:
+            conn.execute(
+                "UPDATE lotes SET sucursal_id = ? "
+                "WHERE producto_id = ? AND sucursal_id = ?",
+                (sid_as, prod_id, sid_p))
+            sid_p = sid_as
     if data.get("almacen_id"):
         # El almacén vale si es de la propia sucursal, de sus AS hijas o, si el
         # producto vive en una AS (América/Simón López/6 de Agosto), de la tienda
