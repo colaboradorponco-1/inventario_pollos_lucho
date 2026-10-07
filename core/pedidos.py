@@ -401,8 +401,29 @@ def pedidos():
     if hasta:
         q += " AND date(p.fecha) <= date(?)"
         params.append(hasta[:10])
-    count_q = "SELECT COUNT(*) AS c FROM (" + q + ") AS sub"
-    total = conn.execute(count_q, params).fetchone()["c"]
+    count_q = """
+        SELECT COUNT(*) AS c 
+        FROM pedidos p 
+        LEFT JOIN sucursales s ON s.id = p.sucursal_id
+        LEFT JOIN sucursales d ON d.id = p.destino_id
+        WHERE 1=1
+    """
+    count_params = list(params)
+    # Aplicar los mismos filtros WHERE que la consulta principal
+    if estados:
+        count_q += f" AND p.estado IN ({marcas})"
+    if filtro:
+        count_q += " AND (p.nro_ticket LIKE ? OR s.nombre LIKE ? OR p.nota LIKE ? OR d.nombre LIKE ?)"
+    if suc_f.isdigit():
+        count_q += " AND p.sucursal_id = ?"
+    if dest_f.isdigit():
+        count_q += " AND (p.destino_id = ? OR EXISTS (SELECT 1 FROM pedido_detalle d5 WHERE d5.pedido_id = p.id AND d5.destino_id = ?))"
+    if desde:
+        count_q += " AND date(p.fecha) >= date(?)"
+    if hasta:
+        count_q += " AND date(p.fecha) <= date(?)"
+
+    total = conn.execute(count_q, count_params).fetchone()["c"]
     offset, limit, pagina, por_pagina = paginar_params()
     q += " ORDER BY p.fecha DESC, p.id DESC LIMIT ? OFFSET ?"
     params += [limit, offset]
