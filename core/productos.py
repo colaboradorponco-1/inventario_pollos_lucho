@@ -42,7 +42,13 @@ def _pide_tacho(data):
 
 
 def _para_proveer(data):
-    return 1
+    """¿Este producto se ofrece a otras sucursales en pedidos? (1 = sí).
+    Los de «solo inventario» se ven en el inventario general pero no aparecen
+    cuando otra sucursal arma un pedido."""
+    v = data.get("para_proveer")
+    if v is None:
+        return 1
+    return 1 if str(v).lower() in ("1", "true", "on", "yes") else 0
 
 
 def _stock_sucursal_permitido(conn, ver_todo, sid):
