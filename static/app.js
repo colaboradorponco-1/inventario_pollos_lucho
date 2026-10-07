@@ -307,7 +307,7 @@ function autoRefrescar() {
 }
 
 // ---------------- Configuración y actualización automática ----------------
-const APP_VERSION = '2026-09-21';
+const APP_VERSION = '2026-10-07';
 const KEY_AUTOREFRESCO = 'pollos_autorefresco';
 let _autoRefrescoTimer = null;
 let _recargaPendiente = false;

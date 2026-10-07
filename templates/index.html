@@ -1382,7 +1382,16 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610062215"></script>
+    <button id="btn-refrescar-top" class="btn-refrescar" type="button"
+            title="Refrescar panel" aria-label="Refrescar datos del panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+        </svg>
+    </button>
+
+    <script src="/static/app.js?v=202610071200"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
