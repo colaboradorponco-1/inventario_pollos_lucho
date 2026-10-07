@@ -51,9 +51,20 @@ def sucursales():
     # provee | tiene productos «para proveer»): así los selectores del front que
     # arman "Todo a X" y proveen por "provee" ofrecen exactamente lo que el
     # backend después va a aceptar al validar el destino de un pedido.
-    # Devolver el campo `provee` guardado en la BD, combinándolo con válidos si es necesario
+    try:
+        rows = conn.execute("""
+            SELECT s.*, p.nombre AS padre_nombre,
+                   (SELECT COUNT(*) FROM repartos r WHERE r.sucursal_id = s.id) AS num_repartos,
+                   (SELECT COALESCE(SUM(r.total), 0) FROM repartos r WHERE r.sucursal_id = s.id) AS total_repartido,
+                   (SELECT COUNT(*) FROM productos p2 WHERE p2.sucursal_id = s.id AND p2.activo = 1) AS num_productos
+            FROM sucursales s
+            LEFT JOIN sucursales p ON p.id = s.padre_id
+            ORDER BY s.principal DESC, s.nombre
+        """).fetchall()
+    except Exception:
+        rows = conn.execute("SELECT * FROM sucursales").fetchall()
     conn.close()
-    return ok([dict(r, provee=bool(r["provee"])) for r in rows])
+    return ok([dict(r, provee=bool(r.get("provee", 0))) for r in rows])
 
 
 @sucursales_bp.route("/api/sucursales/<int:suc_id>", methods=["PUT", "DELETE"])
