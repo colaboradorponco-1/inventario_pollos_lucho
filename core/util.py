@@ -525,12 +525,19 @@ def ip_local():
         return "127.0.0.1"
 
 
+# Identificadores de sucursales de La Paz que no llevan "la paz" en el nombre
+# ("Sucursal Sopocachi", "Sucursal Miraflores", ...). Sin esto se clasificaban
+# como Cochabamba y se colaban en pedidos/paneles de la otra ciudad.
+# MANTENER EN SYNC con `static/app.js:esNombreLaPaz`.
+LA_PAZ_NOMBRES = ("la paz", "sopocachi", "miraflores", "6 de agosto")
+
+
 def ciudad_normalizada(nombre):
     """Normaliza el nombre de una sucursal/cliente a identificador de ciudad."""
     try:
         n = unicodedata.normalize("NFD", (nombre or "")).lower()
         n = "".join(c for c in n if unicodedata.category(c) != "Mn")
-        return "la-paz" if "la paz" in n else "cochabamba"
+        return "la-paz" if any(marca in n for marca in LA_PAZ_NOMBRES) else "cochabamba"
     except Exception:
         return "cochabamba"
 

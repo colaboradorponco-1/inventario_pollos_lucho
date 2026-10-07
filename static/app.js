@@ -774,11 +774,20 @@ function nombreCiudadDe(s) {
     // ("6 de Agosto, La Paz"): por su propio nombre no se podría saber.
     return (s && s.padre_nombre) || (s ? s.nombre : '');
 }
+// ¿El nombre corresponde a una sucursal de La Paz? Algunas tiendas de La Paz no
+// llevan "la paz" en el nombre ("Sopocachi", "Miraflores"...) y sin esta lista
+// se clasificaban como Cochabamba, colándose en pedidos de la otra ciudad.
+// MANTENER EN SYNC con `core.util.LA_PAZ_NOMBRES`.
+function esNombreLaPaz(nombre) {
+    const n = nombreNorm(nombre || '');
+    return n.includes('la paz') || n.includes('sopocachi')
+        || n.includes('miraflores') || n.includes('6 de agosto');
+}
 function ciudadSucursal(obj, fallback) {
     // Acepta una sucursal (usa la ciudad de su tienda si es AS) o un nombre.
     const s = (obj && typeof obj === 'object') ? obj : null;
     const nombre = (s ? nombreCiudadDe(s) : (typeof obj === 'string' ? obj : '')) || (fallback || '');
-    return nombreNorm(nombre).includes('la paz') ? 'La Paz' : 'Cochabamba';
+    return esNombreLaPaz(nombre) ? 'La Paz' : 'Cochabamba';
 }
 function ordenarSucursales(lista) {
     // Cochabamba primero (almacenes principales al inicio) y luego La Paz;
@@ -835,19 +844,20 @@ function esSucursalAS(s) {
     if (!s || s.principal) return false;
     if (s.es_as || s.padre_id) return true;
     const n = nombreNorm(s.nombre || '');
-    return /^as /.test(n) && (n.includes('america') || n.includes('simon'));
+    return /^as /.test(n) && (n.includes('america') || n.includes('simon')
+        || n.includes('6 de agosto'));
 }
 function sucursalesFiltroPedidos(lista) {
     // El admin/superadmin ve TODAS las sucursales del negocio (Almacén
     // Principal, AS, America, Simon Lopez, Siglo xx, 6 de agosto...) tal cual
     // están dadas de alta, para filtrar por cualquier almacén. Los encargados
     // ven la lista fija con la que trabajan: los Almacenes Principales + las
-    // sucursales AS de su MISMA ciudad.
+    // sucursales AS de su MISMA ciudad (la tienda sin AS no despacha pedidos).
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (esGestionPed()) return base;
     return proveedoresAlcance(base)
         .map((s) => (esSucursalAS(s) ? Object.assign({}, s, { nombre: nombreSucursalPedido(s) }) : s))
-        .filter((s) => s.principal || s.provee || esSucursalAS(s));
+        .filter((s) => s.principal || esSucursalAS(s));
 }
 // Nombre visible de una sucursal en el módulo de pedidos: las sucursales AS
 // de producción se muestran como "AS <tienda>" (su encargado de recepción se
@@ -4257,7 +4267,7 @@ on('#wiz-a-1-2', 'click', () => { if (!pedidoSucursal) return toast('Primero eli
 on('#wiz-a-2-1', 'click', () => irPaso(1));
 on('#wiz-a-2-3', 'click', () => irPaso(3));
 on('#wiz-a-3-2', 'click', () => irPaso(2));
-on('#pedido-sucursal', 'change', () => {
+on('#pedido-sucursal', 'change', async () => {
     pedidoSucursal = +$('#pedido-sucursal').value || null;
     pedidoSel = {};
     pedidoTacho = {};
@@ -4267,9 +4277,17 @@ on('#pedido-sucursal', 'change', () => {
     const selDest = $('#pedido-destino');
     if (selDest) {
         const alcance = proveedoresAlcance(catalogos && catalogos.sucursales);
-        const destinos = alcance.filter((x) => (x.principal || x.provee));
+        // Los únicos destinos a los que se puede pedir: los Principales
+        // (siempre) y las sucursales AS de la misma ciudad (las tiendas sin AS
+        // no despachan pedidos: su inventario es de su propia venta).
+        const destinos = alcance.filter((x) => (x.principal || esSucursalAS(x)));
         selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
             + destinos.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
+    }
+    try {
+        await cargarProductosPedido();
+    } catch (e) {
+        toast(e.message, 'err');
     }
     renderTarjetasPedido();
 });
@@ -4324,6 +4342,10 @@ async function cargarProductosPedido() {
     // que devuelve destino_id/destino_nombre con para_pedido=1.
     const dest = pedidoDestinoActual();
     const qs = new URLSearchParams({ por_pagina: '1000', para_pedido: '1' });
+    // El catálogo se acota a la sucursal que pide (la elegida en el paso 1, o
+    // la propia): el servidor solo ofrece lo que esa sucursal puede pedir.
+    const desdePed = String(pedidoSucursal || window.SUCURSAL_ID || '');
+    if (desdePed) qs.set('desde', desdePed);
     if (dest) qs.set('destino_id', String(dest));
     const respP = await request(API + '/productos?' + qs.toString());
     pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
@@ -4359,8 +4381,11 @@ async function loadPedidos() {
         const selDest = $('#pedido-destino');
         if (selDest) {
             const pueden = sucursales.filter((x) => (x.principal || x.provee));
+            // Auto-pedido y alcance: además de los Principales, solo las
+            // sucursales AS de la misma ciudad atienden pedidos.
+            const destinosP = pueden.filter((x) => x.principal || esSucursalAS(x));
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
-                + pueden.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
+                + destinosP.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
         }
         const opcionesAS = opcionesSucursales(sucursalesFiltroPedidos(sucursales), 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');

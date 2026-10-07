@@ -29,6 +29,12 @@ def _ids_proveedores_misma_ciudad(conn, desde):
     pide a La Paz ni La Paz a Cochabamba). Los AS de producción cuentan como
     su ciudad padre (AS 6 de Agosto = La Paz). Sin `desde` o si no existe la
     sucursal, devuelve None (sin restricción, para llamadas que no piden).
+
+    Los únicos destinos no-principales son las sucursales AS de producción de
+    la MISMA ciudad (AS América / AS Simón López para Cochabamba; AS 6 de
+    Agosto para La Paz). Las tiendas sin AS (Siglo XX, Sopocachi, Miraflores...)
+    no atienden pedidos: su inventario es para su propia venta, y a nadie lo
+    piden.
     """
     if not desde:
         return None
@@ -55,8 +61,10 @@ def _ids_proveedores_misma_ciudad(conn, desde):
         if r["principal"]:
             ids.add(int(r["id"]))
             continue
+        if not r.get("es_as"):
+            continue
         prov_nombre = r["nombre"]
-        if r.get("es_as") and r.get("padre_id"):
+        if r.get("padre_id"):
             p = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                              (r["padre_id"],)).fetchone()
             if p and p["nombre"]:

@@ -174,6 +174,34 @@ def _cuerpo_en(etiqueta, fuente, nombre_funcion):
     return None
 
 
+def prueba_el_destino_es_principal_o_as_de_la_misma_ciudad():
+    """El panel de pedidos de cada sucursal solo ofrece los Principales y las
+    sucursales AS de su ciudad (Cochabamba -> AS America + AS Simon Lopez;
+    La Paz -> AS 6 de Agosto). Las tiendas sin AS (Siglo XX, Sopocachi,
+    Miraflores) no despachan pedidos: su inventario es de su propia venta.
+    """
+    fuente = _fuente()
+    _check("la ciudad de La Paz se detecta aunque el nombre no lo diga",
+           "esNombreLaPaz" in fuente and "sopocachi" in fuente
+           and "miraflores" in fuente,
+           "sin esto 'Sopocachi'/'Miraflores' (La Paz) se mostraban como "
+           "Cochabamba y aparecian en los pedidos de la otra ciudad")
+    _check("los destinos 'Todo a X' se acotan a Principales + AS",
+           "destinosP = pueden.filter((x) => x.principal || esSucursalAS(x))" in fuente,
+           "una tienda sin AS (provee=1) no debe ofrecerse como destino")
+    with io.open(os.path.join(RAIZ, "core", "lotes.py"), encoding="utf-8") as fh:
+        lotes = fh.read()
+    cuerpo_ids = _cuerpo_en("Lotes", lotes, "_ids_proveedores_misma_ciudad")
+    _check("el backend solo acepta AS como destino no-principal",
+           cuerpo_ids is not None and "if not r.get(\"es_as\"):" in cuerpo_ids,
+           "el servidor aceptaria pedidos hacia tiendas que no despachan")
+    with io.open(os.path.join(RAIZ, "core", "productos.py"), encoding="utf-8") as fh:
+        prod = fh.read()
+    _check("el catalogo de pedidos acota a la sucursal que pide",
+           "_ids_proveedores_misma_ciudad(conn," in prod and "desde_cat" in prod,
+           "la pantalla ofreceria destinos que luego el pedido rechaza")
+
+
 def main():
     print("=" * 70)
     print("QUE LOS DESTINOS DE PEDIDO LOS MANDE LA BASE, NO EL NOMBRE")
@@ -182,6 +210,7 @@ def main():
     prueba_provee_activo_no_usa_el_nombre()
     prueba_la_lista_de_destinos_usa_la_misma_columna()
     prueba_el_servidor_tambien_exige_la_bandera()
+    prueba_el_destino_es_principal_o_as_de_la_misma_ciudad()
     print("=" * 70)
     print(f"FALLOS: {len(FALLOS)}")
     for f in FALLOS:

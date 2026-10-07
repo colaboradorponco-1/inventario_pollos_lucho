@@ -6,7 +6,8 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
-from .lotes import (destinos_validos, elegir_destino, stock_por_destino)
+from .lotes import (destinos_validos, elegir_destino, stock_por_destino,
+                    _ids_proveedores_misma_ciudad)
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    ok_paginado, paginar_params, sucursal_actual, sucursal_operativa,
                    clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen)
@@ -296,6 +297,12 @@ def productos():
     dest = request.args.get("destino_id", "").strip()
     destino = int(dest) if dest.isdigit() else None
     prov = _stock_disponible(conn, destino_id=destino)
+    # El catálogo del formulario de pedidos se acota a la sucursal que pide
+    # (`?desde=`, la que eligió el encargado/gestion en el paso 1). Así lo que
+    # la pantalla ofrece es exactamente lo que el servidor acepta al guardar:
+    # Principales + sucursales AS de la misma ciudad.
+    desde_arg = request.args.get("desde", "").strip()
+    desde_cat = int(desde_arg) if desde_arg.isdigit() else (sid if para_pedido else None)
     # `para_pedido=1` lo manda solo el catálogo del formulario de pedidos. En ese
     # caso cada producto trae el destino por el que SE PEDIRÍA (el que tiene
     # stock) y el disponible de ahí, para que la pantalla y el servidor elijan lo
@@ -307,6 +314,16 @@ def productos():
     if para_pedido:
         validos = destinos_validos(conn)
         destinos = stock_por_destino(conn)
+        # Acotado a la sucursal que pide (la elegida en el paso 1, o la propia):
+        # Principales + sucursales AS de su misma ciudad, la misma lista que
+        # revalida el alta del pedido. Las tiendas sin AS no despachan pedidos.
+        if desde_cat:
+            permitidos = _ids_proveedores_misma_ciudad(conn, desde_cat)
+            if permitidos is not None:
+                validos = [v for v in validos if v in permitidos]
+                destinos = {pid: [t for t in lista if t[0] in permitidos]
+                            for pid, lista in destinos.items()}
+                destinos = {pid: lista for pid, lista in destinos.items() if lista}
         # Un solo SELECT para los nombres: si se hiciera por producto serían
         # cientos de consultas en cada carga del catálogo.
         nombres = {r["id"]: r["nombre"] or "" for r in conn.execute(
