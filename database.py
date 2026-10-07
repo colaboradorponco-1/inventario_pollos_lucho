@@ -522,6 +522,9 @@ def _limpiar_pedidos_huerfanos(cur):
         """, (ppal_id,))
     except Exception:
         pass
+
+
+def _destruir_sucursales_as(cur):
     """ELIMINA TODO rastro de las sucursales AS (de producción) y deja cada
     ciudad como UN SOLO almacén normal, CON SUS STOCK, como estaba antes.
 
