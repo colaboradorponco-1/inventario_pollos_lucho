@@ -408,6 +408,10 @@ def pedidos():
         LEFT JOIN sucursales d ON d.id = p.destino_id
         WHERE 1=1
     """
+    if not es_superadmin() and sid and (es_logistica() or session.get("rol") == "encargado"):
+        count_q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
+                    "EXISTS (SELECT 1 FROM pedido_detalle d4 "
+                    "WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
     count_params = list(params)
     # Aplicar los mismos filtros WHERE que la consulta principal
     if estados:

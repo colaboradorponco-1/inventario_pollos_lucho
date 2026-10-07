@@ -124,6 +124,23 @@ for etiqueta, rol, sid, nombre, filtro_esperado in CASOS:
     print(f"\n{veredicto:6s} {etiqueta:24s} {nombre}")
     print(f"        {detalle}" + (f"  (params {sids})" if lleva else ""))
 
+    conteos = [(q, p) for q, p in CAPTURADO
+               if q.startswith("SELECT COUNT(*) AS c FROM pedidos p")]
+    conteo_ok = len(conteos) == 1
+    if conteo_ok:
+        sql_conteo, params_conteo = conteos[0]
+        conteo_ok = sql_conteo.count("?") == len(params_conteo)
+        if rol in ("encargado", "preparador", "repartidor") and sid:
+            conteo_ok = conteo_ok and "p.sucursal_id = ?" in sql_conteo \
+                and "d4.destino_id = ?" in sql_conteo
+    if not conteo_ok:
+        fallos += 1
+        print("FALLA  conteo de pedidos            filtros y parámetros alineados")
+        if conteos:
+            print(f"        {conteos[0][0]}  params={conteos[0][1]}")
+    else:
+        print("OK     conteo de pedidos            filtros y parámetros alineados")
+
 print("\n" + "=" * 72)
 print("FALLOS:", fallos)
 print("=" * 72)
