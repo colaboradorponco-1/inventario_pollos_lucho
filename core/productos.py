@@ -135,8 +135,14 @@ def productos():
             return err("Debes asignar una sucursal al producto", 400)
         sid = int(sid)
         if data.get("almacen_id"):
-            if not conn.execute("SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id = ?",
-                                (int(data["almacen_id"]), sid)).fetchone():
+            # Mismo criterio ampliado que al editar: valen los almacenes de la
+            # sucursal elegida y de sus AS hijas (el producto "para proveer"
+            # terminará viviendo en la AS y usa los almacenes de la tienda).
+            sc = list(ids_sucursal_consolidada(conn, sid))
+            if not conn.execute(
+                    "SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id IN ("
+                    + ",".join(["?"] * len(sc)) + ")",
+                    (int(data["almacen_id"]), *sc)).fetchone():
                 conn.close()
                 return err("El almacén no pertenece a esa sucursal", 400)
         # Un producto «para proveer» de una tienda con almacén de producción
@@ -548,8 +554,20 @@ def producto(prod_id):
         return err("Debes asignar una sucursal al producto", 400)
     sid_p = int(sid_p)
     if data.get("almacen_id"):
-        if not conn.execute("SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id = ?",
-                            (int(data["almacen_id"]), sid_p)).fetchone():
+        # El almacén vale si es de la propia sucursal, de sus AS hijas o, si el
+        # producto vive en una AS (América/Simón López/6 de Agosto), de la tienda
+        # madre: el encargado de la tienda elige sus almacenes y el producto se
+        # despacha desde la AS.
+        sc = list(ids_sucursal_consolidada(conn, sid_p))
+        if len(sc) == 1:
+            pr = conn.execute("SELECT padre_id FROM sucursales WHERE id = ? AND es_as = 1",
+                              (sid_p,)).fetchone()
+            if pr and pr["padre_id"]:
+                sc.append(int(pr["padre_id"]))
+        if not conn.execute(
+                "SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id IN ("
+                + ",".join(["?"] * len(sc)) + ")",
+                (int(data["almacen_id"]), *sc)).fetchone():
             conn.close()
             return err("El almacén no pertenece a esa sucursal", 400)
     conn.execute("""
