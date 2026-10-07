@@ -886,7 +886,7 @@ function sucursalesFiltroBandeja(lista) {
                 return n.includes('america') || n.includes('siglo xx') || n.includes('simón') || n.includes('simon');
             }
         } else {
-            // Encargados normales de sucursales
+            // Encargados normales de sucursales (Cochabamba o La Paz)
             if (esLaPaz) {
                 return s.principal || n.includes('6 de agosto');
             } else {
