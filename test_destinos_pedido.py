@@ -174,11 +174,12 @@ def _cuerpo_en(etiqueta, fuente, nombre_funcion):
     return None
 
 
-def prueba_el_destino_es_principal_o_as_de_la_misma_ciudad():
-    """El panel de pedidos de cada sucursal solo ofrece los Principales y las
-    sucursales AS de su ciudad (Cochabamba -> AS America + AS Simon Lopez;
-    La Paz -> AS 6 de Agosto). Las tiendas sin AS (Siglo XX, Sopocachi,
-    Miraflores) no despachan pedidos: su inventario es de su propia venta.
+def prueba_el_destino_es_cualquier_almacen_de_la_misma_ciudad():
+    """Cada sucursal es un almacén 100% independiente (America, as_america,
+    Simon Lopez, as_simon_lopez, el AS de La Paz, ...): el panel de pedidos de
+    una sucursal ofrece los Principales (siempre) y TODOS los almacenes de su
+    misma ciudad, sin filtrar por "es AS". El pedido va DIRECTO al almacén que
+    lo despacha.
     """
     fuente = _fuente()
     _check("la ciudad de La Paz se detecta aunque el nombre no lo diga",
@@ -186,15 +187,18 @@ def prueba_el_destino_es_principal_o_as_de_la_misma_ciudad():
            and "miraflores" in fuente,
            "sin esto 'Sopocachi'/'Miraflores' (La Paz) se mostraban como "
            "Cochabamba y aparecian en los pedidos de la otra ciudad")
-    _check("los destinos 'Todo a X' se acotan a Principales + AS",
-           "destinosP = pueden.filter((x) => x.principal || esSucursalAS(x))" in fuente,
-           "una tienda sin AS (provee=1) no debe ofrecerse como destino")
+    _check("los destinos 'Todo a X' ya NO se acotan a Principales + AS",
+           "destinosP = pueden;" in fuente,
+           "los almacenes de la misma ciudad tienen que ofrecerse directo")
     with io.open(os.path.join(RAIZ, "core", "lotes.py"), encoding="utf-8") as fh:
         lotes = fh.read()
     cuerpo_ids = _cuerpo_en("Lotes", lotes, "_ids_proveedores_misma_ciudad")
-    _check("el backend solo acepta AS como destino no-principal",
-           cuerpo_ids is not None and "if not r.get(\"es_as\"):" in cuerpo_ids,
-           "el servidor aceptaria pedidos hacia tiendas que no despachan")
+    _check("el backend acepta CUALQUIER almacen de la misma ciudad",
+           cuerpo_ids is not None and 'if not r.get("es_as"):' not in cuerpo_ids,
+           "se colo de vuelta el filtro que solo aceptaba AS como destino")
+    _check("el backend sigue limitando por ciudad",
+           cuerpo_ids is not None and "ciudad_normalizada" in cuerpo_ids,
+           "sin acotar por ciudad los pedidos irian a la otra ciudad")
     with io.open(os.path.join(RAIZ, "core", "productos.py"), encoding="utf-8") as fh:
         prod = fh.read()
     _check("el catalogo de pedidos acota a la sucursal que pide",
@@ -210,7 +214,7 @@ def main():
     prueba_provee_activo_no_usa_el_nombre()
     prueba_la_lista_de_destinos_usa_la_misma_columna()
     prueba_el_servidor_tambien_exige_la_bandera()
-    prueba_el_destino_es_principal_o_as_de_la_misma_ciudad()
+    prueba_el_destino_es_cualquier_almacen_de_la_misma_ciudad()
     print("=" * 70)
     print(f"FALLOS: {len(FALLOS)}")
     for f in FALLOS:

@@ -135,29 +135,17 @@ def productos():
             return err("Debes asignar una sucursal al producto", 400)
         sid = int(sid)
         if data.get("almacen_id"):
-            # Mismo criterio ampliado que al editar: valen los almacenes de la
-            # sucursal elegida y de sus AS hijas (el producto "para proveer"
-            # terminará viviendo en la AS y usa los almacenes de la tienda), y
-            # también los de la tienda madre cuando la sucursal ES una AS: el
-            # usuario "AS America" elige los almacenes de su tienda.
+            # Cada sucursal es un almacén independiente: el almacén debe ser de
+            # la sucursal elegida, sin ascender a ninguna tienda madre.
             sc = list(ids_sucursal_consolidada(conn, sid))
-            if len(sc) == 1:
-                pr = conn.execute("SELECT padre_id FROM sucursales WHERE id = ? AND es_as = 1",
-                                  (sid,)).fetchone()
-                if pr and pr["padre_id"]:
-                    sc.append(int(pr["padre_id"]))
             if not conn.execute(
                     "SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id IN ("
                     + ",".join(["?"] * len(sc)) + ")",
                     (int(data["almacen_id"]), *sc)).fetchone():
                 conn.close()
                 return err("El almacén no pertenece a esa sucursal", 400)
-        # Un producto «para proveer» de una tienda con almacén de producción
-        # separado vive en su sucursal AS ("AS <tienda>"): ahí se ofrece, ahí se
-        # despacha. El stock de producción no se mezcla con el de venta.
-        if _para_proveer(data):
-            from .util import sucursal_almacen_as
-            sid = sucursal_almacen_as(conn, sid)
+        # Modelo actual: cada sucursal es un almacén independiente. El producto
+        # vive en la sucursal que lo crea (sin moverlo a ninguna "AS").
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
                                    precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, pide_tacho, para_proveer, activo)
@@ -606,31 +594,10 @@ def producto(prod_id):
     sid_p = int(sid_p)
     para_final = (_para_proveer(data) if data.get("para_proveer") is not None
                   else int(fila.get("para_proveer") or 1))
-    if para_final:
-        # Al marcar «para proveer» en una tienda con almacén de producción
-        # (América/Simón López/6 de Agosto) el producto y SU STOCK se mueven a
-        # la AS. Antes solo se giraba la casilla: la llajua seguía con sus kilos
-        # físicamente en la tienda, el pedido se despachaba de ahí y al
-        # recibirlo se devolvía a lo mismo (45 -> 30 -> 45, ciclo sin mover nada).
-        from .util import sucursal_almacen_as
-        sid_as = sucursal_almacen_as(conn, sid_p)
-        if sid_as != sid_p:
-            conn.execute(
-                "UPDATE lotes SET sucursal_id = ? "
-                "WHERE producto_id = ? AND sucursal_id = ?",
-                (sid_as, prod_id, sid_p))
-            sid_p = sid_as
     if data.get("almacen_id"):
-        # El almacén vale si es de la propia sucursal, de sus AS hijas o, si el
-        # producto vive en una AS (América/Simón López/6 de Agosto), de la tienda
-        # madre: el encargado de la tienda elige sus almacenes y el producto se
-        # despacha desde la AS.
+        # Cada sucursal es un almacén independiente: el almacén debe ser de la
+        # sucursal del producto, sin ascender a ninguna tienda madre.
         sc = list(ids_sucursal_consolidada(conn, sid_p))
-        if len(sc) == 1:
-            pr = conn.execute("SELECT padre_id FROM sucursales WHERE id = ? AND es_as = 1",
-                              (sid_p,)).fetchone()
-            if pr and pr["padre_id"]:
-                sc.append(int(pr["padre_id"]))
         if not conn.execute(
                 "SELECT 1 FROM almacenes WHERE id = ? AND sucursal_id IN ("
                 + ",".join(["?"] * len(sc)) + ")",

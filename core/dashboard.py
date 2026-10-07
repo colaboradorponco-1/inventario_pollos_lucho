@@ -74,11 +74,12 @@ def dashboard():
     else:
         ids_cons = ids_sucursal_consolidada(conn, sid)
         ph = ",".join(["%s"] * len(ids_cons))
-        total_productos = conn.execute("""
-            SELECT COUNT(DISTINCT l.producto_id) c
-            FROM lotes l JOIN productos p ON p.id = l.producto_id
-            WHERE p.activo = 1 AND l.sucursal_id IN (""" + ph + """)
-        """, list(ids_cons)).fetchone()["c"]
+        # Misma cuenta que el panel de productos: los productos REGISTRADOS de
+        # esta sucursal (antes se contaban solo los que tenían lote y el
+        # dashboard quedaba 174 contra 177 del panel).
+        total_productos = conn.execute(
+            "SELECT COUNT(*) c FROM productos WHERE activo = 1 AND sucursal_id IN (" + ph + ")",
+            list(ids_cons)).fetchone()["c"]
 
     stock_cond, stock_params = cond_ciudad("l.sucursal_id", cids)
     if sid is None:

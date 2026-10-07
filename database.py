@@ -1091,11 +1091,12 @@ def migrar_esquema():
             print(f"[migrar] AVISO: no se pudieron normalizar las fechas con 'T': {_e}")
 
         # 9) Sucursales AS (producción) de las tiendas con almacén separado.
-        # Inventario producción vs inventario venta: cada tienda elegida recibe
-        # su sucursal hija "AS <tienda>" con stock propio (ver la función).
-        _creadas_as = _crear_sucursales_as(cur)
-        if _creadas_as:
-            print(f"[migrar] {_creadas_as} sucursal(es) AS de producción creada(s)")
+        # DESACTIVADO: cada sucursal es un almacén independiente (America,
+        # as_america, Simon Lopez, as_simon_lopez...) y no se crean más "AS"
+        # hijas de una tienda. Las que ya existen quedan como un almacén más.
+        # _creadas_as = _crear_sucursales_as(cur)
+        # if _creadas_as:
+        #     print(f"[migrar] {_creadas_as} sucursal(es) AS de producción creada(s)")
         db.commit()
     finally:
         db.close()

@@ -135,90 +135,28 @@ def _tienda_almacen_as(norm):
 
 
 def sucursal_almacen_as(conn, sucursal_id):
-    """Sucursal donde debe vivir un producto/lote de PRODUCCIÓN.
-
-    Para una tienda con almacén separado devuelve su sucursal AS (creándola si
-    no existe, misma lógica idempotente que la migración); para el resto de
-    sucursales (incluida una que YA es AS) devuelve `sucursal_id` tal cual.
+    """Modelo actual: cada sucursal es un almacén 100% independiente (America,
+    as_america, Simon Lopez, as_simon_lopez, ...) con sus propios productos y
+    su propio stock. No hay sucursales AS de producción ligadas a la tienda:
+    un producto vive donde fue creado. Identidad.
     """
-    try:
-        sucursal_id = int(sucursal_id or 0)
-    except (TypeError, ValueError):
-        return sucursal_id
-    if not sucursal_id:
-        return sucursal_id
-    fila = conn.execute(
-        "SELECT nombre, es_as FROM sucursales WHERE id = ?",
-        (sucursal_id,)).fetchone()
-    if not fila:
-        return sucursal_id
-    if fila.get("es_as"):
-        return sucursal_id
-    norm = _nombre_norm(fila["nombre"] or "")
-    if not _tienda_almacen_as(norm):
-        return sucursal_id
-    cur = conn.cursor()
-    row = cur.execute(
-        "SELECT id FROM sucursales "
-        "WHERE padre_id = ? AND es_as = 1 LIMIT 1", (sucursal_id,)).fetchone()
-    if row:
-        return int(row["id"])
-    cur.execute(
-        "SELECT id FROM sucursales "
-        "WHERE UPPER(nombre) = ? AND es_as = 1 LIMIT 1",
-        ("AS " + (fila["nombre"] or "").strip().upper(),))
-    by_name = cur.fetchone()
-    if by_name:
-        cur.execute("UPDATE sucursales SET padre_id = ? WHERE id = ?",
-                    (sucursal_id, by_name["id"]))
-        return int(by_name["id"])
-    cur.execute(
-        "INSERT INTO sucursales (nombre, direccion, principal, provee, es_as, padre_id) "
-        "VALUES (?, ?, 0, 1, 1, ?)",
-        ("AS " + (fila["nombre"] or "").strip(), "", sucursal_id))
-    return int(cur.lastrowid)
+    return sucursal_id
 
 
 def ids_sucursal_consolidada(conn, sucursal_id):
     """Ids que pertenecen a una sucursal para contar/ver su inventario.
 
-    Una tienda con almacén de producción separado (América, Simón López,
-    6 de Agosto-La Paz) tiene su sucursal AS hija: sus productos y lotes viven
-    ahí. Para que LA SUCURSAL siga mostrando sus productos (panel, listado,
-    planilla diaria), el alcance de "la sucursal" es ella + sus AS hijas.
-    Nunca toca datos: solo amplía los ids con que se consultan.
+    Modelo actual: cada sucursal es un almacén 100% independiente (America,
+    as_america, Simon Lopez, as_simon_lopez, ...) con sus propios productos y
+    su propio stock, su inventario diario, sus entradas y salidas. No hay
+    tiendas con sucursal AS de producción ligadas: el alcance de "la sucursal"
+    es ELLA MISMA. Identidad: solo amplía nada.
     """
     try:
         sucursal_id = int(sucursal_id or 0)
     except (TypeError, ValueError):
         return [sucursal_id]
-    if not sucursal_id:
-        return [sucursal_id]
-    ids = [sucursal_id]
-    for r in conn.execute(
-            "SELECT id FROM sucursales WHERE padre_id = ? AND es_as = 1",
-            (sucursal_id,)).fetchall():
-        ids.append(int(r["id"]))
-    # Red de seguridad: si la AS de la tienda no quedó enganchada con padre_id
-    # (base migrada a mano o AS creada antes del vínculo), se busca por nombre,
-    # igual que `sucursal_almacen_as`. Sin esto sus productos aparecían "de otra
-    # sucursal" y el encargado no podía gestionarlos.
-    if len(ids) == 1:
-        fila = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
-                            (sucursal_id,)).fetchone()
-        if fila and _tienda_almacen_as(_nombre_norm(fila["nombre"] or "")):
-            # Se compara sin guiones ni espacios extra: la AS pudo quedar con
-            # otro formato de nombre (p. ej. "AS La Paz 6 de Agosto" vs
-            # "AS La Paz - 6 de Agosto") y con nombre exacto no aparece.
-            nom_par = ("AS " + (fila["nombre"] or "").strip()).upper()
-            r = conn.execute(
-                "SELECT id FROM sucursales WHERE es_as = 1 AND "
-                "UPPER(REPLACE(REPLACE(nombre, '-', ' '), '  ', ' ')) = "
-                "UPPER(REPLACE(REPLACE(?, '-', ' '), '  ', ' ')) LIMIT 1",
-                (nom_par,)).fetchone()
-            if r:
-                ids.append(int(r["id"]))
-    return ids
+    return [sucursal_id]
 
 
 # Endpoints que un preparador/repartidor JAMAŚ debe tocar: todo lo que no sea

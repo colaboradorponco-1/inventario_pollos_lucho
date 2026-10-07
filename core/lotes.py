@@ -44,32 +44,20 @@ def _ids_proveedores_misma_ciudad(conn, desde):
         return None
     from core.util import ciudad_normalizada
     fila = conn.execute(
-        "SELECT nombre, es_as, padre_id FROM sucursales WHERE id = ?",
+        "SELECT nombre FROM sucursales WHERE id = ?",
         (desde,)).fetchone()
     if not fila or not fila["nombre"]:
         return None
-    nombre = fila["nombre"]
-    if fila.get("es_as") and fila.get("padre_id"):
-        p = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
-                         (fila["padre_id"],)).fetchone()
-        if p and p["nombre"]:
-            nombre = p["nombre"]
-    ciudad = ciudad_normalizada(nombre)
+    # Modelo actual: cada sucursal es un almacén independiente. Un pedido puede
+    # ir DIRECTO a cualquier almacén de la MISMA ciudad (los Principales siempre).
+    ciudad = ciudad_normalizada(fila["nombre"])
     ids = set()
     for r in conn.execute(
-            "SELECT id, nombre, principal, es_as, padre_id FROM sucursales").fetchall():
+            "SELECT id, nombre, principal FROM sucursales").fetchall():
         if r["principal"]:
             ids.add(int(r["id"]))
             continue
-        if not r.get("es_as"):
-            continue
-        prov_nombre = r["nombre"]
-        if r.get("padre_id"):
-            p = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
-                             (r["padre_id"],)).fetchone()
-            if p and p["nombre"]:
-                prov_nombre = p["nombre"]
-        if ciudad_normalizada(prov_nombre) == ciudad:
+        if ciudad_normalizada(r["nombre"] or "") == ciudad:
             ids.add(int(r["id"]))
     return ids
 

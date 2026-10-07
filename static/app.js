@@ -816,11 +816,11 @@ function opcionesSucursales(lista, placeholder) {
     if (grupo !== null) html += '</optgroup>';
     return html;
 }
-// Sucursales "de vidriera" (listados, formularios y filtros generales): se
-// excluyen las sucursales AS de producción, que son internas de cada tienda y
-// solo se administran desde el módulo de pedidos.
+// Todas las sucursales son almacenes 100% independientes (America, as_america,
+// Simon Lopez, as_simon_lopez, el AS de La Paz, ...): se listan todas tal cual
+// en pestañas, selectores y filtros, cada una con sus productos y su stock.
 function sucursalesTienda(lista) {
-    return (lista || []).filter((s) => !(s.es_as || s.padre_id));
+    return lista || [];
 }
 // A qué almacenes puede pedir la sucursal que está armando el pedido: los
 // Almacenes Principales (siempre) y el resto solo si están en la MISMA ciudad
@@ -842,45 +842,31 @@ function proveedoresAlcance(lista) {
         return ciudadSucursal(p) === ciudadSucursal(me);
     });
 }
-// ¿Esta sucursal es un almacén de producción AS? Se detecta por la bandera
-// `es_as`/`padre_id` (sucursal hija de una tienda con inventario separado), y
-// por nombre para los AS dadas de alta antes de la migración ("AS ...").
+// ¿Esta sucursal es un almacén de producción AS? En el modelo actual TODAS las
+// sucursales (America, as_america, Simon Lopez, as_simon_lopez, el AS de La
+// Paz, ...) son almacenes independientes: no hay ninguna "especial".
 function esSucursalAS(s) {
-    if (!s || s.principal) return false;
-    if (s.es_as || s.padre_id) return true;
-    const n = nombreNorm(s.nombre || '');
-    return /^as /.test(n) && (n.includes('america') || n.includes('simon')
-        || n.includes('6 de agosto'));
+    return false;
 }
 function sucursalesFiltroPedidos(lista) {
-    // El admin/superadmin ve TODAS las sucursales del negocio (Almacén
-    // Principal, AS, America, Simon Lopez, Siglo xx, 6 de agosto...) tal cual
-    // están dadas de alta, para filtrar por cualquier almacén. Los encargados
-    // ven la lista fija con la que trabajan: los Almacenes Principales + las
-    // sucursales AS de su MISMA ciudad (la tienda sin AS no despacha pedidos).
+    // Cada sucursal es un almacén independiente. El admin/superadmin ve TODAS
+    // las sucursales; el encargado ve los Principales + los almacenes de su
+    // misma ciudad (a los que puede pedir directo).
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (esGestionPed()) return base;
-    return proveedoresAlcance(base)
-        .map((s) => (esSucursalAS(s) ? Object.assign({}, s, { nombre: nombreSucursalPedido(s) }) : s))
-        .filter((s) => s.principal || esSucursalAS(s));
+    return proveedoresAlcance(base);
 }
-// Nombre visible de una sucursal en el módulo de pedidos: las sucursales AS
-// de producción se muestran como "AS <tienda>" (su encargado de recepción se
-// ocupa de ellas).
+// Nombre visible de una sucursal en el módulo de pedidos (ya sin "AS especial"):
+// cada almacén figura con su propio nombre.
 function nombreSucursalPedido(s) {
     if (!s) return '';
-    if (!esSucursalAS(s)) return s.nombre;
-    const base = (s.padre_nombre || s.nombre || '').trim();
-    return nombreNorm(base).startsWith('as ') ? s.nombre : ('AS ' + base);
+    return s.nombre;
 }
 
-// Lista para FILTRAR la bandeja y el historial de pedidos: los Almacenes
-// Principales + las tiendas de la misma ciudad (las que piden). Las AS de
-// producción no figuran: no piden, RECIBEN pedidos; su bandeja se muestra
-// entera con "Todas las sucursales" y con los nombres de tienda (america,
-// simon lopez, siglo xx...).
+// Lista para FILTRAR la bandeja y el historial de pedidos: cada sucursal de la
+// misma ciudad + los Principales (los almacenes con los que trabaja el que pide).
 function sucursalesFiltroBandeja(lista) {
-    return proveedoresAlcance(sucursalesTienda(lista || []).filter((s) => !esSucursalAS(s)));
+    return proveedoresAlcance(lista || (catalogos && catalogos.sucursales) || []);
 }
 
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
@@ -896,12 +882,10 @@ async function poblarBotonesSucursal(contId, selectId, listarFn) {
     const mostrar = !!select && select.style.display !== 'none';
     cont.style.display = mostrar ? 'flex' : 'none';
     if (!mostrar) return;
-    let sucs = proveedoresAlcance(sucursalesTienda(catalogos && catalogos.sucursales)
-        .filter((s) => !esSucursalAS(s)));
+    let sucs = proveedoresAlcance(sucursalesTienda(catalogos && catalogos.sucursales));
     if (!sucs.length) {
         try {
-            sucs = proveedoresAlcance(sucursalesTienda(await request(API + '/sucursales'))
-                .filter((s) => !esSucursalAS(s)));
+            sucs = proveedoresAlcance(sucursalesTienda(await request(API + '/sucursales')));
         } catch (e) { sucs = []; }
     }
     const activo = select ? String(select.value || '') : '';
@@ -920,14 +904,12 @@ async function pintarProdScope() {
     const row = $('#prod-scope-tabs');
     if (!row) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
-    // Las AS de producción ("AS America", "AS Simón López") NO son sucursales
-    // para elegir: su mercadería ya se cuenta en el botón de la tienda (el
-    // servidor consolida tienda + AS). Se ocultan por bandera Y por nombre
-    // (las viejas no tienen la bandera), y la lista se acota a la misma ciudad.
+    // Cada sucursal es un almacén independiente (America, as_america, Simon
+    // Lopez, as_simon_lopez, el AS de La Paz, ...): todas figuran como pestaña
+    // con su propio conteo de productos.
     const botones = [{ v: '', lbl: 'Todas' }]
         .concat(ordenarSucursales(
-            proveedoresAlcance(sucursalesTienda(catalogos.sucursales)
-                .filter((s) => !esSucursalAS(s)))
+            proveedoresAlcance(sucursalesTienda(catalogos.sucursales))
         ).map((s) => ({ v: String(s.id), lbl: s.nombre })));
     const ctr = {};
     for (const b of botones) {
@@ -968,14 +950,10 @@ async function loadProductos() {
         container.innerHTML = '';
 
         const grupos = ordenarSucursales(sucursalesTienda(catalogos.sucursales)).map((s) => ({ id: s.id, nombre: s.nombre }));
-        // Los productos de una sucursal AS hija pertenecen a su tienda (padre):
-        // se agrupan/muestran bajo América/Simón López/6 de Agosto.
+        // Cada sucursal es un almacén independiente: cada producto se agrupa
+        // bajo la sucursal donde vive (as_america, america, simon lopez...).
         const sucsById = Object.fromEntries((catalogos.sucursales || []).map((s) => [String(s.id), s]));
-        const grupoDe = (p) => {
-            const s = sucsById[String(p.sucursal_id)];
-            if (s && s.padre_id) return Number(s.padre_id);
-            return p.sucursal_id;
-        };
+        const grupoDe = (p) => p.sucursal_id;
         const cats = [{ id: 0, nombre: 'Sin categoría' }]
             .concat((catalogos.categorias || []).map((c) => ({ id: c.id, nombre: c.nombre })));
         let visibles = _prodSuc === '' ? grupos : grupos.filter((g) => String(g.id) === _prodSuc);
@@ -1337,20 +1315,9 @@ function poblarAlmacenes(sid) {
     const alm = $('#prod-almacen');
     if (!alm) return;
     const previo = alm.value;
-    // Alcance ampliado, igual que `ids_sucursal_consolidada` del servidor: la
-    // sucursal + sus AS hijas, y para un AS también los almacenes de su tienda
-    // madre (el "AS America" elige los mismos almacenes que América).
-    let sids = sid ? [Number(sid)] : [];
-    if (sid) {
-        const todas = (catalogos && catalogos.sucursales) || [];
-        const me = todas.find((s) => +s.id === +sid);
-        if (me) {
-            if (me.padre_id) sids.push(+me.padre_id);
-            todas.forEach((s) => { if (+s.padre_id === +sid && s.es_as) sids.push(+s.id); });
-        }
-    }
-    sids = Array.from(new Set(sids));
-    const lista = sid ? (catalogos.almacenes || []).filter((a) => sids.includes(+a.sucursal_id))
+    // Cada sucursal es un almacén independiente: el selector muestra solo los
+    // almacenes de LA sucursal elegida.
+    const lista = sid ? (catalogos.almacenes || []).filter((a) => +a.sucursal_id === +sid)
                       : (catalogos.almacenes || []);
     alm.innerHTML = '<option value="">— Sin almacén —</option>' +
         lista.map((a) => `<option value="${a.id}">${esc(a.nombre)}</option>`).join('');
@@ -4333,10 +4300,10 @@ on('#pedido-sucursal', 'change', async () => {
     const selDest = $('#pedido-destino');
     if (selDest) {
         const alcance = proveedoresAlcance(catalogos && catalogos.sucursales);
-        // Los únicos destinos a los que se puede pedir: los Principales
-        // (siempre) y las sucursales AS de la misma ciudad (las tiendas sin AS
-        // no despachan pedidos: su inventario es de su propia venta).
-        const destinos = alcance.filter((x) => (x.principal || esSucursalAS(x)));
+        // Destinos: los Principales + los almacenes de la misma ciudad. Cada
+        // sucursal es un almacén independiente y el pedido va DIRECTO al
+        // almacén que lo despacha (as_america, as_simon_lopez, ...).
+        const destinos = alcance;
         selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
             + destinos.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
     }
@@ -4437,9 +4404,9 @@ async function loadPedidos() {
         const selDest = $('#pedido-destino');
         if (selDest) {
             const pueden = sucursales.filter((x) => (x.principal || x.provee));
-            // Auto-pedido y alcance: además de los Principales, solo las
-            // sucursales AS de la misma ciudad atienden pedidos.
-            const destinosP = pueden.filter((x) => x.principal || esSucursalAS(x));
+            // Cada sucursal es un almacén independiente: el pedido va DIRECTO al
+            // almacén que despacha (los Principales y los de la misma ciudad).
+            const destinosP = pueden;
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + destinosP.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
         }
