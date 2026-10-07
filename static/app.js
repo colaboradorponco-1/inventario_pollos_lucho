@@ -882,8 +882,14 @@ async function poblarBotonesSucursal(contId, selectId, listarFn) {
     const mostrar = !!select && select.style.display !== 'none';
     cont.style.display = mostrar ? 'flex' : 'none';
     if (!mostrar) return;
-    let sucs = sucursalesTienda(catalogos && catalogos.sucursales);
-    if (!sucs.length) { try { sucs = sucursalesTienda(await request(API + '/sucursales')); } catch (e) { sucs = []; } }
+    let sucs = proveedoresAlcance(sucursalesTienda(catalogos && catalogos.sucursales)
+        .filter((s) => !esSucursalAS(s)));
+    if (!sucs.length) {
+        try {
+            sucs = proveedoresAlcance(sucursalesTienda(await request(API + '/sucursales'))
+                .filter((s) => !esSucursalAS(s)));
+        } catch (e) { sucs = []; }
+    }
     const activo = select ? String(select.value || '') : '';
     cont.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
         .concat(ordenarSucursales(sucs || []))
@@ -900,8 +906,15 @@ async function pintarProdScope() {
     const row = $('#prod-scope-tabs');
     if (!row) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
+    // Las AS de producción ("AS America", "AS Simón López") NO son sucursales
+    // para elegir: su mercadería ya se cuenta en el botón de la tienda (el
+    // servidor consolida tienda + AS). Se ocultan por bandera Y por nombre
+    // (las viejas no tienen la bandera), y la lista se acota a la misma ciudad.
     const botones = [{ v: '', lbl: 'Todas' }]
-        .concat(ordenarSucursales(sucursalesTienda(catalogos.sucursales)).map((s) => ({ v: String(s.id), lbl: s.nombre })));
+        .concat(ordenarSucursales(
+            proveedoresAlcance(sucursalesTienda(catalogos.sucursales)
+                .filter((s) => !esSucursalAS(s)))
+        ).map((s) => ({ v: String(s.id), lbl: s.nombre })));
     const ctr = {};
     for (const b of botones) {
         try {
