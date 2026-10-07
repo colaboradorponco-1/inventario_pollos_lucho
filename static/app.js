@@ -1005,7 +1005,13 @@ async function loadProductos() {
 
             const filas = (it) => it.map(p => {
                 const esFilial = window.ROL === 'encargado' && !esGestion && !esAlmacenPpal();
-                const esPropio = window.ROL === 'encargado' && grupoDe(p) === Number(window.SUCURSAL_ID);
+                // Es "propio" si el producto es de la sucursal del usuario tal
+                // cual (el usuario del AS, p. ej. "AS America", edita SUS propios
+                // productos) o si su grupo de tienda coincide (los productos del
+                // AS pertenecen a la tienda padre, y su encargado los edita).
+                const esPropio = window.ROL === 'encargado'
+                    && (grupoDe(p) === Number(window.SUCURSAL_ID)
+                        || Number(p.sucursal_id || 0) === Number(window.SUCURSAL_ID || 0));
                 // En una filial, los productos que no son de su sucursal muestran el
                 // "disponible" del proveedor (lo real, no 0) con el nombre de quién lo tiene.
                 const provVista = esFilial && !esPropio;
