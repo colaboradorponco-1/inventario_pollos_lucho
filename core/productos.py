@@ -217,7 +217,7 @@ def productos():
     # stock_sucursal: fuerza el stock de UNA sucursal concreta (p. ej. el desplegable
     # de ventas/repartos usa el stock de la sucursal del usuario, no el total).
     stock_sid = None
-    stock_suc = None
+    join_own_sucursal = False
     if request.args.get("stock_sucursal", "").strip():
         stock_sid, e = _stock_sucursal_permitido(conn, ver_todo, sid)
         if e:
@@ -229,21 +229,25 @@ def productos():
                       "FROM lotes WHERE sucursal_id IN (" + ph_in + ") GROUP BY producto_id) s ON s.producto_id = p.id")
         lote_cond = " AND l2.sucursal_id IN (" + ph_in + ")"
     elif sucursal is not None:
-        # Pestaña elegida: el stock de cada producto es SOLO el de esa sucursal
-        # (sus propios lotes), sin sumarle el de su almacén de producción.
-        stock_suc = int(sucursal)
+        # Pestaña/sucursal elegida: el stock de cada producto es el de SU PROPIA
+        # sucursal registrada (la papa que pasó a proveer vive en el AS y se ve
+        # con lo que hay ahí; del otro lado, la tienda muestra lo suyo).
+        join_own_sucursal = True
     elif not ver_todo and sid is not None:
-        # Filial sin pestaña: cada inventario muestra lo que ESA sucursal tiene.
-        # La papa que produce el AS vive en el AS (ej. 70 kg) y el inventario de
-        # América muestra los 25 kg que tiene para vender. Si se sumaran los lotes
-        # de la tienda con los del AS del MISMO artículo aparecería el "ciclo":
-        # pedir 15 de producción y ver que el total no se movía (45 -> 45) cuando
-        # en realidad la AS baja y la venta sube.
-        stock_suc = int(sid)
-    if stock_suc is not None:
-        join_stock = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad "
-                      "FROM lotes WHERE sucursal_id = " + str(int(stock_suc)) + " GROUP BY producto_id) s ON s.producto_id = p.id")
-        lote_cond = " AND l2.sucursal_id = " + str(int(stock_suc))
+        # Filial sin pestaña: cada producto muestra el stock del almacén donde
+        # vive (producción en la AS, venta en la tienda). Contar SOLO los lotes
+        # de la propia tienda dejaba en 0 los productos que pasaron al AS (todo
+        # el inventario de América vive en su AS de producción), y sumar los
+        # lotes de la tienda + el AS del MISMO artículo producía el "ciclo"
+        # (45 -> 45): al pasar 15 de producción a la venta, el total no cambiaba
+        # cuando en realidad la AS baja y la venta sube.
+        join_own_sucursal = True
+    if join_own_sucursal:
+        join_stock = ("LEFT JOIN (SELECT l.producto_id, SUM(l.cantidad) AS cantidad "
+                      "FROM lotes l JOIN productos pr2 ON pr2.id = l.producto_id "
+                      "WHERE l.cantidad > 0 AND l.sucursal_id = pr2.sucursal_id "
+                      "GROUP BY l.producto_id) s ON s.producto_id = p.id")
+        lote_cond = " AND l2.sucursal_id = p.sucursal_id"
     elif stock_sid is None:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
