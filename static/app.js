@@ -864,8 +864,30 @@ function nombreSucursalPedido(s) {
 function sucursalesFiltroBandeja(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (puedeVerTodasSucursales()) return base;
-    // Los encargados ven los Principales y todas las sucursales de su alcance
-    return base.filter((s) => s.principal || s.provee || true);
+    const nombreSuc = (window.SUCURSAL_NOMBRE || '').toLowerCase();
+    const esLaPaz = nombreSuc.includes('la paz') || nombreSuc.includes('miraflores') || nombreSuc.includes('sopocachi');
+    const esReceptor = nombreSuc.includes('as ') || nombreSuc.startsWith('as');
+
+    return base.filter((s) => {
+        const n = (s.nombre || '').toLowerCase();
+        if (esLaPaz) {
+            if (esReceptor) {
+                // Receptor de La Paz: Sopocachi, Miraflores (y ella misma)
+                return n.includes('sopocachi') || n.includes('miraflores') || Number(s.id) === Number(window.SUCURSAL_ID);
+            } else {
+                // Encargados sucursales La Paz: Almacén Principal 1, 2 y AS 6 de Agosto
+                return s.principal || n.includes('6 de agosto') || Number(s.id) === Number(window.SUCURSAL_ID);
+            }
+        } else {
+            if (esReceptor) {
+                // Receptores Cochabamba (AS America, AS Simon Lopez): America, Siglo XX, Simon Lopez
+                return n.includes('america') || n.includes('siglo xx') || n.includes('simón') || n.includes('simon') || Number(s.id) === Number(window.SUCURSAL_ID);
+            } else {
+                // Encargados filiales Cochabamba: Almacén Principal 1, 2 y AS America, AS Simon Lopez
+                return s.principal || n.includes('as america') || n.includes('as simón') || n.includes('as simon') || Number(s.id) === Number(window.SUCURSAL_ID);
+            }
+        }
+    });
 }
 
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
