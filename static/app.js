@@ -4657,8 +4657,9 @@ async function cargarBandeja() {
         const grupos = sucF ? gruposRaw.filter((g) => String(g.sucursal_id) === sucF) : ordenarSucursales(gruposRaw);
         const btsB = $('#bandeja-suc-btns');
         if (btsB) {
+            const sucsFiltradas = sucursalesFiltroBandeja(catalogos.sucursales);
             btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-                .concat(ordenarSucursales(sucursalesFiltroBandeja(catalogos.sucursales).map((s) => ({ id: String(s.id), nombre: s.nombre }))))
+                .concat(ordenarSucursales(sucsFiltradas.map((s) => ({ id: String(s.id), nombre: s.nombre }))))
                 .map((b) => `
                     <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
                 .join('');
