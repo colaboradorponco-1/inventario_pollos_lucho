@@ -199,6 +199,20 @@ def ids_sucursal_consolidada(conn, sucursal_id):
             "SELECT id FROM sucursales WHERE padre_id = ? AND es_as = 1",
             (sucursal_id,)).fetchall():
         ids.append(int(r["id"]))
+    # Red de seguridad: si la AS de la tienda no quedó enganchada con padre_id
+    # (base migrada a mano o AS creada antes del vínculo), se busca por nombre,
+    # igual que `sucursal_almacen_as`. Sin esto sus productos aparecían "de otra
+    # sucursal" y el encargado no podía gestionarlos.
+    if len(ids) == 1:
+        fila = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
+                            (sucursal_id,)).fetchone()
+        if fila and _tienda_almacen_as(_nombre_norm(fila["nombre"] or "")):
+            r = conn.execute(
+                "SELECT id FROM sucursales "
+                "WHERE UPPER(nombre) = ? AND es_as = 1 LIMIT 1",
+                ("AS " + (fila["nombre"] or "").strip().upper(),)).fetchone()
+            if r:
+                ids.append(int(r["id"]))
     return ids
 
 

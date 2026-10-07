@@ -519,7 +519,11 @@ def producto(prod_id):
     # encargado de la tienda debe poder gestionarlos igual que los propios).
     if not es_gestion() and not es_encargado_almacen(conn):
         sid_user = sucursal_actual()
-        if sid_user is None or int(fila["sucursal_id"] or 0) not in ids_sucursal_consolidada(conn, sid_user):
+        cons = ids_sucursal_consolidada(conn, sid_user) if sid_user is not None else []
+        if sid_user is None or int(fila["sucursal_id"] or 0) not in cons:
+            app_logger = logging.getLogger("app")
+            app_logger.error("producto %s de sucursal %s editado por %s con ámbito %s -> 403",
+                             prod_id, fila["sucursal_id"], sid_user, cons)
             conn.close()
             return err("Solo puedes gestionar productos de tu sucursal", 403)
     if request.method == "DELETE":
