@@ -199,6 +199,9 @@ def productos():
     sucursal = request.args.get("sucursal", "").strip()
     para_pedido = request.args.get("para_pedido", "").strip() in ("1", "true", "si")
     sid = sucursal_actual()
+    # Sucursal que pide (para acotar el catálogo de pedidos a su misma ciudad).
+    desde_arg = request.args.get("desde", "").strip()
+    desde_cat = int(desde_arg) if desde_arg.isdigit() else (sid if para_pedido else None)
     # Cualquier valor no numérico en un filtro devolvía 500 en vez de 400.
     def _id_o_none(v):
         try:
@@ -293,6 +296,30 @@ def productos():
     if para_pedido:
         q += (" AND (p.para_proveer = 1 OR p.sucursal_id IS NULL OR EXISTS "
               "(SELECT 1 FROM sucursales s2 WHERE s2.id = p.sucursal_id AND s2.principal = 1))")
+        # «La versión para proveer del AS manda»: si el artículo ya tiene una
+        # fila con casilla «para proveer» en un almacén de sucursal (AS) de la
+        # misma ciudad, SOLO esa fila se ofrece en los pedidos. La misma
+        # mercadería cargada como global/venta o en el almacén principal queda
+        # oculta mientras exista esa versión: si no, los pedidos se repartían
+        # entre el principal (44 kg) y el AS (toneladas) sin poder controlarlo.
+        permitidos = _ids_proveedores_misma_ciudad(conn, desde_cat)
+        ciudad_ok = "1=1" if permitidos is None else (
+            "p2.sucursal_id IN (" + ",".join(str(i) for i in permitidos) + ")")
+        q += (" AND ("
+              "    (p.para_proveer = 1 AND EXISTS ("
+              "        SELECT 1 FROM sucursales as_ "
+              "        WHERE as_.id = p.sucursal_id AND as_.es_as = 1))"
+              "    OR NOT EXISTS ("
+              "        SELECT 1 FROM productos p2"
+              "        JOIN sucursales as_ ON as_.id = p2.sucursal_id"
+              "        WHERE p2.activo = 1 AND IFNULL(p2.para_proveer, 1) = 1"
+              "          AND as_.es_as = 1 AND p2.id <> p.id AND " + ciudad_ok + " AND ("
+              "            (IFNULL(p2.codigo, '') <> '' "
+              "             AND IFNULL(p2.codigo, '') = IFNULL(p.codigo, '')"
+              "            ) OR ("
+              "              IFNULL(p2.codigo, '') = '' OR IFNULL(p.codigo, '') = ''"
+              "            ) AND p2.nombre = p.nombre"
+              "        )))")
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":
@@ -318,9 +345,8 @@ def productos():
     # El catálogo del formulario de pedidos se acota a la sucursal que pide
     # (`?desde=`, la que eligió el encargado/gestion en el paso 1). Así lo que
     # la pantalla ofrece es exactamente lo que el servidor acepta al guardar:
-    # Principales + sucursales AS de la misma ciudad.
-    desde_arg = request.args.get("desde", "").strip()
-    desde_cat = int(desde_arg) if desde_arg.isdigit() else (sid if para_pedido else None)
+    # Principales + sucursales AS de la misma ciudad. (`desde_cat` ya quedó
+    # resuelto arriba, antes del filtro de la versión que provee.)
     # `para_pedido=1` lo manda solo el catálogo del formulario de pedidos. En ese
     # caso cada producto trae el destino por el que SE PEDIRÍA (el que tiene
     # stock) y el disponible de ahí, para que la pantalla y el servidor elijan lo
