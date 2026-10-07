@@ -864,21 +864,8 @@ function nombreSucursalPedido(s) {
 function sucursalesFiltroBandeja(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (puedeVerTodasSucursales()) return base;
-    // Si es un encargado zonal/filial, solo ve las sucursales de su misma ciudad o vinculadas
-    const sid = window.SUCURSAL_ID;
-    if (!sid) return base;
-    const actual = base.find((s) => Number(s.id) === Number(sid));
-    if (!actual) return base;
-    const ciudadActual = (actual.direccion || '').toLowerCase();
-    return base.filter((s) => {
-        if (s.principal) return true;
-        if (Number(s.id) === Number(sid)) return true;
-        const dir = (s.direccion || '').toLowerCase();
-        if (ciudadActual && dir && (ciudadActual.includes('la paz') && dir.includes('la paz') || ciudadActual.includes('cochabamba') && dir.includes('cochabamba'))) {
-            return true;
-        }
-        return false;
-    });
+    // Los encargados ven los Principales y todas las sucursales de su alcance
+    return base.filter((s) => s.principal || s.provee || true);
 }
 
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
