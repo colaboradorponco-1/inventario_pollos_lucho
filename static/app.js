@@ -856,7 +856,17 @@ function esSucursalAS(s) {
 function sucursalesFiltroPedidos(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (puedeVerTodasSucursales()) return base;
-    return sucursalesFiltroBandeja(base);
+    const nombreSuc = (window.SUCURSAL || '').toLowerCase();
+    const esLaPaz = nombreSuc.includes('la paz') || nombreSuc.includes('miraflores') || nombreSuc.includes('sopocachi');
+    // Para hacer un pedido, las filiales ven los Almacenes Principales y su propio AS
+    return base.filter((s) => {
+        const n = (s.nombre || '').toLowerCase();
+        if (n.startsWith('as ') || n.includes('as ')) {
+            if (esLaPaz) return n.includes('6 de agosto');
+            return n.includes('as america') || n.includes('as simón') || n.includes('as simon');
+        }
+        return s.principal;
+    });
 }
 // Nombre visible de una sucursal en el módulo de pedidos (ya sin "AS especial"):
 // cada almacén figura con su propio nombre.
