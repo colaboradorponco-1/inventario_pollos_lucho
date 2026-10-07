@@ -850,7 +850,8 @@ function esSucursalAS(s) {
 }
 function sucursalesFiltroPedidos(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
-    return base;
+    if (puedeVerTodasSucursales()) return base;
+    return sucursalesFiltroBandeja(base);
 }
 // Nombre visible de una sucursal en el módulo de pedidos (ya sin "AS especial"):
 // cada almacén figura con su propio nombre.
