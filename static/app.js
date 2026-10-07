@@ -1239,7 +1239,7 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-precio-venta').value = p.precio_venta;
         $('#prod-vencimiento').value = p.vencimiento || '';
         $('#prod-proveedor').value = p.proveedor_id || '';
-        $('#prod-provee').value = String(p.para_proveer == null ? 1 : +p.para_proveer);
+    
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
         if (esGestionDlg) poblarAlmacenes(+$('#prod-sucursal').value || 0);
         if (esGestionDlg && p.sucursal_id && !p.almacen_id) {
@@ -1274,7 +1274,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         precio_venta: +$('#prod-precio-venta').value || 0,
         vencimiento: $('#prod-vencimiento').value || null,
         proveedor_id: +$('#prod-proveedor').value || null,
-        para_proveer: +$('#prod-provee').value === 1 ? 1 : 0,
+
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
     if (esCentral()) {
