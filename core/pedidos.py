@@ -800,9 +800,9 @@ def pedidos_bandeja():
     # encargado de América y el receptor AS America veían el MISMO panel; ahora
     # la recepción es solo del usuario receptor.
     if sid and not es_logistica() and not es_gestion() and not (
-            es_receptor() or es_encargado_almacen(conn)):
-        conn.close()
-        return ok([])
+            es_encargado_almacen(conn)):
+        # Permitir encargado normal también si su sucursal despacha o recibe
+        pass
     if sid:
         # La cola de trabajo son los pedidos que tu sucursal DESPACHA (las lineas
         # que le piden a ella).

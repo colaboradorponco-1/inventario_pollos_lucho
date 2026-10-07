@@ -102,14 +102,8 @@ def es_logistica():
 
 
 def es_receptor():
-    """True si el usuario es un ALMACEN receptor (p. ej. 'AS America').
-
-    Es la recepción/producción de una sucursal proveedora: su panel es la
-    bandeja de pedidos que le hacen y solo sus propios datos. También puede
-    crear pedidos de APROVISIONAMIENTO al Almacén Principal (de los que
-    despacha su propia bandeja), como el AS de 6 de Agosto que pide a los
-    Principales para abastecer La Paz."""
-    return bool(session.get("receptor"))
+    """Ya no existen sucursales AS separadas; siempre devuelve False."""
+    return False
 
 
 def _nombre_norm(nombre):
