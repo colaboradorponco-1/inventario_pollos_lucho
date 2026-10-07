@@ -832,6 +832,11 @@ function proveedoresAlcance(lista) {
     const me = todos.find((x) => String(x.id) === String(pid));
     const base = lista || todos;
     if (!me) return base;
+    // Admin/superadmin y los encargados de Almacén Principal gestionan TODAS
+    // las sucursales (Cochabamba y La Paz): ven la lista completa, sin acotar
+    // por ciudad. La regla de "misma ciudad" aplica solo a las filiales (las
+    // tiendas que arman pedidos piden solo a los AP y a las AS de su ciudad).
+    if (esGestionPed() || esAlmacenPpal()) return base;
     return base.filter((p) => {
         if (p.principal) return true;
         return ciudadSucursal(p) === ciudadSucursal(me);
