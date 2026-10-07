@@ -104,10 +104,79 @@ def es_logistica():
 def es_receptor():
     """True si el usuario es un ALMACEN receptor (p. ej. 'AS America').
 
-    Son la recepción de una sucursal proveedora: su panel es la bandeja de
-    pedidos que le hacen a esa sucursal y solo sus propios datos. No crean
-    pedidos propios ('Mis pedidos')."""
+    Es la recepción/producción de una sucursal proveedora: su panel es la
+    bandeja de pedidos que le hacen y solo sus propios datos. También puede
+    crear pedidos de APROVISIONAMIENTO al Almacén Principal (de los que
+    despacha su propia bandeja), como el AS de 6 de Agosto que pide a los
+    Principales para abastecer La Paz."""
     return bool(session.get("receptor"))
+
+
+def _nombre_norm(nombre):
+    """Normaliza el nombre de sucursal igual que `database._nombre_norm`
+    (sin acentos ni palabras genéricas), para que la regla AS coincida."""
+    n = unicodedata.normalize("NFD", (nombre or "")) \
+        .encode("ascii", "ignore").decode().lower()
+    for w in ("sucursal", "almacen", "principal"):
+        n = n.replace(w, " ")
+    return " ".join(n.split())
+
+
+def _tienda_almacen_as(norm):
+    """True si la sucursal corresponde a una tienda con almacén de producción
+    separado ("AS <tienda>"). Por ahora solo: América, Simón López y
+    6 de Agosto (La Paz). Se evalúa sobre el nombre normalizado.
+
+    MANTENER EN SYNC con `database._es_tienda_almacen_as`: la regla define
+    qué sucursales reciben su sucursal AS hija al arrancar.
+    """
+    return ("america" in norm or "simon" in norm
+            or ("la paz" in norm and "6" in norm))
+
+
+def sucursal_almacen_as(conn, sucursal_id):
+    """Sucursal donde debe vivir un producto/lote de PRODUCCIÓN.
+
+    Para una tienda con almacén separado devuelve su sucursal AS (creándola si
+    no existe, misma lógica idempotente que la migración); para el resto de
+    sucursales (incluida una que YA es AS) devuelve `sucursal_id` tal cual.
+    """
+    try:
+        sucursal_id = int(sucursal_id or 0)
+    except (TypeError, ValueError):
+        return sucursal_id
+    if not sucursal_id:
+        return sucursal_id
+    fila = conn.execute(
+        "SELECT nombre, es_as FROM sucursales WHERE id = ?",
+        (sucursal_id,)).fetchone()
+    if not fila:
+        return sucursal_id
+    if fila.get("es_as"):
+        return sucursal_id
+    norm = _nombre_norm(fila["nombre"] or "")
+    if not _tienda_almacen_as(norm):
+        return sucursal_id
+    cur = conn.cursor()
+    row = cur.execute(
+        "SELECT id FROM sucursales "
+        "WHERE padre_id = ? AND es_as = 1 LIMIT 1", (sucursal_id,)).fetchone()
+    if row:
+        return int(row["id"])
+    cur.execute(
+        "SELECT id FROM sucursales "
+        "WHERE UPPER(nombre) = ? AND es_as = 1 LIMIT 1",
+        ("AS " + (fila["nombre"] or "").strip().upper(),))
+    by_name = cur.fetchone()
+    if by_name:
+        cur.execute("UPDATE sucursales SET padre_id = ? WHERE id = ?",
+                    (sucursal_id, by_name["id"]))
+        return int(by_name["id"])
+    cur.execute(
+        "INSERT INTO sucursales (nombre, direccion, principal, provee, es_as, padre_id) "
+        "VALUES (?, ?, 0, 1, 1, ?)",
+        ("AS " + (fila["nombre"] or "").strip(), "", sucursal_id))
+    return int(cur.lastrowid)
 
 
 # Endpoints que un preparador/repartidor JAMAŚ debe tocar: todo lo que no sea

@@ -137,6 +137,12 @@ def productos():
                                 (int(data["almacen_id"]), sid)).fetchone():
                 conn.close()
                 return err("El almacén no pertenece a esa sucursal", 400)
+        # Un producto «para proveer» de una tienda con almacén de producción
+        # separado vive en su sucursal AS ("AS <tienda>"): ahí se ofrece, ahí se
+        # despacha. El stock de producción no se mezcla con el de venta.
+        if _para_proveer(data):
+            from .util import sucursal_almacen_as
+            sid = sucursal_almacen_as(conn, sid)
         cur = conn.execute("""
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
                                    precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, pide_tacho, para_proveer, activo)
@@ -261,10 +267,13 @@ def productos():
             # El scope de visibilidad limita a filiales: solo lo que pueden ver
             q += " AND p.sucursal_id = ?"
             params.append(sucursal)
-    # El formulario de pedidos SOLO ofrece lo marcado «para proveer»; lo de
-    # «solo inventario» se ve en el inventario general pero no se puede pedir.
+    # El formulario de pedidos SOLO ofrece lo marcado «para proveer» (más lo
+    # global y lo del almacén principal, de donde cualquier sucursal puede
+    # pedir). Lo de «solo inventario» se ve en el inventario general pero no se
+    # puede pedir.
     if para_pedido:
-        q += " AND p.para_proveer = 1"
+        q += (" AND (p.para_proveer = 1 OR p.sucursal_id IS NULL OR EXISTS "
+              "(SELECT 1 FROM sucursales s2 WHERE s2.id = p.sucursal_id AND s2.principal = 1))")
     if estado == "con-stock":
         q += " AND COALESCE(s.cantidad, 0) > 0"
     elif estado == "agotado":
@@ -320,6 +329,9 @@ def productos():
         r["stock_prov"] = prov.get(r["id"], 0)
         r["destino_stock"] = None
         r["destino_nombre"] = ""
+        # El proveedor (quien distribuye) no tiene stock de este producto. El
+        # pedido se puede hacer IGUAL y queda avisado; no es "agotado".
+        r["sin_stock"] = False
         if para_pedido and destino is None:
             # Automático: va a quien REPARTE el producto, que es la sucursal que
             # lo tiene en el catálogo (o el principal si esa no despacha).
@@ -333,6 +345,7 @@ def productos():
                 disp = stock_dest - reservas.get((int(r["id"]), sid_dest), 0.0)
                 r["stock_prov"] = max(0.0, disp)
                 r["destino_stock"] = stock_dest
+                r["sin_stock"] = stock_dest <= 0
             else:
                 r["stock_prov"] = 0.0
         else:

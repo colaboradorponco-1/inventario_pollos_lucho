@@ -21,19 +21,76 @@ def normalizar_fecha_vencimiento(valor):
         return None
 
 
-def destinos_validos(conn):
+def _ids_proveedores_misma_ciudad(conn, desde):
+    """Ids de sucursales a las que la sucursal `desde` puede pedir.
+
+    Los almacenes principales atienden a TODOS (siempre válidos); el resto de
+    proveedores solo si están en la MISMA ciudad que `desde` (Cochabamba no
+    pide a La Paz ni La Paz a Cochabamba). Los AS de producción cuentan como
+    su ciudad padre (AS 6 de Agosto = La Paz). Sin `desde` o si no existe la
+    sucursal, devuelve None (sin restricción, para llamadas que no piden).
+    """
+    if not desde:
+        return None
+    try:
+        desde = int(desde)
+    except (TypeError, ValueError):
+        return None
+    from core.util import ciudad_normalizada
+    fila = conn.execute(
+        "SELECT nombre, es_as, padre_id FROM sucursales WHERE id = ?",
+        (desde,)).fetchone()
+    if not fila or not fila["nombre"]:
+        return None
+    nombre = fila["nombre"]
+    if fila.get("es_as") and fila.get("padre_id"):
+        p = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
+                         (fila["padre_id"],)).fetchone()
+        if p and p["nombre"]:
+            nombre = p["nombre"]
+    ciudad = ciudad_normalizada(nombre)
+    ids = set()
+    for r in conn.execute(
+            "SELECT id, nombre, principal, es_as, padre_id FROM sucursales").fetchall():
+        if r["principal"]:
+            ids.add(int(r["id"]))
+            continue
+        prov_nombre = r["nombre"]
+        if r.get("es_as") and r.get("padre_id"):
+            p = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
+                             (r["padre_id"],)).fetchone()
+            if p and p["nombre"]:
+                prov_nombre = p["nombre"]
+        if ciudad_normalizada(prov_nombre) == ciudad:
+            ids.add(int(r["id"]))
+    return ids
+
+
+def destinos_validos(conn, desde=None):
     """[sucursal_id, ...] con las que un pedido puede salir, por prioridad.
 
-    Solo las que de verdad pueden atender: el almacén principal y las
-    sucursales marcadas como proveedora. El principal va primero.
+    Solo las que de verdad pueden atender: el almacén principal, las sucursales
+    marcadas como proveedora, y las que tienen productos activos marcados
+    «para proveer» (aunque nadie haya tocado la casilla: la opción se activa
+    sola con la sola existencia de esos productos). El principal va primero.
+
+    Con `desde` (la sucursal que pide) se restrringe además por ciudad.
     """
     filas = conn.execute(
-        "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1 "
+        "SELECT id FROM sucursales "
+        "WHERE principal = 1 OR IFNULL(provee, 0) = 1 "
+        "   OR EXISTS (SELECT 1 FROM productos p "
+        "              WHERE p.sucursal_id = sucursales.id AND p.activo = 1 "
+        "                AND IFNULL(p.para_proveer, 1) = 1) "
         "ORDER BY principal DESC, nombre, id").fetchall()
-    return [int(f["id"]) for f in filas]
+    ids = [int(f["id"]) for f in filas]
+    permitidos = _ids_proveedores_misma_ciudad(conn, desde)
+    if permitidos is not None:
+        ids = [i for i in ids if i in permitidos]
+    return ids
 
 
-def stock_por_destino(conn):
+def stock_por_destino(conn, desde=None):
     """{producto_id: [(sucursal_id, stock, nombre), ...]} -> solo los VÁLIDOS
     que tienen stock > 0, ordenados por prioridad.
 
@@ -48,7 +105,10 @@ def stock_por_destino(conn):
         FROM lotes l
         JOIN sucursales s ON s.id = l.sucursal_id
         WHERE l.cantidad > 0 AND l.sucursal_id IS NOT NULL
-          AND (s.principal = 1 OR IFNULL(s.provee, 0) = 1)
+          AND (s.principal = 1 OR IFNULL(s.provee, 0) = 1
+               OR EXISTS (SELECT 1 FROM productos p
+                          WHERE p.sucursal_id = s.id AND p.activo = 1
+                            AND IFNULL(p.para_proveer, 1) = 1))
         GROUP BY l.producto_id, l.sucursal_id, s.nombre
         ORDER BY s.principal DESC, s.nombre, l.sucursal_id
     """).fetchall()
@@ -56,6 +116,12 @@ def stock_por_destino(conn):
     for f in filas:
         out.setdefault(int(f["producto_id"]), []).append(
             (int(f["sucursal_id"]), float(f["c"] or 0), f["nombre"] or ""))
+    permitidos = _ids_proveedores_misma_ciudad(conn, desde)
+    if permitidos is not None:
+        for pid in list(out):
+            out[pid] = [t for t in out[pid] if t[0] in permitidos]
+            if not out[pid]:
+                del out[pid]
     return out
 
 

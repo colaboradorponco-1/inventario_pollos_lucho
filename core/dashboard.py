@@ -3,6 +3,7 @@ from datetime import date
 from flask import Blueprint, g, request, session
 
 from database import get_conn
+from .lotes import destinos_validos
 from .util import (ok, login_requerido, sucursal_actual, sucursal_operativa, es_gestion,
                    es_encargado_almacen, ids_ciudad_permitidos, sucursal_filtro_permitida,
                    cond_ciudad)
@@ -409,18 +410,20 @@ def catalogos():
         proveedores = [dict(r) for r in conn.execute(
             "SELECT * FROM proveedores WHERE sucursal_id = %s OR sucursal_id IS NULL ORDER BY nombre", (sid,)).fetchall()]
     # `provee` tiene que ser LA MISMA regla que usa el backend al validar el
-    # destino de un pedido (`principal = 1 OR provee = 1`, pedidos.py). Antes se
-    # pisaba la columna real con un proxy ("esta sucursal tiene productos
-    # activos"), y como son reglas distintas la pantalla le mostraba al
-    # responsable productos de una sucursal que el servidor despues rechazaba con
-    # "'X' no es un almacen valido para pedir", tumbando el pedido entero.
+    # destino de un pedido: la arma `destinos_validos` (principal | provee |
+    # tiene productos «para proveer»). El catálogo la aplica igual para que la
+    # pantalla nunca ofrezca un proveedor que el servidor luego rechace.
+    _validos = set(destinos_validos(conn))
     data = {
         "almacenes": almacenes,
         "categorias": [dict(r) for r in conn.execute("SELECT * FROM categorias ORDER BY nombre").fetchall()],
         "proveedores": proveedores,
         "sucursales": [
-            dict(r, provee=bool(r.get("principal")) or bool(r.get("provee")))
-            for r in conn.execute("SELECT * FROM sucursales ORDER BY principal DESC, nombre").fetchall()
+            dict(r, provee=r["id"] in _validos)
+            for r in conn.execute(
+                "SELECT s.*, p.nombre AS padre_nombre "
+                "FROM sucursales s LEFT JOIN sucursales p ON p.id = s.padre_id "
+                "ORDER BY s.principal DESC, s.nombre").fetchall()
         ],
     }
     conn.close()

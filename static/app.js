@@ -467,7 +467,7 @@ async function poblarSelectorSucursalCiudad(selSuc) {
     if (!selSuc) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
     const ciudadTab = (window.CIUDAD_ACTUAL || '').replace(/[-_]/g, ' ');
-    const lista = ordenarSucursales((catalogos.sucursales || [])
+    const lista = ordenarSucursales(sucursalesTienda(catalogos.sucursales)
         .filter((s) => nombreNorm(ciudadSucursal(s.nombre)) === ciudadTab));
     selSuc.innerHTML = '<option value="">— Todas las sucursales de la ciudad —</option>' +
         lista.map((s) => `<option value="${s.id}">${esc(s.nombre)}${s.principal ? ' (Ppal)' : ''}</option>`).join('');
@@ -504,10 +504,10 @@ async function loadCatalogos() {
     fill('#prod-proveedor', catalogos.proveedores, '— Sin proveedor —');
     fill('#prod-filtro-proveedor', catalogos.proveedores, 'Todos los proveedores');
     const selProvS = $('#prov-sucursal');
-    if (selProvS) selProvS.innerHTML = opcionesSucursales(catalogos.sucursales, '— Sin sucursal —');
+    if (selProvS) selProvS.innerHTML = opcionesSucursales(sucursalesTienda(catalogos.sucursales), '— Sin sucursal —');
     const sucursalesOpt = () => {
         const lista = esCentral()
-            ? (catalogos.sucursales || [])
+            ? sucursalesTienda(catalogos.sucursales)
             : (catalogos.sucursales || []).filter((s) => s.id === window.SUCURSAL_ID);
         return opcionesSucursales(lista, '');
     };
@@ -517,7 +517,7 @@ async function loadCatalogos() {
     if (selExp) selExp.innerHTML = '<option value="">Todas las sucursales</option>' + sucursalesOpt();
     fill('#prod-almacen', catalogos.almacenes, '— Sin almacén —');
     const selProdSuc = $('#prod-sucursal');
-    if (selProdSuc) selProdSuc.innerHTML = opcionesSucursales(catalogos.sucursales, 'Seleccione una sucursal...');
+    if (selProdSuc) selProdSuc.innerHTML = opcionesSucursales(sucursalesTienda(catalogos.sucursales), 'Seleccione una sucursal...');
     fill('#importar-categoria', catalogos.categorias, '— Sin categoría —');
     fill('#exportar-categoria', catalogos.categorias, 'Todas las categorías');
     fill('#mov-almacen', catalogos.almacenes, '— Sin almacén —');
@@ -529,13 +529,13 @@ async function loadCatalogos() {
      '#mov-export-sucursal', '#gasto-export-sucursal', '#venta-export-sucursal', '#reparto-export-sucursal']
         .forEach((id) => {
             const el = $(id);
-            if (el) el.innerHTML = opcionesSucursales(catalogos.sucursales, el.options[0]?.text || 'Todas las sucursales');
+            if (el) el.innerHTML = opcionesSucursales(sucursalesTienda(catalogos.sucursales), el.options[0]?.text || 'Todas las sucursales');
         });
     const esGestion = window.ROL === 'admin' || window.ROL === 'superadmin';
     ['#mov-export-sucursal', '#gasto-export-sucursal', '#venta-export-sucursal', '#reparto-export-sucursal']
         .forEach((id) => { const el = $(id); if (el) el.style.display = esGestion ? 'inline-flex' : 'none'; });
     const selUserSuc = $('#user-sucursal');
-    if (selUserSuc) selUserSuc.innerHTML = '<option value="">— Asignar después —</option>' + opcionesSucursales(catalogos.sucursales, '');
+    if (selUserSuc) selUserSuc.innerHTML = '<option value="">— Asignar después —</option>' + opcionesSucursales(sucursalesTienda(catalogos.sucursales), '');
 }
 
 // ---------------- Panel logistica (preparador / repartidor) ----------------
@@ -769,14 +769,22 @@ function esSucursalFija() { return !!(window.SUCURSAL_ACTUAL && window.ROL !== '
 function nombreNorm(nombre) {
     return (nombre || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
-function ciudadSucursal(nombre) {
+function nombreCiudadDe(s) {
+    // El AS de producción ("AS 6 DE AGOSTO") quiere la ciudad de SU TIENDA
+    // ("6 de Agosto, La Paz"): por su propio nombre no se podría saber.
+    return (s && s.padre_nombre) || (s ? s.nombre : '');
+}
+function ciudadSucursal(obj, fallback) {
+    // Acepta una sucursal (usa la ciudad de su tienda si es AS) o un nombre.
+    const s = (obj && typeof obj === 'object') ? obj : null;
+    const nombre = (s ? nombreCiudadDe(s) : (typeof obj === 'string' ? obj : '')) || (fallback || '');
     return nombreNorm(nombre).includes('la paz') ? 'La Paz' : 'Cochabamba';
 }
 function ordenarSucursales(lista) {
     // Cochabamba primero (almacenes principales al inicio) y luego La Paz;
     // dentro de cada ciudad, alfabético.
     return (lista || []).slice().sort((a, b) => {
-        const ca = ciudadSucursal(a.nombre), cb = ciudadSucursal(b.nombre);
+        const ca = ciudadSucursal(a), cb = ciudadSucursal(b);
         if (ca !== cb) return ca === 'La Paz' ? 1 : -1;
         if (!!a.principal !== !!b.principal) return a.principal ? -1 : 1;
         return nombreNorm(a.nombre).localeCompare(nombreNorm(b.nombre), 'es');
@@ -788,7 +796,7 @@ function opcionesSucursales(lista, placeholder) {
     let html = placeholder ? `<option value="">${esc(placeholder)}</option>` : '';
     let grupo = null;
     for (const s of lista2) {
-        const c = ciudadSucursal(s.nombre);
+        const c = ciudadSucursal(s);
         if (c !== grupo) {
             if (grupo !== null) html += '</optgroup>';
             grupo = c;
@@ -799,37 +807,56 @@ function opcionesSucursales(lista, placeholder) {
     if (grupo !== null) html += '</optgroup>';
     return html;
 }
-// ¿Esta sucursal es una recepción AS (America / Simon Lopez)? Se detecta por
-// nombre aunque su columna `provee` no esté activa: basta con que exista para
-// que su encargado de recepción la vea en el filtro del módulo de pedidos.
+// Sucursales "de vidriera" (listados, formularios y filtros generales): se
+// excluyen las sucursales AS de producción, que son internas de cada tienda y
+// solo se administran desde el módulo de pedidos.
+function sucursalesTienda(lista) {
+    return (lista || []).filter((s) => !(s.es_as || s.padre_id));
+}
+// A qué almacenes puede pedir la sucursal que está armando el pedido: los
+// Almacenes Principales (siempre) y el resto solo si están en la MISMA ciudad
+// (Cochabamba no pide a La Paz, ni La Paz a Cochabamba). Es el mismo criterio
+// con que el servidor valida los destinos.
+function proveedoresAlcance(lista) {
+    const todos = (catalogos && catalogos.sucursales) || [];
+    const pid = pedidoSucursal || window.SUCURSAL_ID || null;
+    const me = todos.find((x) => String(x.id) === String(pid));
+    const base = lista || todos;
+    if (!me) return base;
+    return base.filter((p) => {
+        if (p.principal) return true;
+        return ciudadSucursal(p) === ciudadSucursal(me);
+    });
+}
+// ¿Esta sucursal es un almacén de producción AS? Se detecta por la bandera
+// `es_as`/`padre_id` (sucursal hija de una tienda con inventario separado), y
+// por nombre para los AS dadas de alta antes de la migración ("AS ...").
 function esSucursalAS(s) {
     if (!s || s.principal) return false;
-    const n = nombreNorm(s.nombre);
-    return n.includes('america') || n.includes('simon');
+    if (s.es_as || s.padre_id) return true;
+    const n = nombreNorm(s.nombre || '');
+    return /^as /.test(n) && (n.includes('america') || n.includes('simon'));
 }
 function sucursalesFiltroPedidos(lista) {
     // El admin/superadmin ve TODAS las sucursales del negocio (Almacén
     // Principal, AS, America, Simon Lopez, Siglo xx, 6 de agosto...) tal cual
     // están dadas de alta, para filtrar por cualquier almacén. Los encargados
     // ven la lista fija con la que trabajan: los Almacenes Principales + las
-    // sucursales AS (America, Simon Lopez).
+    // sucursales AS de su MISMA ciudad.
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (esGestionPed()) return base;
-    return base
+    return proveedoresAlcance(base)
         .map((s) => (esSucursalAS(s) ? Object.assign({}, s, { nombre: nombreSucursalPedido(s) }) : s))
         .filter((s) => s.principal || s.provee || esSucursalAS(s));
 }
 // Nombre visible de una sucursal en el módulo de pedidos: las sucursales AS
-// (America, Simon Lopez) se muestran como "AS America"/"AS Simon Lopez" porque
-// su receptor se encarga de ellas.
+// de producción se muestran como "AS <tienda>" (su encargado de recepción se
+// ocupa de ellas).
 function nombreSucursalPedido(s) {
     if (!s) return '';
-    if (esSucursalAS(s)) {
-        const n = nombreNorm(s.nombre);
-        if (n.includes('america')) return 'AS America';
-        return 'AS Simon Lopez';
-    }
-    return s.nombre;
+    if (!esSucursalAS(s)) return s.nombre;
+    const base = (s.padre_nombre || s.nombre || '').trim();
+    return nombreNorm(base).startsWith('as ') ? s.nombre : ('AS ' + base);
 }
 
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
@@ -845,8 +872,8 @@ async function poblarBotonesSucursal(contId, selectId, listarFn) {
     const mostrar = !!select && select.style.display !== 'none';
     cont.style.display = mostrar ? 'flex' : 'none';
     if (!mostrar) return;
-    let sucs = (catalogos && catalogos.sucursales) || [];
-    if (!sucs.length) { try { sucs = await request(API + '/sucursales'); } catch (e) { sucs = []; } }
+    let sucs = sucursalesTienda(catalogos && catalogos.sucursales);
+    if (!sucs.length) { try { sucs = sucursalesTienda(await request(API + '/sucursales')); } catch (e) { sucs = []; } }
     const activo = select ? String(select.value || '') : '';
     cont.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
         .concat(ordenarSucursales(sucs || []))
@@ -864,7 +891,7 @@ async function pintarProdScope() {
     if (!row) return;
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
     const botones = [{ v: '', lbl: 'Todas' }]
-        .concat(ordenarSucursales(catalogos.sucursales || []).map((s) => ({ v: String(s.id), lbl: s.nombre })));
+        .concat(ordenarSucursales(sucursalesTienda(catalogos.sucursales)).map((s) => ({ v: String(s.id), lbl: s.nombre })));
     const ctr = {};
     for (const b of botones) {
         try {
@@ -903,7 +930,7 @@ async function loadProductos() {
         const container = $('#productos-por-categoria');
         container.innerHTML = '';
 
-        const grupos = ordenarSucursales(catalogos.sucursales || []).map((s) => ({ id: s.id, nombre: s.nombre }));
+        const grupos = ordenarSucursales(sucursalesTienda(catalogos.sucursales)).map((s) => ({ id: s.id, nombre: s.nombre }));
         const cats = [{ id: 0, nombre: 'Sin categoría' }]
             .concat((catalogos.categorias || []).map((c) => ({ id: c.id, nombre: c.nombre })));
         let visibles = _prodSuc === '' ? grupos : grupos.filter((g) => String(g.id) === _prodSuc);
@@ -1144,9 +1171,9 @@ async function openProductoModal(id, lista) {
     if (!sid0 && esGestionDlg) {
         sid0 = ((catalogos.sucursales || []).find((s) => s.principal) || {}).id || '';
     }
-    if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
-        selSuc.innerHTML = opcionesSucursales(catalogos.sucursales, 'Seleccione una sucursal...');
-    }
+if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
+            selSuc.innerHTML = opcionesSucursales(sucursalesTienda(catalogos.sucursales), 'Seleccione una sucursal...');
+        }
     selSuc.value = sid0 || '';
     // Al editar, la sucursal se mantiene fija salvo para admin (evita registrar
     // almacenes ajenos); al crear, siempre es editable.
@@ -1334,7 +1361,7 @@ async function loadMovimientos() {
                 tabs.style.display = 'flex';
                 // Poblar selector con todas las sucursales
                 try {
-                    const sucs = await request(API + '/sucursales');
+                    const sucs = sucursalesTienda(await request(API + '/sucursales'));
                     select.innerHTML = '<option value="">Todas las sucursales</option>' +
                         sucs.map((s) => `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
                 } catch (e) { /* sin sucursales */ }
@@ -1359,7 +1386,7 @@ async function loadMovimientos() {
             if (window.ROL === 'admin' || window.ROL === 'superadmin') {
                 movAlmLabel.style.display = 'block';
                 try {
-                    const sucs = await request(API + '/sucursales');
+                    const sucs = sucursalesTienda(await request(API + '/sucursales'));
                     movAlm.innerHTML = sucs.map((s) => `<option value="${s.id}">${s.principal ? '★ ' : ''}${esc(s.nombre)}</option>`).join('');
                     movAlm.value = window.SUCURSAL_ID || (sucs.find((s) => s.principal) || {}).id || '';
                 } catch (e) { /* sin sucursales */ }
@@ -1882,7 +1909,7 @@ async function loadAlmacenes() {
             request(API + '/sucursales'),
         ]);
         const selA = $('#alm-sucursal');
-        if (selA) selA.innerHTML = '<option value="">— Sin asignar (general) —</option>' + opcionesSucursales(sucursales, '');
+        if (selA) selA.innerHTML = '<option value="">— Sin asignar (general) —</option>' + opcionesSucursales(sucursalesTienda(sucursales), '');
         $('#almacenes-tbody').innerHTML = almacenes.map((a) => `
             <tr>
                 <td>${esc(a.nombre)}</td>
@@ -2454,7 +2481,7 @@ async function loadRepartos() {
             ? ` · dueño: ${p.sucursal_nombre || p.sucursal_id}` : '';
         $('#reparto-producto').innerHTML = '<option value="">Seleccione producto...</option>' +
             prods.map((p) => `<option value="${p.id}" data-costo="${p.costo_promedio || ''}" data-stock="${p.stock}">${nomProd(p)}${due(p)} (stock: ${p.stock} ${p.unidad})</option>`).join('');
-        const sucursales = await request(API + '/sucursales');
+        const sucursales = sucursalesTienda(await request(API + '/sucursales'));
         const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' || window.SUCURSAL_PRINCIPAL);
         const esPrincipal = !!window.SUCURSAL_PRINCIPAL;
         const destino = sucursales.filter((s) => s.id !== window.SUCURSAL_ID && (esGestion || esPrincipal || !s.principal));
@@ -2667,10 +2694,10 @@ $('#btn-gestionar-sucursales').addEventListener('click', () => {
 });
 
 async function cargarSucursales() {
-    const sucursales = await request(API + '/sucursales');
+    const sucursales = sucursalesTienda(await request(API + '/sucursales'));
     $('#sucursales-tbody').innerHTML = ordenarSucursales(sucursales).map((s) => `
         <tr>
-            <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s.nombre)}</span>${(s.num_productos && !s.principal && !s.provee)
+            <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s)}</span>${(s.num_productos && !s.principal && !s.provee)
                 ? `<span class="badge badge-pendiente" title="Esta sucursal tiene ${s.num_productos} producto(s) en el catálogo pero no está marcada como proveedora, así que NADIE puede pedirlos: el servidor los rechaza. Si de verdad despacha mercadería, editá la sucursal y marcá «¿Provee a otras?».">⚠ ${s.num_productos} no se pueden pedir</span>`
                 : ''}</td>
             <td>${s.direccion || '—'}</td>
@@ -3859,7 +3886,10 @@ function proveeActivo(provId) {
     const s = (catalogos.sucursales || []).find((x) => x.id === provId);
     if (!s) return false;
     if (s.principal) return true;
-    return !!s.provee;
+    if (!s.provee) return false;
+    // Restricción de ciudad: solo se puede pedir a proveedores de la MISMA
+    // ciudad que la sucursal que pide (los Principales quedan arriba, exentos).
+    return proveedoresAlcance([s]).length === 1;
 }
 
 function irPaso(n) {
@@ -3925,11 +3955,9 @@ function productosElegidos() {
 // almacén y misma búsqueda que usa renderTarjetasPedido).
 function pedidoProductosVisibles() {
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
-    const sid = pedidoSucursal || (($('#pedido-sucursal') || {}).value ? +$('#pedido-sucursal').value : null);
     return (pedidoProdsAll || []).filter((p) => {
         const provId = provDeProducto(p);
         if (!provId) return false;
-        if (sid && provId === sid) return false;
         if (!proveeActivo(provId)) return false;
         if (pedidoProvFiltro && String(provId) !== pedidoProvFiltro) return false;
         if (q) {
@@ -3943,13 +3971,11 @@ function pedidoProductosVisibles() {
 function renderTarjetasPedido() {
     const cont = $('#pedido-listado');
     if (!cont) return;
-    const sid = pedidoSucursal;
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
     const provs = {};
     (pedidoProdsAll || []).forEach((p) => {
         const provId = provDeProducto(p);
         if (!provId) return;
-        if (sid && provId === sid) return;
         if (!proveeActivo(provId)) return;
         const buscar = (p.nombre + ' ' + (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
         if (q && !buscar.includes(q)) return;
@@ -4002,21 +4028,23 @@ function renderTarjetasPedido() {
             ${g.prods.map((p) => {
                 const qty = pedidoSel[p.id] || 0;
                 const max = maxPedido(p);
-                const agotado = max <= 0;
-                const excede = qty > max;
+                const falta = sinStockProveedor(p);
+                const agotado = max <= 0 && !falta;
+                const excede = !falta && qty > max;
+                const quien = p.destino_nombre || proveedorCantShow(p);
                 return `
-                <div class="prod-card ${qty > 0 ? 'seleccionado' : ''} ${agotado ? 'agotado-card' : ''} ${excede ? 'sin-stock' : ''}" data-id="${p.id}">
+                <div class="prod-card ${qty > 0 ? 'seleccionado' : ''} ${agotado ? 'agotado-card' : ''} ${excede ? 'sin-stock' : ''} ${falta ? 'sin-stock-prov' : ''}" data-id="${p.id}">
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
-                        <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${max > 0 ? 'disp-ok' : 'disp-no'}">${max > 0 ? 'disponible: ' + fmtNum(max) + ' ' + esc(p.unidad || 'unidad') : '❌ Sin stock disponible'}</span></div>
+                        <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${falta ? 'disp-falta' : (max > 0 ? 'disp-ok' : 'disp-no')}">${falta ? '⚠ ' + esc(quien) + ' no tiene stock' : (max > 0 ? 'disponible: ' + fmtNum(max) + ' ' + esc(p.unidad || 'unidad') : '❌ Sin stock disponible')}</span></div>
                         ${parseFloat(p.unidad_tacho || 0) > 0 ? `<div class="prod-card-meta">1 tacho = ${fmtNum(p.unidad_tacho)} ${esc(p.unidad || 'unidad')}</div>` : (p.pide_tacho ? '<div class="prod-card-meta">Se pide por tachos</div>' : '')}
-                        <div class="aviso-stock" style="display:${excede ? '' : 'none'}">Excede cantidad existente (máximo: ${fmtNum(max)})</div>
+                        <div class="aviso-stock ${falta ? 'aviso-falta' : ''}" style="display:${falta || excede ? '' : 'none'}">${falta ? `${esc(quien)} no tiene stock de este producto. Podés pedir igual: el pedido va ahi y queda avisado.` : `Excede cantidad existente (máximo: ${fmtNum(max)})`}</div>
                     </div>
                     <div class="tacho-col">
                         ${selectorTacho(p)}
                         <div class="stepper">
                             <button type="button" class="ste ste-menos" data-id="${p.id}" ${agotado ? 'disabled' : ''}>−</button>
-                            <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0" max="${max}" step="any" data-id="${p.id}" ${agotado ? 'disabled' : ''}>
+                            <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0"${falta ? '' : ` max="${max}"`} step="any" data-id="${p.id}" ${agotado ? 'disabled' : ''}>
                             <button type="button" class="ste ste-mas" data-id="${p.id}" ${agotado ? 'disabled' : ''}>+</button>
                         </div>
                     </div>
@@ -4040,21 +4068,25 @@ function renderRevisionPedido() {
         return;
     }
     let total = 0;
+    let faltantes = 0;
     const rows = items.map((it) => {
         total += it.cantidad;
         const max = maxPedido(it.p);
-        const excedeR = it.cantidad > max;
+        const falta = sinStockProveedor(it.p);
+        if (falta) faltantes++;
+        const excedeR = !falta && it.cantidad > max;
         const med = textoTachoSel(it.id);
         return `<tr>
             <td>${esc(it.p.nombre)}</td>
             <td class="td-unidad">${esc(it.p.unidad || 'unidad')}</td>
             <td class="td-cant"><strong class="${excedeR ? 'stock-rojo' : ''}">${it.cantidad}</strong>${excedeR ? ` <span class="stock-rojo">(excede: solo ${fmtNum(max)})</span>` : ''}</td>
             <td class="td-medida">${med ? `<span class="tacho-tag">${esc(med)}</span>` : '—'}</td>
-            <td class="td-prov">lo tiene ${esc(proveedorCantShow(it.p))}</td>
+            <td class="td-prov">${falta ? `⚠ ${esc(proveedorCantShow(it.p))} no tiene stock` : `lo provee ${esc(proveedorCantShow(it.p))}`}</td>
         </tr>`;
     }).join('');
     cont.innerHTML = `
         <p class="hint">Esto pedirá <strong>${esc(nombreSucursalPed(pedidoSucursal))}</strong>. Al enviar se genera su pedido imprimible.</p>
+        ${faltantes ? `<div class="aviso-stock aviso-falta" style="margin-bottom:10px">⚠ ${faltantes} producto(s) van a un proveedor que no tiene stock. El pedido se manda igual: quedan marcados para que el almacén consiga la mercadería.</div>` : ''}
         <table class="data-table compact"><thead><tr><th>Producto</th><th>Unidad</th><th>Cant.</th><th>Medida</th><th></th></tr></thead>
             <tbody>${rows}</tbody>
         </table>
@@ -4067,11 +4099,29 @@ function maxPedido(p) {
     return Math.max(0, (p && p.stock_prov != null) ? p.stock_prov : 0);
 }
 
+// La sucursal que DISTRIBUYE el producto (su proveedor) no tiene stock. El
+// pedido NO se bloquea: va igual a esa sucursal, que es a quien le corresponde,
+// y queda avisado para que el almacén consiga la mercadería. Tener el producto
+// en el inventario de OTRA sucursal no la convierte en proveedora.
+function sinStockProveedor(p) {
+    return !!(p && p.sin_stock);
+}
+
+// ¿La cantidad supera lo disponible? Para un proveedor sin stock no aplica: se
+// puede pedir la cantidad que haga falta, porque la mercadería se consigue.
+function excedeDisponible(p, val) {
+    if (sinStockProveedor(p)) return false;
+    return val > maxPedido(p);
+}
+
 function marcarExceso(id, max) {
     const input = document.getElementById('pq-' + id);
     const card = input ? input.closest('.prod-card') : null;
-    const qty = pedidoSel[id] || 0;
-    const excede = qty > max;
+    const p = (pedidoProdsAll || []).find((x) => x.id === id);
+    // Sin stock en el proveedor el aviso es OTRO ("no tiene, se pide igual"),
+    // así que acá no se pisa.
+    if (sinStockProveedor(p)) return;
+    const excede = (pedidoSel[id] || 0) > max;
     if (input) input.classList.toggle('prod-q-alto', excede);
     if (card) card.classList.toggle('sin-stock', excede);
     const nota = card ? card.querySelector('.aviso-stock') : null;
@@ -4084,10 +4134,16 @@ function marcarExceso(id, max) {
 function marcarCantidad(id, cantidad) {
     const p = (pedidoProdsAll || []).find((x) => x.id === id);
     const max = p ? maxPedido(p) : 0;
-    if (cantidad > max) {
-        toast(`Excedió la cantidad existente: solo hay ${fmtNum(max)} disponible`, 'err');
+    let v;
+    if (sinStockProveedor(p)) {
+        // Se pide igual aunque el proveedor no tenga: no se recorta a 0.
+        v = Math.max(0, cantidad);
+    } else {
+        if (cantidad > max) {
+            toast(`Excedió la cantidad existente: solo hay ${fmtNum(max)} disponible`, 'err');
+        }
+        v = Math.max(0, Math.min(cantidad, max));
     }
-    const v = Math.max(0, Math.min(cantidad, max));
     pedidoSel[id] = v > 0 ? v : 0;
     const input = document.getElementById('pq-' + id);
     if (input) input.value = pedidoSel[id];
@@ -4120,7 +4176,7 @@ if (_listadoPed) {
             pedidoTacho[id] = { f: frac, u };
             const cant = Math.round(frac * u * 1000) / 1000;
             const max = maxPedido(p);
-            if (cant > max) {
+            if (excedeDisponible(p, cant)) {
                 toast(`No cabe esa medida: ${(FRACCIONES_TACHO.find((f) => f.v === frac) || {}).t} (× ${fmtNum(u)}) son ${fmtNum(cant)} ${p.unidad || 'unidad'} y solo hay ${fmtNum(max)}`, 'err');
                 limpiarTacho(id);
             } else {
@@ -4139,7 +4195,7 @@ if (_listadoPed) {
             const p = (pedidoProdsAll || []).find((x) => x.id === id);
             const cant = Math.round(t.f * u * 1000) / 1000;
             const max = p ? maxPedido(p) : 0;
-            if (cant > max) {
+            if (excedeDisponible(p, cant)) {
                 toast(`Excede el disponible: ${fmtNum(cant)} ${p ? p.unidad : ''} y solo hay ${fmtNum(max)}`, 'err');
                 limpiarTacho(id);
             } else {
@@ -4157,7 +4213,7 @@ if (_listadoPed) {
         if (tchA && Math.abs(v - Math.round(tchA.f * tchA.u * 1000) / 1000) > 0.0001) {
             limpiarTacho(id);
         }
-        if (v > max) {
+        if (excedeDisponible(p, v)) {
             marcarCantidad(id, max);
             toast(`No hay esa cantidad: excede el disponible (${fmtNum(max)})`, 'err');
         } else {
@@ -4172,7 +4228,7 @@ if (_listadoPed) {
         const delta = btn.classList.contains('ste-menos') ? -1 : 1;
         const p = (pedidoProdsAll || []).find((x) => x.id === id);
         const max = p ? maxPedido(p) : 0;
-        if (delta > 0 && actual + delta > max) {
+        if (delta > 0 && excedeDisponible(p, actual + delta)) {
             toast(`No hay esa cantidad: el stock máximo disponible es ${fmtNum(max)}`, 'err');
             if (actual < max) marcarCantidad(id, max);
             return;
@@ -4185,9 +4241,8 @@ if (_listadoPed) {
         const id = +e.target.dataset.id;
         const val = parseFloat(e.target.value) || 0;
         const p = (pedidoProdsAll || []).find((x) => x.id === id);
-        const max = p ? maxPedido(p) : 0;
-        if (val > max) {
-            toast(`Excedió la cantidad existente (máximo ${fmtNum(max)})`, 'err');
+        if (excedeDisponible(p, val)) {
+            toast(`Excedió la cantidad existente (máximo ${fmtNum(maxPedido(p))})`, 'err');
         }
         const tchB = tachoDe(id);
         if (tchB && Math.abs(val - Math.round(tchB.f * tchB.u * 1000) / 1000) > 0.0001) {
@@ -4207,6 +4262,15 @@ on('#pedido-sucursal', 'change', () => {
     pedidoSel = {};
     pedidoTacho = {};
     $('#pedido-buscar').value = '';
+    // Al cambiar la sucursal que pide cambia su ciudad: se recalculan los
+    // destinos a los que puede pedir (los Principales y su misma ciudad).
+    const selDest = $('#pedido-destino');
+    if (selDest) {
+        const alcance = proveedoresAlcance(catalogos && catalogos.sucursales);
+        const destinos = alcance.filter((x) => (x.principal || x.provee));
+        selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
+            + destinos.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
+    }
     renderTarjetasPedido();
 });
 on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
@@ -4277,17 +4341,24 @@ async function loadPedidos() {
     try {
         await loadCatalogos();
         await cargarProductosPedido();
-        const sucursales = await request(API + '/sucursales');
+        let sucursales = await request(API + '/sucursales');
+        // La cola de pedidos de un encargado se arma contra su propia ciudad
+        // (Cochabamba o La Paz): los Principales siempre, el resto solo de la
+        // misma ciudad. El admin ve todo y elige la sucursal que pide en el
+        // selector del primer paso.
+        if (!esGestionPed()) {
+            sucursales = proveedoresAlcance(sucursales);
+        }
         // Selector de almacén destino. "Automático" es lo de siempre: cada
         // producto va a la sucursal que lo reparte (la que lo tiene en el
         // catálogo). Abajo están los almacenes a los que SÍ se puede pedir
-        // (principales y sucursales marcadas como proveedora), por si hay que
-        // sacarlo de uno puntual. No se ofrece la propia sucursal porque el
-        // backend rechaza pedirte a ti mismo.
+        // (principales, proveedoras y las que tienen productos «para proveer»,
+        // la misma regla que valida el backend), por si hay que sacarlo de uno
+        // puntual. Incluye la propia sucursal: se puede pedir a tu propio
+        // almacén principal (auto-pedido).
         const selDest = $('#pedido-destino');
         if (selDest) {
-            const yo = window.SUCURSAL_ID;
-            const pueden = sucursales.filter((x) => (x.principal || x.provee) && x.id !== yo);
+            const pueden = sucursales.filter((x) => (x.principal || x.provee));
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + pueden.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
         }
@@ -4300,7 +4371,7 @@ async function loadPedidos() {
         if (esEncargadoPed()) {
             const mie = sucursales.find((x) => x.id === window.SUCURSAL_ID);
             selSuc.innerHTML = mie ? `<option value="${mie.id}">${mie.principal ? '★ ' : ''}${esc(nombreSucursalPedido(mie))}</option>` : '';
-            if ((window.SUCURSAL_PRINCIPAL && !sucursalProvee()) || window.RECEPTOR) {
+            if (window.SUCURSAL_PRINCIPAL && !sucursalProvee()) {
                 const form = $('#form-pedido');
                 if (form && form.closest('.panel')) form.closest('.panel').style.display = 'none';
             }
@@ -4368,12 +4439,13 @@ function inicializarPestanasPedidos() {
     const tabReal = $('#tab-hist-realizados');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
-    // Almacén principal «puro», preparador/repartidor, admin y usuario RECEPTOR
-    // se quedan únicamente con su bandeja. Las sucursales que piden (filiales y
-    // la propia proveedora con su encargado normal) conservan «Mis pedidos».
+    // Almacén principal «puro», preparador/repartidor y admin se quedan
+    // únicamente con su bandeja. Las sucursales que piden (filiales y la
+    // propia proveedora con su encargado normal) conservan «Mis pedidos».
+    // El usuario RECEPTOR del AS también conserva «Mis pedidos»: es quien
+    // hace el pedido de aprovisionamiento al Almacén Principal.
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
         || window.ROL === 'preparador' || window.ROL === 'repartidor'
-        || !!window.RECEPTOR
         || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
 
     if (soloBandeja) {
@@ -4807,7 +4879,7 @@ window.verPedido = async (id, accionables = true) => {
             repCont.style.display = 'none';
         }
         $('#det-pedido-items').innerHTML = data.detalle.map((d) => `
-            <tr><td>${esc(d.producto_nombre)}</td><td>${d.cantidad}</td>
+            <tr><td>${esc(d.producto_nombre)}${d.sin_stock ? ' <span class="stock-rojo" title="El proveedor no tiene stock">⚠ sin stock en el proveedor</span>' : ''}</td><td>${d.cantidad}</td>
                 <td>${esc(d.unidad || 'unidad')}</td>
                 <td>${tachoEtiqueta(d) || '—'}</td>
                 <td>${esc(sucMap[d.destino_id] || '—')}</td></tr>`).join('');

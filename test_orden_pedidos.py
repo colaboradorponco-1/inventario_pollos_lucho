@@ -112,22 +112,25 @@ def prueba_catalogo_provee_coincide_con_backend():
     """La causa del error 'no es un almacen valido para pedir'."""
     dash = _leer(os.path.join("core", "dashboard.py"))
     py = _leer(os.path.join("core", "pedidos.py"))
+    lotes = _leer(os.path.join("core", "lotes.py"))
+    suc = _leer(os.path.join("core", "sucursales.py"))
     _check("el catalogo ya NO usa el proxy de 'tiene productos activos'",
            "ids_proveedoras" not in dash)
-    _check("el catalogo usa la columna real (principal o provee)",
-           re.search(r"dict\(r,\s*provee=bool\(r\.get\(\"principal\"\)\)"
-                     r"\s*or\s*bool\(r\.get\(\"provee\"\)\)\)", dash) is not None)
-    # La lista de destinos válidos ahora la arma core/lotes.py
-    # (destinos_validos) para que la usen el pedido y el catálogo por igual.
+    # El catalogo y /api/sucursales NO pisan la columna: derivan `provee` con la
+    # MISMA regla de `destinos_validos` (principal | provee | tiene productos
+    # «para proveer»). Una sola fuente para el pedido y la pantalla.
+    _check("el catalogo deriva provee con la misma regla de destinos_validos",
+           "destinos_validos(conn)" in dash and 'provee=r["id"] in _validos' in dash)
+    _check("el listado /api/sucursales tambien deriva provee igual",
+           "destinos_validos(conn)" in suc and 'provee=r["id"] in _validos' in suc)
+    # La lista de destinos válidos la arma core/lotes.py (destinos_validos) para
+    # que la usen el pedido y el catálogo por igual.
     m = re.search(r"destinos_validos\(conn\)", py)
-    _check("el backend sigue validando con principal = 1 OR provee = 1",
+    _check("el backend sigue validando con la misma lista de destinos",
            m is not None and "destinos_validos" in py)
-    _check("las dos reglas son la misma", "provee=bool" in dash.replace(" ", "")
-           or "provee=bool" in dash)
     # Para poder arreglar los datos de un vistazo: el listado de sucursales dice
     # cuantas tiene sin marcar como proveedora (esos productos no se pueden
     # pedir y antes el error no decia cuales eran).
-    suc = _leer(os.path.join("core", "sucursales.py"))
     js = _leer(os.path.join("static", "app.js"))
     _check("el listado de sucursales cuenta sus productos",
            "num_productos" in suc and "AS num_productos" in suc)
@@ -426,6 +429,65 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
     _check("el aviso dice DONDE hay, para que la persona decida",
            "está en" in py)
 
+    # Auto-provee: una sucursal que tiene productos «para proveer» se activa
+    # sola como destino aunque nadie haya marcado la casilla. Es la regla que
+    # hace aparecer a America en los pedidos con solo tener su llajua marcada.
+    _check("destinos_validos se activa sola con productos para proveer",
+           "EXISTS (SELECT 1 FROM productos p" in lotes
+           and "IFNULL(p.para_proveer, 1) = 1" in lotes)
+    _check("stock_por_destino aplica la misma regla de auto-provee",
+           lotes.count("IFNULL(p.para_proveer, 1) = 1") >= 2)
+
+    # Auto-pedido: una sucursal puede pedirse a si misma (su propio almacén
+    # principal, p. ej. America pide su llajua). Ni el backend ni el front la
+    # ocultan.
+    _check("el backend ya NO rechaza pedirte a ti mismo",
+           "no puede pedirse a ti mismo" not in py)
+    _check("el frontend ya NO esconde los productos del propio AS",
+           "provId === sid" not in js)
+    _check("el selector de destino incluye la propia sucursal",
+           re.search(r"const pueden = sucursales\.filter\(\(x\) => \(x\.principal \|\| x\.provee\)\);", js) is not None)
+
+
+def prueba_sin_stock_no_bloquea():
+    """El faltante del proveedor se AVISA, no se convierte en "agotado".
+
+    Antes, si al proveedor (quien reparte el producto) no le quedaba stock, la
+    pantalla deshabilitaba el producto y el pedido no se podia hacer: el faltante
+    de stock se tapaba con un bloqueo. Ahora el pedido se manda igual a quien le
+    corresponde, y queda marcado para que el almacen consiga la mercaderia.
+    """
+    prod = _leer(os.path.join("core", "productos.py"))
+    py = _leer(os.path.join("core", "pedidos.py"))
+    db = _leer(os.path.join("database.py"))
+    js = _leer(os.path.join("static", "app.js"))
+    tpl = _leer(os.path.join("templates", "ticket_pedido.html"))
+
+    # Backend: el catalogo marca la linea y el pedido la guarda.
+    _check("el catalogo marca sin_stock cuando el destino no tiene",
+           'r["sin_stock"] = False' in prod
+           and 'r["sin_stock"] = stock_dest <= 0' in prod)
+    _check("el pedido guarda la marca en la linea (no solo en el mensaje)",
+           "tacho_unidad, sin_stock in items" in py
+           and "sin_stock)" in py,
+           "si no se persiste, el almacen descubre el faltante al separar")
+    _check("la columna sin_stock existe al crear la tabla",
+           "sin_stock TINYINT NOT NULL DEFAULT 0" in db)
+    _check("se agrega la columna a las bases ya creadas (migracion aditiva)",
+           '_add_columna(cur, "pedido_detalle", "sin_stock TINYINT NOT NULL DEFAULT 0")' in db)
+    _check("el ticket tambien avisa del faltante",
+           '"sin_stock": d.get("sin_stock")' in py and "item.sin_stock" in tpl)
+
+    # Frontend: NO hay bloqueo; el faltante del proveedor tiene su propio aviso.
+    _check("el frontend distingue 'proveedor sin stock' de 'agotado'",
+           "function sinStockProveedor" in js
+           and "const agotado = max <= 0 && !falta;" in js)
+    _check("pedir de mas no se bloquea si el proveedor no tiene stock",
+           "function excedeDisponible" in js
+           and "if (sinStockProveedor(p)) return false;" in js)
+    _check("la revision y el detalle muestran el faltante",
+           "sinStockProveedor(it.p)" in js and "d.sin_stock" in js)
+
 
 
 def main():
@@ -438,6 +500,7 @@ def main():
     prueba_catalogo_provee_coincide_con_backend()
     prueba_el_destino_no_se_elige_por_stock()
     prueba_el_destino_no_se_elige_por_stock_en_el_codigo()
+    prueba_sin_stock_no_bloquea()
     prueba_error_de_destino_no_tumba_el_pedido()
     prueba_front_ordena_por_categoria()
     prueba_front_manda_en_el_orden_visible()

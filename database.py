@@ -223,7 +223,9 @@ def init_db():
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "nombre VARCHAR(255) NOT NULL UNIQUE,"
                     "direccion VARCHAR(255) DEFAULT '',"
-                    "principal TINYINT DEFAULT 0)")
+                    "principal TINYINT DEFAULT 0,"
+                    "es_as TINYINT NOT NULL DEFAULT 0,"
+                    "padre_id INT)")
         cur.execute("CREATE TABLE IF NOT EXISTS almacenes ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "nombre VARCHAR(255) NOT NULL UNIQUE,"
@@ -390,6 +392,7 @@ def init_db():
                     "unidad VARCHAR(50) DEFAULT 'unidad',"
                     "tacho_fraccion DOUBLE DEFAULT 0,"
                     "tacho_texto VARCHAR(50) DEFAULT '',"
+                    "sin_stock TINYINT NOT NULL DEFAULT 0,"
                     "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS repartos ("
@@ -494,6 +497,79 @@ def _nombre_norm(nombre):
     for w in ("sucursal", "almacen", "principal"):
         n = n.replace(w, " ")
     return " ".join(n.split())
+
+
+def _es_tienda_almacen_as(norm):
+    """¿Esta sucursal TIENDA tiene su almacén de producción (AS) separado?
+
+    Decisión de negocio (2026): POR AHORA solo América, Simón López y
+    La Paz - 6 de Agosto. El resto de sucursales sigue con inventario único
+    (todo vive en la tienda), como estaba. Si mañana entra otra tienda al
+    modelo de producción propia, solo hay que agregarla aquí.
+    Mantener en sync con `core.util._tienda_almacen_as`.
+    """
+    if "america" in norm or "simon" in norm:
+        return True
+    return "la paz" in norm and "6" in norm
+
+
+def _crear_sucursales_as(cur):
+    """Crea la sucursal AS (producción) de cada tienda con almacén separado.
+
+    "Tener su propio almacén pero seguir perteneciendo a su sucursal" se
+    implementa con UNA SUCURSAL HIJA por tienda: `es_as=1` + `padre_id` a la
+    tienda. Su stock es independiente del de venta (inventario_producción vs
+    inventario_venta).
+
+    Idempotente. En cada arranque, para cada tienda del grupo elegido:
+      - crea "AS <tienda>" si no existe (provee=1, para aceptar pedidos);
+      - mueve ahí al usuario receptor "AS ..." de la tienda (quien despacha);
+      - mueve los productos activos «para proveer» y SUS LOTES (producción),
+        que es donde vive la mercadería que se distribuye;
+      - los productos «para venta» (para_proveer=0) se quedan en la tienda.
+    Nunca pisa un AS ya existente ni toca otras sucursales.
+    """
+    creadas = 0
+    cur.execute("SELECT id, nombre FROM sucursales "
+                "WHERE principal = 0 AND IFNULL(es_as, 0) = 0")
+    for t in cur.fetchall():
+        if not _es_tienda_almacen_as(_nombre_norm(t["nombre"])):
+            continue
+        cur.execute("SELECT id FROM sucursales "
+                    "WHERE padre_id = %s AND es_as = 1 LIMIT 1", (t["id"],))
+        as_for = cur.fetchone()
+        if as_for:
+            as_id = as_for["id"]
+        else:
+            cur.execute("SELECT id FROM sucursales "
+                        "WHERE UPPER(nombre) = %s AND es_as = 1 LIMIT 1",
+                        ("AS " + (t["nombre"] or "").strip().upper(),))
+            as_by_name = cur.fetchone()
+            if as_by_name:
+                as_id = as_by_name["id"]
+                cur.execute("UPDATE sucursales SET padre_id = %s WHERE id = %s",
+                            (t["id"], as_id))
+            else:
+                cur.execute("INSERT INTO sucursales (nombre, direccion, principal, provee, es_as, padre_id) "
+                            "VALUES (%s, %s, 0, 1, 1, %s)",
+                            ("AS " + (t["nombre"] or "").strip(), "", t["id"]))
+                as_id = cur.lastrowid
+                creadas += 1
+        # El receptor "AS ..." de esa tienda pasa a su sucursal de producción.
+        cur.execute("UPDATE usuarios SET sucursal_id = %s "
+                    "WHERE usuario LIKE 'AS %' AND receptor = 1 AND sucursal_id = %s",
+                    (as_id, t["id"]))
+        # Los productos que se ofrecen a otras sucursales (producción) -> AS.
+        cur.execute("UPDATE productos SET sucursal_id = %s "
+                    "WHERE sucursal_id = %s AND activo = 1 AND para_proveer = 1",
+                    (as_id, t["id"]))
+        # Y los lotes de esos productos que aún viven en la tienda -> AS:
+        # el stock de producción no puede quedar mezclado con el de venta.
+        cur.execute("""UPDATE lotes l JOIN productos p ON p.id = l.producto_id
+                       SET l.sucursal_id = %s
+                       WHERE p.sucursal_id = %s AND l.sucursal_id = %s""",
+                    (as_id, as_id, t["id"]))
+    return creadas
 
 
 def _col_existe(cur, tabla, columna):
@@ -666,6 +742,16 @@ def migrar_esquema():
         # pedir. La columna se crea ahora; 0 = no provee, que es lo seguro.
         if not _col_existe(cur, "sucursales", "provee"):
             _add_columna(cur, "sucursales", "provee TINYINT NOT NULL DEFAULT 0")
+        # Inventario de producción vs inventario de venta: el almacén de
+        # producción (el "AS" de cada sucursal proveedora) es UNA SUCURSAL hija
+        # con su propio stock. `es_as` la identifica, `padre_id` apunta a la
+        # sucursal tienda a la que sigue perteneciendo. Así "AS América" tiene
+        # sus toneladas de producción y "América" sus kg de venta, cada uno en
+        # su propio inventario.
+        if not _col_existe(cur, "sucursales", "es_as"):
+            _add_columna(cur, "sucursales", "es_as TINYINT NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "sucursales", "padre_id"):
+            _add_columna(cur, "sucursales", "padre_id INT")
         # Etapa logística del pedido, SEPARADA de `estado`.
         # `estado` sigue siendo pendiente/despachado/cumplido (lo que usan todos
         # los reportes y filtros, así que no se rompen). `etapa` es el avance
@@ -703,6 +789,16 @@ def migrar_esquema():
         # cuentan antes de esta columna) y no generan avisos falsos ni se rompen.
         if not _col_existe(cur, "inventario_detalle", "contado_por"):
             _add_columna(cur, "inventario_detalle", "contado_por VARCHAR(255)")
+        # Marca de "el proveedor no tenía stock de este producto cuando se pidió".
+        # El destino de un pedido es quien DISTRIBUYE el producto (la sucursal
+        # que lo tiene en su catálogo), no una cualquiera que tenga mercadería:
+        # si se eligiera por stock, el pedido le vaciaría el inventario a otra
+        # sucursal. Cuando al proveedor no le alcanza, el pedido se manda igual
+        # (a él le corresponde) pero queda avisado para que consiga la
+        # mercadería, en vez de descubrir el faltante al ir a separar. Default 0:
+        # los pedidos ya cargados no generan avisos falsos.
+        if not _col_existe(cur, "pedido_detalle", "sin_stock"):
+            _add_columna(cur, "pedido_detalle", "sin_stock TINYINT NOT NULL DEFAULT 0")
         if _col_existe(cur, "pedidos", "etapa") and \
                 not _indice_existe(cur, "pedidos", "idx_pedidos_etapa"):
             try:
@@ -993,6 +1089,14 @@ def migrar_esquema():
             except Exception:
                 pass
             print(f"[migrar] AVISO: no se pudieron normalizar las fechas con 'T': {_e}")
+
+        # 9) Sucursales AS (producción) de las tiendas con almacén separado.
+        # Inventario producción vs inventario venta: cada tienda elegida recibe
+        # su sucursal hija "AS <tienda>" con stock propio (ver la función).
+        _creadas_as = _crear_sucursales_as(cur)
+        if _creadas_as:
+            print(f"[migrar] {_creadas_as} sucursal(es) AS de producción creada(s)")
+        db.commit()
     finally:
         db.close()
 

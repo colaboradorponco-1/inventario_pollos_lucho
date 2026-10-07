@@ -17,7 +17,7 @@ from flask import Blueprint, redirect, render_template, request, session
 
 from database import get_conn
 from .lotes import (destinos_validos, elegir_destino, stock_en_destino,
-                   stock_por_destino)
+                   stock_por_destino, _ids_proveedores_misma_ciudad)
 from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
                    paginar_params, sucursal_actual, sucursal_operativa, stock_actual,
                    es_gestion, es_superadmin, es_encargado_almacen, registrar_movimiento,
@@ -133,11 +133,6 @@ def pedidos():
         if not detalle:
             conn.close()
             return err("El pedido no tiene productos")
-        # Un usuario RECEPTOR (p. ej. "AS America"/"AS Simon Lopez") es el
-        # almacén que RECIBE pedidos: no hace pedidos propios.
-        if es_receptor():
-            conn.close()
-            return err("Este usuario solo recibe pedidos, no realiza pedidos propios")
         sid = sucursal_actual()
         if session.get("rol") == "encargado":
             sucursal_id = sid
@@ -156,11 +151,21 @@ def pedidos():
         # no da permiso para repartirla), sino por quién tiene el producto en
         # el catálogo; ver `elegir_destino`.
         validos = destinos_validos(conn)
-        proveedores_validos = set(validos)
         # Dónde hay stock de cada producto. Solo para AVISAR cuando el destino
         # responsable no tiene: que la persona decida, no que el sistema le
         # vacíe el inventario a otra sucursal.
         candidatos = stock_por_destino(conn)
+        # Restricción por ciudad: la sucursal que pide solo puede pedir a los
+        # Almacenes Principales o a proveedores de su misma ciudad (Cochabamba
+        # no pide a La Paz, ni La Paz a Cochabamba). Ver
+        # `_ids_proveedores_misma_ciudad` en core/lotes.py.
+        permitidos = _ids_proveedores_misma_ciudad(conn, sucursal_id)
+        if permitidos is not None:
+            validos = [v for v in validos if v in permitidos]
+            candidatos = {pid: [t for t in lista if t[0] in permitidos]
+                          for pid, lista in candidatos.items()}
+            candidatos = {pid: lista for pid, lista in candidatos.items() if lista}
+        proveedores_validos = set(validos)
         # Destinos invalidos acumulados (ver mas abajo): antes se cortaba en el
         # primero y se caia el pedido entero.
         destinos_malos = {}
@@ -227,25 +232,27 @@ def pedidos():
                 conn.close()
                 return err(f"'{fila['nombre']}' no tiene una sucursal que pueda "
                            f"repartirlo. Revisá la sucursal del producto en el catálogo.")
-            if proveedor == sucursal_id:
-                conn.close()
-                return err(f"'{fila['nombre']}' es de tu propia sucursal; no puede pedirse a ti mismo")
             # El destino tiene que ser una sucursal que de verdad provee (un
             # almacén principal, o una filial marcada como proveedora). Sin esto
             # se podía pedir a cualquier sucursal pasando su id a mano, incluso
-            # a una que no despacha.
+            # a una que no despacha. Una sucursal también puede pedirse a sí
+            # misma (su propio almacén principal): eso queda como auto-pedido y
+            # al entregarse se registra como reparto interno, sin mover stock
+            # entre sucursales.
             if proveedor not in proveedores_validos:
                 destinos_malos.setdefault(proveedor, []).append(fila["nombre"])
                 continue
             # Si a quien le toca despachar no tiene de esto, se avisa y se sigue:
             # el pedido se guarda igual y la persona ve donde hay. Bloquear
             # acá seria peor, porque el problema real es el stock, no el pedido.
-            if stock_en_destino(candidatos.get(prod_id), proveedor) <= 0:
+            falta = stock_en_destino(candidatos.get(prod_id), proveedor) <= 0
+            if falta:
                 sin_stock.append((proveedor, fila["nombre"], prod_id))
             texto_tacho = _texto_tacho(fraccion) if por_tacho else ""
             items.append((prod_id, fila["nombre"], cantidad, proveedor,
                           fila["unidad"] or "unidad", fraccion if por_tacho else 0,
-                          texto_tacho, tacho_unidad if por_tacho else 0))
+                          texto_tacho, tacho_unidad if por_tacho else 0,
+                          1 if falta else 0))
         if destinos_malos:
             # Se informan TODOS los destinos invalidos de una vez. Antes se
             # devolvia en la primera linea mala, asi que un pedido de 24
@@ -279,12 +286,16 @@ def pedidos():
             conn.close()
             return err("Error al registrar el pedido")
         pedido_id = cur.lastrowid
-        for prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad in items:
+        # La linea guarda la marca sin_stock (1 = al proveedor le falta stock)
+        # para que el ticket y el detalle muestren el faltante, no solo el aviso.
+        _faltantes = sin_stock
+        for prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad, sin_stock in items:
             conn.execute("""
                 INSERT INTO pedido_detalle (pedido_id, producto_id, producto_nombre, cantidad,
-                                            destino_id, unidad, tacho_fraccion, tacho_texto, tacho_unidad)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad))
+                                            destino_id, unidad, tacho_fraccion, tacho_texto, tacho_unidad, sin_stock)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad, sin_stock))
+        sin_stock = _faltantes
         conn.commit()
         # Aviso (no bloquea) por producto: a quien le toca despachar no tiene
         # stock. Se arma antes de cerrar la conexión porque necesita los nombres.
@@ -479,6 +490,7 @@ def _ticket_data(conn, pedido_id):
             "cantidad": d["cantidad"],
             "tacho_texto": d.get("tacho_texto") or "",
             "tacho_unidad": d.get("tacho_unidad") or 0,
+            "sin_stock": d.get("sin_stock"),
             "costo": d["costo_unitario"] or 0,
             # Sin round(): el subtotal tiene que sumar EXACTAMENTE lo mismo que
             # el total del pedido y que el total del reparto. Con
@@ -617,7 +629,11 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
     `origen_propio=False` se usa cuando quien entrega NO es el proveedor (el
     repartidor de América/Simón López entrega mercadería que salió del almacén
     principal). Sin ese parámetro el repartidor recibiría "Solo puedes despachar
-    líneas cuyo origen sea tu propia sucursal" y el pedido nunca se cerraría."""
+    líneas cuyo origen sea tu propia sucursal" y el pedido nunca se cerraría.
+
+    Un auto-pedido (origen == sucursal solicitante) deja reparto y reparto_detalle
+    pero no desplaza stock ni valida stock de salida: es solo la constancia de
+    que la sucursal se surtió de su propio almacén."""
     if detalle is None:
         detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ?",
                                (pedido["id"],)).fetchall()
@@ -631,8 +647,10 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
         origen_id = d["destino_id"] or pedido["destino_id"]
         if not origen_id:
             return "error", "Una línea del pedido no tiene proveedor asignado"
-        if origen_id == pedido["sucursal_id"]:
-            return "error", "El origen no puede ser igual al destino del pedido"
+        # Una sucursal puede pedirse a sí misma (auto-pedido a su propio
+        # almacén principal). En ese caso el reparto se registra igual como
+        # constancia y total, pero NO se mueve stock entre sucursales (abajo se
+        # salta la salida/entrada cuando origen == sucursal solicitante).
         if origen_propio and sid_op is not None and origen_id != sid_op:
             return "error", "Solo puedes despachar líneas cuyo origen sea tu propia sucursal"
         grupos.setdefault(origen_id, []).append(d)
@@ -649,6 +667,9 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
         if not org:
             return "error", f"Proveedor {origen_id} no encontrado"
         for d in items:
+            # Auto-pedido: no hay traslado, así que no se valida stock de salida.
+            if origen_id == pedido["sucursal_id"]:
+                continue
             stock = stock_actual(conn, d["producto_id"], origen_id)
             if stock < d["cantidad"]:
                 return "error", (f"Stock insuficiente de {d['producto_nombre']} en "
@@ -691,11 +712,14 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
                 INSERT INTO reparto_detalle (reparto_id, producto_id, producto_nombre, cantidad, costo_unitario, subtotal)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (reparto_id, d["producto_id"], d["producto_nombre"], d["cantidad"], costo, subtotal))
-            registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, fecha_mov,
-                                  f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
-            registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, fecha_mov,
-                                  f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
-                                  pedido["sucursal_id"])
+            # Los auto-pedidos no mueven stock (origen == sucursal que pide):
+            # el reparto queda como constancia y el total, sin salida ni entrada.
+            if origen_id != pedido["sucursal_id"]:
+                registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, fecha_mov,
+                                      f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
+                registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, fecha_mov,
+                                      f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
+                                      pedido["sucursal_id"])
         conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (subtotal_reparto, reparto_id))
     return total, reparto_ids
 
@@ -941,7 +965,9 @@ _ETIQUETA_ETAPA = {
 @login_requerido
 def pedido_etapa(pedido_id):
     """Avanza la etapa logistica del pedido. Es lo unico que puede cambiar un
-    preparador o un repartidor; el `estado` lo sigue manejando quien coordina."""
+    preparador o un repartidor, y también el almacén receptor (los usuarios "AS
+    ..." con rol receptor, que reciben los pedidos y los marcan En camino /
+    Entregado); el `estado` lo sigue manejando quien coordina."""
     conn = get_conn()
     # FOR UPDATE: dos personas marcando a la vez no pueden saltarse la
     # validacion de la etapa actual ni duplicar el movimiento de stock.
@@ -959,7 +985,10 @@ def pedido_etapa(pedido_id):
 
     rol = session.get("rol")
     sid = sucursal_actual()
-    if rol not in ("preparador", "repartidor") and not (es_gestion() or es_encargado_almacen(conn)):
+    # Los roles logísticos marcan la etapa del pedido, y también el encargado
+    # receptor (el "AS ..." que recibe los pedidos en su sucursal).
+    if rol not in ("preparador", "repartidor") and not es_receptor() \
+            and not (es_gestion() or es_encargado_almacen(conn)):
         conn.close()
         return err("Tu rol no puede cambiar la etapa del pedido", 403)
     if not sid:
@@ -970,7 +999,8 @@ def pedido_etapa(pedido_id):
     # rol logistico puede ver los pedidos que su sucursal le hizo al almacen
     # (para saber que esta esperando), pero no puede tocarlos, porque la
     # mercaderia la prepara y despacha el almacen, no la sucursal que pidio.
-    if rol in ("preparador", "repartidor"):
+    # Para el receptor vale lo mismo: marca los pedidos que RECIBE su almacén.
+    if rol in ("preparador", "repartidor") or es_receptor():
         det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
                            (pedido_id,)).fetchall()
         es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in det)

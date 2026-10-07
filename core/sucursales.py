@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
+from .lotes import destinos_validos
 from .util import ok, err, login_requerido, rol_requerido, registrar_auditoria, registrar_movimiento, stock_actual, ok_paginado, paginar_params, sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion, es_encargado_almacen
 
 sucursales_bp = Blueprint("sucursales", __name__)
@@ -42,16 +43,22 @@ def sucursales():
         except pymysql.err.IntegrityError:
             conn.close()
             return err("Ya existe una sucursal con ese nombre")
+    # `provee` derivado con LA MISMA regla de `destinos_validos` (principal |
+    # provee | tiene productos «para proveer»): así los selectores del front que
+    # arman "Todo a X" y proveen por "provee" ofrecen exactamente lo que el
+    # backend después va a aceptar al validar el destino de un pedido.
+    _validos = set(destinos_validos(conn))
     rows = conn.execute("""
-        SELECT s.*,
+        SELECT s.*, p.nombre AS padre_nombre,
                (SELECT COUNT(*) FROM repartos r WHERE r.sucursal_id = s.id) AS num_repartos,
                (SELECT COALESCE(SUM(r.total), 0) FROM repartos r WHERE r.sucursal_id = s.id) AS total_repartido,
-               (SELECT COUNT(*) FROM productos p WHERE p.sucursal_id = s.id AND p.activo = 1) AS num_productos
+               (SELECT COUNT(*) FROM productos p2 WHERE p2.sucursal_id = s.id AND p2.activo = 1) AS num_productos
         FROM sucursales s
+        LEFT JOIN sucursales p ON p.id = s.padre_id
         ORDER BY s.principal DESC, s.nombre
     """).fetchall()
     conn.close()
-    return ok([dict(r) for r in rows])
+    return ok([dict(r, provee=r["id"] in _validos) for r in rows])
 
 
 @sucursales_bp.route("/api/sucursales/<int:suc_id>", methods=["PUT", "DELETE"])

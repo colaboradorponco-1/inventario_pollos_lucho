@@ -484,6 +484,10 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 .unit-hint { display: block; font-size: 11px; color: var(--muted); margin-top: 4px; }
 .disp-ok { color: #16a34a; font-weight: 700; }
 .disp-no { color: #dc2626; font-weight: 700; }
+/* El proveedor del producto no tiene stock. NO es "agotado": el pedido se puede
+   hacer igual, va a esa sucursal y queda avisado. Ámbar (atención), no rojo. */
+.disp-falta { color: #b45309; font-weight: 700; }
+.prod-card.sin-stock-prov { border-color: #f59e0b; }
 
 /* Toast */
 .toast {
@@ -1115,6 +1119,7 @@ body.rol-encargado .panel-finance {
 .prod-q.prod-q-alto { border-color: #dc2626 !important; background: #fef2f2; }
 .prod-card.sin-stock { border-color: #dc2626; }
 .aviso-stock { color: #dc2626; font-size: 12px; margin-top: 4px; }
+.aviso-falta { color: #b45309; }
 .stock-rojo { color: #dc2626; font-weight: 700; }
 /* Pedido por tachos: selector de medida (¼, ½, ¾, entero) junto al cantidad */
 .tacho-col { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
