@@ -849,12 +849,8 @@ function esSucursalAS(s) {
     return false;
 }
 function sucursalesFiltroPedidos(lista) {
-    // Cada sucursal es un almacén independiente. El admin/superadmin ve TODAS
-    // las sucursales; el encargado ve los Principales + los almacenes de su
-    // misma ciudad (a los que puede pedir directo).
     const base = lista || (catalogos && catalogos.sucursales) || [];
-    if (esGestionPed()) return base;
-    return proveedoresAlcance(base);
+    return base;
 }
 // Nombre visible de una sucursal en el módulo de pedidos (ya sin "AS especial"):
 // cada almacén figura con su propio nombre.
