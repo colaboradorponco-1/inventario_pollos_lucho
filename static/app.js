@@ -800,8 +800,13 @@ function ordenarSucursales(lista) {
     });
 }
 function opcionesSucursales(lista, placeholder) {
-    // Opciones <select> agrupadas por ciudad (Cochabamba / La Paz) y en orden.
-    const lista2 = ordenarSucursales(lista || []);
+    // Si no es gestion, aplicar el filtro de bandeja para que los AS o sucursales
+    // vean solo lo que les corresponde en los desplegables.
+    let listaFiltrada = lista || [];
+    if (!puedeVerTodasSucursales() && listaFiltrada.length > 5) {
+        listaFiltrada = sucursalesFiltroBandeja(listaFiltrada);
+    }
+    const lista2 = ordenarSucursales(listaFiltrada);
     let html = placeholder ? `<option value="">${esc(placeholder)}</option>` : '';
     let grupo = null;
     for (const s of lista2) {
