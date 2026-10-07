@@ -4842,7 +4842,18 @@ function esCentralBadge() {
 }
 
 async function pintarBadgePedidos() {
-    // El punto rojo solo corresponde al encargado de la sucursal que RECIBE el pedido.
+    // El punto rojo solo corresponde a la sucursal que RECIBE y ATIENDE el
+    // pedido: central, logística y los AS receptores. Un encargado normal de
+    // tienda (America, Simón López...) NO lo ve: los pedidos hechos a su
+    // sucursal le llegan a su AS, no a él.
+    const badge = $('#badge-pedidos');
+    if (!puedeVerBandeja()) {
+        if (badge) {
+            badge.textContent = '';
+            badge.style.display = 'none';
+        }
+        return;
+    }
     // Una sucursal filial solo cuenta los pendientes que le llegan como destino;
     // admin/superadmin y almacén principal cuentan todos los pendientes.
     const qs = new URLSearchParams({ estado: 'pendiente,en_camino', pagina: 1, por_pagina: 1 });
@@ -4857,7 +4868,6 @@ async function pintarBadgePedidos() {
     }
     const pend = await request(API + '/pedidos?' + qs.toString());
     const n = (pend.total != null ? pend.total : (pend.data || pend).length);
-    const badge = $('#badge-pedidos');
     if (badge) {
         badge.textContent = n > 0 ? n : '';
         badge.style.display = n > 0 ? 'inline-flex' : 'none';
