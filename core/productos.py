@@ -514,10 +514,14 @@ def producto(prod_id):
         conn.close()
         return err("Producto no encontrado", 404)
     # Admin/superadmin y encargados de almacén principal gestionan cualquier producto;
-    # las sucursales filiales solo gestionan los de SU sucursal (los que crearon).
-    if not es_gestion() and not es_encargado_almacen(conn) and fila["sucursal_id"] != sucursal_actual():
-        conn.close()
-        return err("Solo puedes gestionar productos de tu sucursal", 403)
+    # las sucursales filiales solo gestionan los de SU ámbito: su sucursal + sus AS
+    # hijas (los productos de América/Simón López/6 de Agosto viven en la AS y el
+    # encargado de la tienda debe poder gestionarlos igual que los propios).
+    if not es_gestion() and not es_encargado_almacen(conn):
+        sid_user = sucursal_actual()
+        if sid_user is None or int(fila["sucursal_id"] or 0) not in ids_sucursal_consolidada(conn, sid_user):
+            conn.close()
+            return err("Solo puedes gestionar productos de tu sucursal", 403)
     if request.method == "DELETE":
         conn.execute("UPDATE productos SET activo = 0 WHERE id = ?", (prod_id,))
         conn.commit()
