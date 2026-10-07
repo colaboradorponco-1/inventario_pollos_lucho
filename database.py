@@ -499,77 +499,61 @@ def _nombre_norm(nombre):
     return " ".join(n.split())
 
 
-def _es_tienda_almacen_as(norm):
-    """¿Esta sucursal TIENDA tiene su almacén de producción (AS) separado?
+def _destruir_sucursales_as(cur):
+    """ELIMINA TODO rastro de las sucursales AS (de producción) y deja cada
+    ciudad como UN SOLO almacén normal, CON SUS STOCK, como estaba antes.
 
-    Decisión de negocio (2026): POR AHORA solo América, Simón López y
-    La Paz - 6 de Agosto. El resto de sucursales sigue con inventario único
-    (todo vive en la tienda), como estaba. Si mañana entra otra tienda al
-    modelo de producción propia, solo hay que agregarla aquí.
-    Mantener en sync con `core.util._tienda_almacen_as`.
+    Decisión del dueño (2026-10-07): los AS no van. America, Simón López y
+    La Paz - 6 de Agosto vuelven a ser la única sucursal/almacén de su ciudad,
+    con todos sus productos, lotes, stock y movimientos.
+
+    Idempotente: solo actúa si todavía existen sucursales con es_as = 1.
+    Orden seguro (primero se mueven los datos a la sucursal madre y al final
+    se borra la fila AS), así no se pierde nada:
+      1) lotes          -> sucursal madre
+      2) productos      -> sucursal madre
+      3) movimientos    -> sucursal madre
+      4) almacenes      -> sucursal madre
+      5) inventario     -> sucursal madre
+      6) pedidos/detalle (destino histórico) -> sucursal madre
+      7) repartos       -> sucursal madre
+      8) usuarios       -> sucursal madre
+      9) se BORRA la sucursal AS
     """
-    if "america" in norm or "simon" in norm:
-        return True
-    return "la paz" in norm and "6" in norm
-
-
-def _crear_sucursales_as(cur):
-    """Crea la sucursal AS (producción) de cada tienda con almacén separado.
-
-    "Tener su propio almacén pero seguir perteneciendo a su sucursal" se
-    implementa con UNA SUCURSAL HIJA por tienda: `es_as=1` + `padre_id` a la
-    tienda. Su stock es independiente del de venta (inventario_producción vs
-    inventario_venta).
-
-    Idempotente. En cada arranque, para cada tienda del grupo elegido:
-      - crea "AS <tienda>" si no existe (provee=1, para aceptar pedidos);
-      - mueve ahí al usuario receptor "AS ..." de la tienda (quien despacha);
-      - mueve los productos activos «para proveer» y SUS LOTES (producción),
-        que es donde vive la mercadería que se distribuye;
-      - los productos «para venta» (para_proveer=0) se quedan en la tienda.
-    Nunca pisa un AS ya existente ni toca otras sucursales.
-    """
-    creadas = 0
-    cur.execute("SELECT id, nombre FROM sucursales "
-                "WHERE principal = 0 AND IFNULL(es_as, 0) = 0")
-    for t in cur.fetchall():
-        if not _es_tienda_almacen_as(_nombre_norm(t["nombre"])):
-            continue
-        cur.execute("SELECT id FROM sucursales "
-                    "WHERE padre_id = %s AND es_as = 1 LIMIT 1", (t["id"],))
-        as_for = cur.fetchone()
-        if as_for:
-            as_id = as_for["id"]
+    cur.execute("SELECT id, nombre, padre_id FROM sucursales "
+                "WHERE IFNULL(es_as, 0) = 1")
+    for a in cur.fetchall():
+        asid = a["id"]
+        if a["padre_id"]:
+            cur.execute("SELECT id FROM sucursales WHERE id = %s", (a["padre_id"],))
+            padre = cur.fetchone()
         else:
-            cur.execute("SELECT id FROM sucursales "
-                        "WHERE UPPER(nombre) = %s AND es_as = 1 LIMIT 1",
-                        ("AS " + (t["nombre"] or "").strip().upper(),))
-            as_by_name = cur.fetchone()
-            if as_by_name:
-                as_id = as_by_name["id"]
-                cur.execute("UPDATE sucursales SET padre_id = %s WHERE id = %s",
-                            (t["id"], as_id))
-            else:
-                cur.execute("INSERT INTO sucursales (nombre, direccion, principal, provee, es_as, padre_id) "
-                            "VALUES (%s, %s, 0, 1, 1, %s)",
-                            ("AS " + (t["nombre"] or "").strip(), "", t["id"]))
-                as_id = cur.lastrowid
-                creadas += 1
-        # El receptor "AS ..." de esa tienda pasa a su sucursal de producción.
-        cur.execute("UPDATE usuarios SET sucursal_id = %s "
-                    "WHERE usuario LIKE 'AS %' AND receptor = 1 AND sucursal_id = %s",
-                    (as_id, t["id"]))
-        # Los productos que se ofrecen a otras sucursales (producción) -> AS.
-        cur.execute("UPDATE productos SET sucursal_id = %s "
-                    "WHERE sucursal_id = %s AND activo = 1 AND para_proveer = 1",
-                    (as_id, t["id"]))
-        # Y los lotes de esos productos que aún viven en la tienda -> AS:
-        # el stock de producción no puede quedar mezclado con el de venta.
-        cur.execute("""UPDATE lotes l JOIN productos p ON p.id = l.producto_id
-                       SET l.sucursal_id = %s
-                       WHERE p.sucursal_id = %s AND l.sucursal_id = %s""",
-                    (as_id, as_id, t["id"]))
-    return creadas
+            nom = (a["nombre"] or "").strip()
+            guess = nom[3:].strip() if nom.upper().startswith("AS ") else None
+            padre = None
+            if guess:
+                cur.execute("SELECT id FROM sucursales "
+                            "WHERE UPPER(nombre) = %s AND IFNULL(es_as, 0) = 0 "
+                            "LIMIT 1", (guess.upper(),))
+                padre = cur.fetchone()
+        if not padre or padre["id"] == asid:
+            continue  # sin sucursal madre identificable: no se toca nada
+        pid = padre["id"]
+        cur.execute("UPDATE lotes SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
+        cur.execute("UPDATE productos SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
+        cur.execute("UPDATE movimientos SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
+        cur.execute("UPDATE almacenes SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
+        cur.execute("UPDATE inventario_diario SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
+        cur.execute("UPDATE pedidos SET destino_id = %s WHERE destino_id = %s", (pid, asid))
+        cur.execute("UPDATE pedido_detalle SET destino_id = %s WHERE destino_id = %s", (pid, asid))
+        cur.execute("UPDATE repartos SET origen_sucursal_id = %s WHERE origen_sucursal_id = %s", (pid, asid))
+        cur.execute("UPDATE repartos SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
+        cur.execute("UPDATE usuarios SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
+        try:
+            cur.execute("DELETE FROM sucursales WHERE id = %s", (asid,))
+        except Exception:
+            pass  # si alguna tabla extra la referencia, la fila queda vacía e inofensiva
+    return None
 
 
 def _col_existe(cur, tabla, columna):
@@ -1090,13 +1074,11 @@ def migrar_esquema():
                 pass
             print(f"[migrar] AVISO: no se pudieron normalizar las fechas con 'T': {_e}")
 
-        # 9) Sucursales AS (producción) de las tiendas con almacén separado.
-        # DESACTIVADO: cada sucursal es un almacén independiente (America,
-        # as_america, Simon Lopez, as_simon_lopez...) y no se crean más "AS"
-        # hijas de una tienda. Las que ya existen quedan como un almacén más.
-        # _creadas_as = _crear_sucursales_as(cur)
-        # if _creadas_as:
-        #     print(f"[migrar] {_creadas_as} sucursal(es) AS de producción creada(s)")
+        # 9) Destrucción de las sucursales AS (producción): America, Simon Lopez
+        # y 6 de Agosto vuelven a ser UN SOLO almacén por ciudad, con sus stock.
+        # Todo lo del AS (productos, lotes, movimientos, usuarios) pasa a la
+        # sucursal madre y la fila AS se borra. Idempotente.
+        _destruir_sucursales_as(cur)
         db.commit()
     finally:
         db.close()
