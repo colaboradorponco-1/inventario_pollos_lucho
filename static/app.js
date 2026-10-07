@@ -869,6 +869,15 @@ function nombreSucursalPedido(s) {
     return nombreNorm(base).startsWith('as ') ? s.nombre : ('AS ' + base);
 }
 
+// Lista para FILTRAR la bandeja y el historial de pedidos: los Almacenes
+// Principales + las tiendas de la misma ciudad (las que piden). Las AS de
+// producción no figuran: no piden, RECIBEN pedidos; su bandeja se muestra
+// entera con "Todas las sucursales" y con los nombres de tienda (america,
+// simon lopez, siglo xx...).
+function sucursalesFiltroBandeja(lista) {
+    return proveedoresAlcance(sucursalesTienda(lista || []).filter((s) => !esSucursalAS(s)));
+}
+
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
 function puedeVerTodasSucursales() { return esAdmin() || esAlmacenPpal(); }
 
@@ -4408,7 +4417,7 @@ async function loadPedidos() {
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + destinosP.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
         }
-        const opcionesAS = opcionesSucursales(sucursalesFiltroPedidos(sucursales), 'Todas las sucursales');
+        const opcionesAS = opcionesSucursales(sucursalesFiltroBandeja(sucursales), 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
         if (filtroSel) filtroSel.innerHTML = opcionesAS;
         const filtroReal = $('#pedido-sucursal-realizados');
@@ -4488,10 +4497,11 @@ function inicializarPestanasPedidos() {
     // Almacén principal «puro», preparador/repartidor y admin se quedan
     // únicamente con su bandeja. Las sucursales que piden (filiales y la
     // propia proveedora con su encargado normal) conservan «Mis pedidos».
-    // El usuario RECEPTOR del AS también conserva «Mis pedidos»: es quien
-    // hace el pedido de aprovisionamiento al Almacén Principal.
+    // El usuario RECEPTOR del AS también queda solo con la bandeja: los AS no
+    // hacen pedidos — RECIBEN los de las otras sucursales.
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
         || window.ROL === 'preparador' || window.ROL === 'repartidor'
+        || window.RECEPTOR
         || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
 
     if (soloBandeja) {
@@ -4628,7 +4638,7 @@ async function cargarBandeja() {
         const btsB = $('#bandeja-suc-btns');
         if (btsB) {
             btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-                .concat(ordenarSucursales(sucursalesFiltroPedidos(catalogos.sucursales).map((s) => ({ id: String(s.id), nombre: s.nombre }))))
+                .concat(ordenarSucursales(sucursalesFiltroBandeja(catalogos.sucursales).map((s) => ({ id: String(s.id), nombre: s.nombre }))))
                 .map((b) => `
                     <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
                 .join('');
