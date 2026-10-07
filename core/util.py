@@ -207,10 +207,15 @@ def ids_sucursal_consolidada(conn, sucursal_id):
         fila = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (sucursal_id,)).fetchone()
         if fila and _tienda_almacen_as(_nombre_norm(fila["nombre"] or "")):
+            # Se compara sin guiones ni espacios extra: la AS pudo quedar con
+            # otro formato de nombre (p. ej. "AS La Paz 6 de Agosto" vs
+            # "AS La Paz - 6 de Agosto") y con nombre exacto no aparece.
+            nom_par = ("AS " + (fila["nombre"] or "").strip()).upper()
             r = conn.execute(
-                "SELECT id FROM sucursales "
-                "WHERE UPPER(nombre) = ? AND es_as = 1 LIMIT 1",
-                ("AS " + (fila["nombre"] or "").strip().upper(),)).fetchone()
+                "SELECT id FROM sucursales WHERE es_as = 1 AND "
+                "UPPER(REPLACE(REPLACE(nombre, '-', ' '), '  ', ' ')) = "
+                "UPPER(REPLACE(REPLACE(?, '-', ' '), '  ', ' ')) LIMIT 1",
+                (nom_par,)).fetchone()
             if r:
                 ids.append(int(r["id"]))
     return ids

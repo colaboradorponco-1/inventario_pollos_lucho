@@ -219,6 +219,13 @@ def productos():
         if e:
             conn.close()
             return e
+    elif sucursal is not None:
+        # La pestaña de sucursal del listado muestra el stock DE ESA sucursal
+        # (ella + su AS), no el de la sucursal del usuario. Si no, al filtrar por
+        # otra sucursal los estados "con stock"/"agotado"/"stock bajo"/"por
+        # vencer" se calculaban contra los lotes del usuario y la lista salía en 0
+        # (pasa en los paneles AS y en los de cualquier filial).
+        stock_sid = sucursal
     elif not ver_todo and sid is not None:
         stock_sid = sid
     if stock_sid is not None:
