@@ -83,15 +83,15 @@ def ejecutar_creacion(rol, sucursal_id=30, principal=0):
         return ped.pedidos()
 
 
-def ejecutar_archivo(estado, archivado):
+def ejecutar_archivo(estado, archivado, rol="admin", sucursal_id=30):
     global ESTADO_PEDIDO
     ESTADO_PEDIDO = estado
     CAPTURADO.clear()
     with srv.test_request_context(
             "/api/pedidos/7/archivar", method="PUT", json={"archivado": archivado}):
         session["user_id"] = 1
-        session["rol"] = "admin"
-        session["sucursal_id"] = 30
+        session["rol"] = rol
+        session["sucursal_id"] = sucursal_id
         return ped.pedido_archivar(7)
 
 
@@ -150,6 +150,12 @@ with open(os.path.join(os.path.dirname(__file__), "static", "app.js"),
     interfaz = archivo.read()
 check("el alcance global se elige desde el control exclusivo del superadmin",
       "pedido-bandeja-alcance" in interfaz and "Todas las sucursales" in interfaz)
+check("el filtro por botones lee la propiedad data-bsuc correctamente",
+      "bandejaSucF = b.dataset.bsuc" in interfaz
+      and "b.dataset.bSuc" not in interfaz)
+check("mis solicitudes también permiten archivar estados terminales",
+      "['entregado', 'rechazado'].includes(estado)" in interfaz
+      and "await listarPedidos()" in interfaz)
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()
@@ -163,6 +169,14 @@ check("solo el pedido terminal se archiva",
       not isinstance(respuesta, tuple) and len(inserciones) == 1)
 check("el archivo se guarda para la sucursal que lo solicita",
       bool(inserciones) and inserciones[0][1][:2] == [7, 30])
+respuesta_solicitante = ejecutar_archivo(
+    "rechazado", True, rol="encargado", sucursal_id=42)
+inserciones_solicitante = [(sql, params) for sql, params in CAPTURADO
+                           if "INSERT INTO pedidos_archivados" in sql]
+check("la sucursal solicitante también puede archivar su copia",
+      not isinstance(respuesta_solicitante, tuple)
+      and bool(inserciones_solicitante)
+      and inserciones_solicitante[0][1][:2] == [7, 42])
 with open(os.path.join(os.path.dirname(__file__), "database.py"),
           encoding="utf-8") as archivo:
     schema = archivo.read()

@@ -4786,7 +4786,12 @@ window.archivarPedido = async (id, archivar) => {
             body: JSON.stringify({ archivado: archivar }),
         });
         toast(res.message, 'ok');
-        await cargarBandeja();
+        if (pestanaPedidos === 'mis-pedidos') {
+            pagState['#pedidos-paginacion'] = 1;
+            await listarPedidos();
+        } else {
+            await cargarBandeja();
+        }
     } catch (e) {
         toast(e.message, 'err');
     }
@@ -4831,6 +4836,9 @@ async function listarPedidos() {
             <td>${celdaEstado}</td>
             <td>${esc(p.nota) || '—'}</td>
             <td>
+                ${window.SUCURSAL_ID && ['entregado', 'rechazado'].includes(estado)
+                    ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, true)">Archivar</button>`
+                    : ''}
                 <button class="btn btn-icon" onclick="verPedido(${p.id}, false)" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             </td>
         </tr>`; }).join('') || '<tr><td colspan="9" class="empty">Sin pedidos registrados</td></tr>';
@@ -4885,7 +4893,7 @@ on('#pedido-sucursal-filtro', 'change', () => { bandejaSucF = ''; cargarBandeja(
 on('#bandeja-suc-btns', 'click', (e) => {
     const b = e.target.closest('[data-bsuc]');
     if (!b) return;
-    bandejaSucF = b.dataset.bSuc;
+    bandejaSucF = b.dataset.bsuc;
     const sel = $('#pedido-sucursal-filtro');
     if (sel) sel.value = bandejaSucF;
     cargarBandeja();
