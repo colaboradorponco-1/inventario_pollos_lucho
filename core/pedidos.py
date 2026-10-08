@@ -457,6 +457,58 @@ def pedido_detalle(pedido_id):
                "repartos": [dict(r) for r in repartos]})
 
 
+@pedidos_bp.route("/api/pedidos/<int:pedido_id>/archivar", methods=["PUT"])
+@login_requerido
+def pedido_archivar(pedido_id):
+    conn = get_conn()
+    pedido = conn.execute(
+        "SELECT * FROM pedidos WHERE id = ?", (pedido_id,)).fetchone()
+    if not pedido:
+        conn.close()
+        return err("Pedido no encontrado", 404)
+    detalle = conn.execute(
+        "SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,)).fetchall()
+    if not _puede_ver_pedido(conn, pedido, detalle):
+        conn.close()
+        return err("No tienes permisos para este pedido", 403)
+    if pedido["estado"] not in ("entregado", "rechazado"):
+        conn.close()
+        return err("Solo se pueden archivar pedidos entregados o rechazados", 400)
+    sid = sucursal_actual()
+    if sid is None:
+        conn.close()
+        return err("Necesitas una sucursal asignada para archivar pedidos", 403)
+    if not (pedido["sucursal_id"] == sid or
+            pedido.get("destino_id") == sid or
+            any((d.get("destino_id") or pedido.get("destino_id")) == sid for d in detalle)):
+        conn.close()
+        return err("Solo puedes archivar pedidos relacionados con tu sucursal", 403)
+
+    data = request.get_json() or {}
+    archivado = data.get("archivado")
+    if not isinstance(archivado, bool):
+        conn.close()
+        return err("Indica si deseas archivar o restaurar el pedido")
+    if archivado:
+        conn.execute(
+            "INSERT INTO pedidos_archivados (pedido_id, sucursal_id, usuario, fecha) "
+            "VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE usuario = VALUES(usuario), "
+            "fecha = VALUES(fecha)",
+            (pedido_id, sid, session.get("usuario", ""),
+             datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        mensaje = "Pedido archivado para tu sucursal"
+    else:
+        conn.execute(
+            "DELETE FROM pedidos_archivados WHERE pedido_id = ? AND sucursal_id = ?",
+            (pedido_id, sid))
+        mensaje = "Pedido restaurado en tu historial"
+    conn.commit()
+    conn.close()
+    registrar_auditoria("Pedido archivado" if archivado else "Pedido restaurado",
+                        f"{pedido['nro_ticket']} para sucursal ID {sid}")
+    return ok(message=mensaje)
+
+
 def _ticket_data(conn, pedido_id):
     """Agrupa el pedido por proveedor y por categoría para el ticket único."""
     pedido = conn.execute("""
@@ -846,13 +898,28 @@ def pedidos_bandeja():
     # El estado tambien es opcional: por defecto se muestra lo que hay que
     # trabajar (pendiente + en camino). Los entregados/rechazados se ven en el
     # historial.
-    estado = (request.args.get("estado", "") or "pendiente").strip().lower()
-    if estado in _ESTADOS:
-        if estado == "pendiente":
-            where += " AND p.estado IN ('pendiente', 'en_camino')"
-        else:
-            where += " AND p.estado = ?"
-            params.append(estado)
+    vista = (request.args.get("vista", "") or "activos").strip().lower()
+    if vista not in ("activos", "historial", "archivados"):
+        conn.close()
+        return err("Vista de pedidos inválida", 400)
+    if vista == "archivados":
+        where += " AND p.estado IN ('entregado', 'rechazado')"
+        if sid:
+            where += (" AND EXISTS (SELECT 1 FROM pedidos_archivados pa "
+                      "WHERE pa.pedido_id = p.id AND pa.sucursal_id = ?)")
+            params.append(sid)
+        elif es_superadmin():
+            where += " AND EXISTS (SELECT 1 FROM pedidos_archivados pa WHERE pa.pedido_id = p.id)"
+    elif vista == "historial":
+        where += " AND p.estado IN ('entregado', 'rechazado')"
+        if sid:
+            where += (" AND NOT EXISTS (SELECT 1 FROM pedidos_archivados pa "
+                      "WHERE pa.pedido_id = p.id AND pa.sucursal_id = ?)")
+            params.append(sid)
+        elif es_superadmin():
+            where += " AND NOT EXISTS (SELECT 1 FROM pedidos_archivados pa WHERE pa.pedido_id = p.id)"
+    else:
+        where += " AND p.estado IN ('pendiente', 'en_camino')"
     desde = (request.args.get("desde", "") or "").strip()
     hasta = (request.args.get("hasta", "") or "").strip()
     if desde:

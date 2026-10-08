@@ -941,6 +941,11 @@
                         <input type="date" id="pedido-bandeja-desde" data-sin-fecha-defecto>
                         <input type="date" id="pedido-bandeja-hasta" data-sin-fecha-defecto>
                         <select id="pedido-sucursal-filtro" style="max-width:220px"></select>
+                        <select id="pedido-bandeja-vista" aria-label="Vista de pedidos">
+                            <option value="activos">Pendientes y en camino</option>
+                            <option value="historial">Entregados y rechazados</option>
+                            <option value="archivados">Archivados</option>
+                        </select>
                         <button class="btn" id="btn-filtrar-pedidos">Filtrar</button>
                         <span class="flex-grow"></span>
                         <span class="respaldo-txt" id="historial-resumen"></span>

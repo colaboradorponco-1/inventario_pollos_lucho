@@ -382,6 +382,15 @@ def init_db():
                     "nota TEXT,"
                     "destino_id INT,"
                     "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS pedidos_archivados ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "pedido_id INT NOT NULL,"
+                    "sucursal_id INT NOT NULL,"
+                    "usuario VARCHAR(255) DEFAULT '',"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "UNIQUE KEY uq_pedido_sucursal_archivado (pedido_id, sucursal_id),"
+                    "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS pedido_detalle ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "pedido_id INT NOT NULL,"

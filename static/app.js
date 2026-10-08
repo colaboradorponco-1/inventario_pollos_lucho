@@ -4672,7 +4672,9 @@ async function cargarBandeja() {
     try {
         const desde = ($('#pedido-bandeja-desde') || {}).value || '';
         const hasta = ($('#pedido-bandeja-hasta') || {}).value || '';
+        const vistaBandeja = ($('#pedido-bandeja-vista') || {}).value || 'activos';
         const qs = new URLSearchParams();
+        qs.set('vista', vistaBandeja);
         if (desde) qs.set('desde', desde);
         if (hasta) qs.set('hasta', hasta);
         const gruposRaw = (await request(API + '/pedidos/bandeja' + (qs.toString() ? '?' + qs.toString() : ''))) || [];
@@ -4697,18 +4699,27 @@ async function cargarBandeja() {
         }
         const total = grupos.reduce((a, g) => a + g.pedidos.length, 0);
         const resumen = $('#historial-resumen');
-        if (resumen) resumen.textContent = total ? `${total} pedido(s) por despachar` : '';
+        const etiquetasVista = {
+            activos: 'pedido(s) activos',
+            historial: 'pedido(s) en historial',
+            archivados: 'pedido(s) archivados',
+        };
+        if (resumen) resumen.textContent = total ? `${total} ${etiquetasVista[vistaBandeja]}` : '';
         if (!total) {
             // Distinguir "no hay nada pendiente" de "tu filtro de fecha lo
             // esconde": antes ambos casos mostraban el mismo texto, y por eso
             // un pedido de ayer sin despachar era indistinguible de no tener
             // trabajo. Ahora el mensaje dice si hay que tocar los filtros.
             const conFiltro = desde || hasta;
+            const vacioVista = vistaBandeja === 'archivados'
+                ? 'No hay pedidos archivados para esta sucursal.'
+                : vistaBandeja === 'historial'
+                    ? 'No hay pedidos entregados o rechazados en el historial.'
+                    : 'No hay pedidos pendientes. Los ya entregados o rechazados están en el historial.';
             $('#bandeja-contenido').innerHTML = conFiltro
-                ? '<p class="empty">No hay pedidos pendientes en el rango de fechas filtrado. ' +
-                  'Limpia las fechas para ver todos los pendientes.</p>'
-                : '<p class="empty">No hay pedidos pendientes. ' +
-                  'Los ya entregados o rechazados están en el historial.</p>';
+                ? `<p class="empty">No hay pedidos en esta vista dentro del rango filtrado. ` +
+                  'Limpia las fechas para volver a verlos.</p>'
+                : `<p class="empty">${vacioVista}</p>`;
             return;
         }
         const catSuc = (catalogos && catalogos.sucursales) || [];
@@ -4732,6 +4743,9 @@ async function cargarBandeja() {
                             ${chipEstado}
                             ${p.nota ? '<span class="respaldo-txt">' + esc(p.nota) + '</span>' : ''}
                             <span class="flex-grow"></span>
+                            ${window.SUCURSAL_ID && (vistaBandeja === 'historial' || vistaBandeja === 'archivados')
+                                ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaBandeja === 'historial'})">${vistaBandeja === 'historial' ? 'Archivar' : 'Restaurar'}</button>`
+                                : ''}
                             <button class="btn btn-sm" onclick="window.open('/pedidos/ticket/${p.id}', '_blank')">Imprimir</button>
                             <button class="btn btn-icon" onclick="verPedido(${p.id}, true)" title="Ver detalle y gestionar estado" aria-label="Ver detalle y gestionar estado">${eyeSvg}</button>
                         </div>
@@ -4754,6 +4768,20 @@ async function cargarBandeja() {
         if (cont) cont.innerHTML = '<p class="empty">' + esc(e.message) + '</p>';
     }
 }
+
+window.archivarPedido = async (id, archivar) => {
+    if (archivar && !confirm('Este pedido se ocultará del historial de tu sucursal, pero no se borrará y podrás restaurarlo. ¿Continuar?')) return;
+    try {
+        const res = await request(API + '/pedidos/' + id + '/archivar', {
+            method: 'PUT',
+            body: JSON.stringify({ archivado: archivar }),
+        });
+        toast(res.message, 'ok');
+        await cargarBandeja();
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+};
 
 async function listarPedidos() {
     const qs = new URLSearchParams();
@@ -4842,6 +4870,7 @@ async function pintarBadgePedidos() {
 }
 
 $('#btn-filtrar-pedidos').addEventListener('click', cargarBandeja);
+on('#pedido-bandeja-vista', 'change', cargarBandeja);
 on('#pedido-sucursal-filtro', 'change', () => { bandejaSucF = ''; cargarBandeja(); });
 on('#bandeja-suc-btns', 'click', (e) => {
     const b = e.target.closest('[data-bsuc]');
