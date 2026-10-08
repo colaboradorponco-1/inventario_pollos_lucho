@@ -1240,6 +1240,22 @@ function exportarProductos() {
     window.location.href = API + '/exportar/productos?' + qs.toString();
 }
 
+function sucursalPermiteOfrecerProductos(sucursalId) {
+    const sucursal = (catalogos.sucursales || [])
+        .find((s) => String(s.id) === String(sucursalId));
+    return !!sucursal && (Number(sucursal.principal) === 1 || !!sucursal.provee);
+}
+
+function actualizarControlProductoPedido(sucursalId, ofrecer = false) {
+    const wrap = $('#prod-para-proveer-wrap');
+    const hint = $('#prod-para-proveer-hint');
+    const checkbox = $('#prod-para-proveer');
+    const permitido = sucursalPermiteOfrecerProductos(sucursalId);
+    if (wrap) wrap.style.display = permitido ? 'flex' : 'none';
+    if (hint) hint.style.display = permitido ? 'block' : 'none';
+    if (checkbox) checkbox.checked = permitido && ofrecer;
+}
+
 async function openProductoModal(id, lista) {
     await loadCatalogos();
     const form = $('#form-producto');
@@ -1262,6 +1278,7 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
             selSuc.innerHTML = opcionesSucursales(sucursalesTienda(catalogos.sucursales), 'Seleccione una sucursal...');
         }
     selSuc.value = sid0 || '';
+        actualizarControlProductoPedido(selSuc.value, false);
     // Al editar, la sucursal se mantiene fija salvo para admin (evita registrar
     // almacenes ajenos); al crear, siempre es editable.
     if (!id) {
@@ -1299,6 +1316,7 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-proveedor').value = p.proveedor_id || '';
     
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
+        actualizarControlProductoPedido($('#prod-sucursal').value, !!p.para_proveer);
         if (esGestionDlg) poblarAlmacenes(+$('#prod-sucursal').value || 0);
         if (esGestionDlg && p.sucursal_id && !p.almacen_id) {
             const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === p.sucursal_id);
@@ -1332,6 +1350,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         precio_venta: +$('#prod-precio-venta').value || 0,
         vencimiento: $('#prod-vencimiento').value || null,
         proveedor_id: +$('#prod-proveedor').value || null,
+        para_proveer: $('#prod-para-proveer').checked,
 
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
@@ -1386,6 +1405,7 @@ function poblarAlmacenes(sid) {
 // Al elegir sucursal en el modal de producto, cargar los almacenes de esa sucursal
 $('#prod-sucursal').addEventListener('change', () => {
     poblarAlmacenes(+$('#prod-sucursal').value || 0);
+    actualizarControlProductoPedido($('#prod-sucursal').value, false);
 });
 
 // ---------------- Movimientos ----------------

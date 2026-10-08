@@ -4,7 +4,6 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
-from .lotes import destinos_validos
 from .util import ok, err, login_requerido, rol_requerido, registrar_auditoria, registrar_movimiento, stock_actual, ok_paginado, paginar_params, sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion, es_encargado_almacen
 
 sucursales_bp = Blueprint("sucursales", __name__)
@@ -47,10 +46,8 @@ def sucursales():
         except pymysql.err.IntegrityError:
             conn.close()
             return err("Ya existe una sucursal con ese nombre")
-    # `provee` derivado con LA MISMA regla de `destinos_validos` (principal |
-    # provee | tiene productos «para proveer»): así los selectores del front que
-    # arman "Todo a X" y proveen por "provee" ofrecen exactamente lo que el
-    # backend después va a aceptar al validar el destino de un pedido.
+    # `provee` es una configuración explícita de la sucursal, separada de la
+    # opción por producto que determina qué artículos ofrece ese almacén.
     try:
         rows = conn.execute("""
             SELECT s.*, p.nombre AS padre_nombre,

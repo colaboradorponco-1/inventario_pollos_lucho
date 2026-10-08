@@ -42,7 +42,14 @@ def _pide_tacho(data):
 
 
 def _para_proveer(data):
-    return 1
+    valor = data.get("para_proveer")
+    return 1 if str(valor).lower() in ("1", "true", "on", "yes") else 0
+
+
+def _sucursal_puede_proveer(conn, sucursal_id):
+    sucursal = conn.execute(
+        "SELECT principal, provee FROM sucursales WHERE id = ?", (sucursal_id,)).fetchone()
+    return bool(sucursal and (sucursal.get("principal") or sucursal.get("provee")))
 
 
 def _stock_sucursal_permitido(conn, ver_todo, sid):
@@ -128,6 +135,10 @@ def productos():
             conn.close()
             return err("Debes asignar una sucursal al producto", 400)
         sid = int(sid)
+        para_proveer = _para_proveer(data)
+        if para_proveer and not _sucursal_puede_proveer(conn, sid):
+            conn.close()
+            return err("Solo los almacenes proveedores pueden ofrecer productos en pedidos", 400)
         if data.get("almacen_id"):
             # Cada sucursal es un almacén independiente: el almacén debe ser de
             # la sucursal elegida, sin ascender a ninguna tienda madre.
@@ -149,7 +160,7 @@ def productos():
               data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
               data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
               data.get("almacen_id"), proveedor_id, sid, _tacho_unidad(data), _pide_tacho(data),
-              _para_proveer(data)))
+              para_proveer))
         conn.commit()
         new_id = cur.lastrowid
         stock_inicial = data.get("stock_inicial", 0) or 0
@@ -289,13 +300,14 @@ def productos():
             ph = ",".join(["?"] * len(ids_suc))
             q += " AND p.sucursal_id IN (" + ph + ")"
             params.extend(ids_suc)
-    # El formulario de pedidos SOLO ofrece lo marcado «para proveer» (más lo
-    # global y lo del almacén principal, de donde cualquier sucursal puede
-    # pedir). Lo de «solo inventario» se ve en el inventario general pero no se
-    # puede pedir.
+    # El pedido solo ofrece productos que su almacén proveedor habilitó
+    # explícitamente. Los productos sin sucursal asignada siguen en inventario,
+    # pero no se pueden ofrecer porque no tienen un origen de despacho claro.
     if para_pedido:
-        q += (" AND (p.para_proveer = 1 OR p.sucursal_id IS NULL OR EXISTS "
-              "(SELECT 1 FROM sucursales s2 WHERE s2.id = p.sucursal_id AND s2.principal = 1))")
+        q += (" AND IFNULL(p.para_proveer, 1) = 1 "
+              "AND p.sucursal_id IS NOT NULL "
+              "AND EXISTS (SELECT 1 FROM sucursales sp "
+              "WHERE sp.id = p.sucursal_id AND (sp.principal = 1 OR sp.provee = 1))")
         # «La versión para proveer del AS manda»: si el artículo ya tiene una
         # fila con casilla «para proveer» en un almacén de sucursal (AS) de la
         # misma ciudad, SOLO esa fila se ofrece en los pedidos. La misma
@@ -306,14 +318,15 @@ def productos():
         ciudad_ok = "1=1" if permitidos is None else (
             "p2.sucursal_id IN (" + ",".join(str(i) for i in permitidos) + ")")
         q += (" AND ("
-              "    (p.para_proveer = 1 AND EXISTS ("
+              "    (IFNULL(p.para_proveer, 1) = 1 AND EXISTS ("
               "        SELECT 1 FROM sucursales as_ "
               "        WHERE as_.id = p.sucursal_id AND as_.es_as = 1))"
               "    OR NOT EXISTS ("
               "        SELECT 1 FROM productos p2"
               "        JOIN sucursales as_ ON as_.id = p2.sucursal_id"
               "        WHERE p2.activo = 1 AND IFNULL(p2.para_proveer, 1) = 1"
-              "          AND as_.es_as = 1 AND p2.id <> p.id AND " + ciudad_ok + " AND ("
+              "          AND as_.es_as = 1 AND as_.provee = 1 "
+              "          AND p2.id <> p.id AND " + ciudad_ok + " AND ("
               "            (IFNULL(p2.codigo, '') <> '' "
               "             AND IFNULL(p2.codigo, '') = IFNULL(p.codigo, '')"
               "            ) OR ("
@@ -588,6 +601,9 @@ def producto(prod_id):
     sid_p = int(sid_p)
     para_final = (_para_proveer(data) if data.get("para_proveer") is not None
                   else int(fila.get("para_proveer") or 1))
+    if para_final and not _sucursal_puede_proveer(conn, sid_p):
+        conn.close()
+        return err("Solo los almacenes proveedores pueden ofrecer productos en pedidos", 400)
     if data.get("almacen_id"):
         # Cada sucursal es un almacén independiente: el almacén debe ser de la
         # sucursal del producto, sin ascender a ninguna tienda madre.
@@ -822,8 +838,8 @@ def importar_productos():
                 cur = conn.execute("""
                     INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo,
                                            costo_promedio, precio_venta, vencimiento, proveedor_id,
-                                           sucursal_id, activo)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 1)
+                                           sucursal_id, para_proveer, activo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, 1)
                 """, (codigo, nombre, marca, cat_id, unidad, stock_min, costo, precio, prov_id, sid_imp))
                 prod_id = cur.lastrowid
                 stock_cant = parse_num(rd.get(h_stock)) if h_stock else 0.0

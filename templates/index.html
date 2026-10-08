@@ -1099,6 +1099,14 @@
                     <label id="prod-sucursal-label" style="display:none">Sucursal <select id="prod-sucursal"></select></label>
                 </div>
                 <label>Proveedor <select id="prod-proveedor"></select></label>
+                <label class="chk" id="prod-para-proveer-wrap" style="display:none"
+                       title="Si está habilitado, las sucursales autorizadas podrán incluir este producto en sus pedidos.">
+                    <input type="checkbox" id="prod-para-proveer">
+                    Ofrecer este producto en pedidos
+                </label>
+                <small class="scan-hint" id="prod-para-proveer-hint" style="display:none">
+                    Las sucursales AS solo ofrecen productos a tiendas de su ciudad; los Almacenes Principales pueden abastecer a todas. Desactivarlo no cambia el inventario.
+                </small>
 
                 <label id="campo-stock-inicial">Stock inicial (compra, sumará stock) <input type="number" id="prod-stock-inicial" step="any" min="0"></label>
                 <label id="campo-stock-actual" style="display:none">Stock actual <input type="number" id="prod-stock-actual" step="any" min="0"></label>

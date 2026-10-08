@@ -433,9 +433,9 @@ def catalogos():
         proveedores = [dict(r) for r in conn.execute(
             "SELECT * FROM proveedores WHERE sucursal_id = %s OR sucursal_id IS NULL ORDER BY nombre", (sid,)).fetchall()]
     # `provee` tiene que ser LA MISMA regla que usa el backend al validar el
-    # destino de un pedido: la arma `destinos_validos` (principal | provee |
-    # tiene productos «para proveer»). El catálogo la aplica igual para que la
-    # pantalla nunca ofrezca un proveedor que el servidor luego rechace.
+    # destino de un pedido: Almacén Principal o sucursal marcada explícitamente
+    # como proveedora. El catálogo la aplica igual para que la pantalla nunca
+    # ofrezca un proveedor que el servidor luego rechace.
     _validos = set(destinos_validos(conn))
     data = {
         "almacenes": almacenes,

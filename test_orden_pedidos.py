@@ -116,13 +116,12 @@ def prueba_catalogo_provee_coincide_con_backend():
     suc = _leer(os.path.join("core", "sucursales.py"))
     _check("el catalogo ya NO usa el proxy de 'tiene productos activos'",
            "ids_proveedoras" not in dash)
-    # El catalogo y /api/sucursales NO pisan la columna: derivan `provee` con la
-    # MISMA regla de `destinos_validos` (principal | provee | tiene productos
-    # «para proveer»). Una sola fuente para el pedido y la pantalla.
+    # El catálogo usa la regla de destino del backend; /api/sucursales expone
+    # la configuración explícita que permite administrar la misma regla.
     _check("el catalogo deriva provee con la misma regla de destinos_validos",
            "destinos_validos(conn)" in dash and 'provee=r["id"] in _validos' in dash)
-    _check("el listado /api/sucursales tambien deriva provee igual",
-           "destinos_validos(conn)" in suc and 'provee=r["id"] in _validos' in suc)
+    _check("el listado /api/sucursales expone la configuración provee guardada",
+           "return ok([dict(r, provee=bool(r.get(\"provee\", 0))) for r in rows])" in suc)
     # La lista de destinos válidos la arma core/lotes.py (destinos_validos) para
     # que la usen el pedido y el catálogo por igual.
     m = re.search(r"destinos_validos\(conn\)", py)
@@ -429,14 +428,14 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
     _check("el aviso dice DONDE hay, para que la persona decida",
            "está en" in py)
 
-    # Auto-provee: una sucursal que tiene productos «para proveer» se activa
-    # sola como destino aunque nadie haya marcado la casilla. Es la regla que
-    # hace aparecer a America en los pedidos con solo tener su llajua marcada.
-    _check("destinos_validos se activa sola con productos para proveer",
-           "EXISTS (SELECT 1 FROM productos p" in lotes
-           and "IFNULL(p.para_proveer, 1) = 1" in lotes)
-    _check("stock_por_destino aplica la misma regla de auto-provee",
-           lotes.count("IFNULL(p.para_proveer, 1) = 1") >= 2)
+    # La sucursal se habilita como proveedor explícitamente; la opción del
+    # producto solo decide si ese artículo se ofrece.
+    _check("destinos_validos usa solo principales y sucursales proveedoras",
+           "WHERE principal = 1 OR IFNULL(provee, 0) = 1" in lotes
+           and "EXISTS (SELECT 1 FROM productos p" not in lotes)
+    _check("stock_por_destino usa la misma autorización explícita",
+           "s.principal = 1 OR IFNULL(s.provee, 0) = 1" in lotes
+           and "EXISTS (SELECT 1 FROM productos p" not in lotes)
 
     # Auto-pedido: una sucursal puede pedirse a si misma (su propio almacén
     # principal, p. ej. America pide su llajua). Ni el backend ni el front la
@@ -489,6 +488,38 @@ def prueba_sin_stock_no_bloquea():
            "sinStockProveedor(it.p)" in js and "d.sin_stock" in js)
 
 
+def prueba_control_oferta_productos():
+    prod = _leer(os.path.join("core", "productos.py"))
+    js = _leer(os.path.join("static", "app.js"))
+    tpl = _leer(os.path.join("templates", "index.html"))
+    ns = {}
+    exec(_py_def(prod, "_para_proveer"), ns)
+    _check("la opción de ofrecer producto respeta Sí/No",
+           ns["_para_proveer"]({"para_proveer": True}) == 1
+           and ns["_para_proveer"]({"para_proveer": False}) == 0
+           and ns["_para_proveer"]({}) == 0)
+    _check("solo una sucursal principal o marcada como proveedora ofrece un producto",
+           "_sucursal_puede_proveer" in prod
+           and "SELECT principal, provee FROM sucursales" in prod
+           and "if para_proveer and not _sucursal_puede_proveer(conn, sid)" in prod)
+    _check("el catálogo de pedidos exige producto habilitado y sucursal proveedora",
+           "IFNULL(p.para_proveer, 1) = 1" in prod
+           and "p.sucursal_id IS NOT NULL" in prod
+           and "sp.principal = 1 OR sp.provee = 1" in prod)
+    _check("el formulario guarda la opción al crear y editar productos",
+           'id="prod-para-proveer"' in tpl
+           and "para_proveer: $('#prod-para-proveer').checked" in js
+           and "actualizarControlProductoPedido" in js
+           and "function sucursalPermiteOfrecerProductos" in js
+           and "async function sucursalPermiteOfrecerProductos" not in js)
+    _check("desactivar la opción conserva el producto en inventario",
+           "Desactivarlo no cambia el inventario" in tpl
+           and "UPDATE productos SET codigo" in prod)
+    _check("los productos importados no se ofrecen por defecto",
+           "sucursal_id, para_proveer, activo)" in prod
+           and "NULL, ?, ?, 0, 1)" in prod)
+
+
 
 def main():
     print("=" * 72)
@@ -501,6 +532,7 @@ def main():
     prueba_el_destino_no_se_elige_por_stock()
     prueba_el_destino_no_se_elige_por_stock_en_el_codigo()
     prueba_sin_stock_no_bloquea()
+    prueba_control_oferta_productos()
     prueba_error_de_destino_no_tumba_el_pedido()
     prueba_front_ordena_por_categoria()
     prueba_front_manda_en_el_orden_visible()

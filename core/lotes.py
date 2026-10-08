@@ -65,19 +65,16 @@ def _ids_proveedores_misma_ciudad(conn, desde):
 def destinos_validos(conn, desde=None):
     """[sucursal_id, ...] con las que un pedido puede salir, por prioridad.
 
-    Solo las que de verdad pueden atender: el almacén principal, las sucursales
-    marcadas como proveedora, y las que tienen productos activos marcados
-    «para proveer» (aunque nadie haya tocado la casilla: la opción se activa
-    sola con la sola existencia de esos productos). El principal va primero.
+    Solo los Almacenes Principales y las sucursales marcadas explícitamente
+    como proveedoras. La casilla de un producto controla qué artículos ofrece
+    cada proveedor; no convierte por sí sola una sucursal en proveedora.
+    El principal va primero.
 
     Con `desde` (la sucursal que pide) se restrringe además por ciudad.
     """
     filas = conn.execute(
         "SELECT id FROM sucursales "
         "WHERE principal = 1 OR IFNULL(provee, 0) = 1 "
-        "   OR EXISTS (SELECT 1 FROM productos p "
-        "              WHERE p.sucursal_id = sucursales.id AND p.activo = 1 "
-        "                AND IFNULL(p.para_proveer, 1) = 1) "
         "ORDER BY principal DESC, nombre, id").fetchall()
     ids = [int(f["id"]) for f in filas]
     permitidos = _ids_proveedores_misma_ciudad(conn, desde)
@@ -101,10 +98,7 @@ def stock_por_destino(conn, desde=None):
         FROM lotes l
         JOIN sucursales s ON s.id = l.sucursal_id
         WHERE l.cantidad > 0 AND l.sucursal_id IS NOT NULL
-          AND (s.principal = 1 OR IFNULL(s.provee, 0) = 1
-               OR EXISTS (SELECT 1 FROM productos p
-                          WHERE p.sucursal_id = s.id AND p.activo = 1
-                            AND IFNULL(p.para_proveer, 1) = 1))
+          AND (s.principal = 1 OR IFNULL(s.provee, 0) = 1)
         GROUP BY l.producto_id, l.sucursal_id, s.nombre
         ORDER BY s.principal DESC, s.nombre, l.sucursal_id
     """).fetchall()
