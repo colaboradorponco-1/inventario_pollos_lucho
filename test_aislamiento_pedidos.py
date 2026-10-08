@@ -81,14 +81,16 @@ def sql_de_listado(rol, sucursal_id):
 
 # (etiqueta, rol, sucursal_id, nombre, filtro_obligatorio)
 # El filtro importa, no es que "lleve alguno": `destino_id` es el PROVEEDOR y
-# `sucursal_id` es quien PIDIO. Un preparador debe ver lo que pidio su sucursal.
+# `sucursal_id` es quien PIDIO. Un admin de sucursal solo ve lo relacionado con
+# su sucursal; únicamente superadmin conserva alcance global.
 CASOS = [
     ("preparador America", "preparador", 35, "America", "p.sucursal_id = ?"),
     ("repartidor Simon", "repartidor", 33, "Simon Lopez", "p.sucursal_id = ?"),
     ("encargado filial", "encargado", 42, "La Paz", "p.sucursal_id = ?"),
     ("encargado AP1", "encargado", 30, "Almacen Principal 1", "p.sucursal_id = ?"),
     ("encargado AP2", "encargado", 36, "Almacen Principal 2", "p.sucursal_id = ?"),
-    ("admin", "admin", 30, "Almacen Principal 1", None),
+    ("admin de sucursal", "admin", 30, "Almacen Principal 1", "p.sucursal_id = ?"),
+    ("admin sin sucursal", "admin", None, "sin asignar", "AND 1 = 0"),
     ("superadmin", "superadmin", None, "todas", None),
 ]
 
@@ -105,7 +107,10 @@ for etiqueta, rol, sid, nombre, filtro_esperado in CASOS:
 
     if filtro_esperado is None:
         ok = not lleva
-        detalle = "sin filtro (ve todos, por diseño)"
+        detalle = "sin filtro (solo superadmin ve todos)"
+    elif filtro_esperado == "AND 1 = 0":
+        ok = filtro_esperado in sql and not lleva
+        detalle = "sin sucursal, no debe ver pedidos"
     else:
         ok = (filtro_esperado in sql)
         detalle = f"filtro por {filtro_esperado}"
@@ -130,9 +135,11 @@ for etiqueta, rol, sid, nombre, filtro_esperado in CASOS:
     if conteo_ok:
         sql_conteo, params_conteo = conteos[0]
         conteo_ok = sql_conteo.count("?") == len(params_conteo)
-        if rol in ("encargado", "preparador", "repartidor") and sid:
+        if rol in ("encargado", "preparador", "repartidor", "admin") and sid:
             conteo_ok = conteo_ok and "p.sucursal_id = ?" in sql_conteo \
                 and "d4.destino_id = ?" in sql_conteo
+        if rol == "admin" and sid is None:
+            conteo_ok = conteo_ok and "AND 1 = 0" in sql_conteo
     if not conteo_ok:
         fallos += 1
         print("FALLA  conteo de pedidos            filtros y parámetros alineados")

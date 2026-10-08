@@ -4711,8 +4711,6 @@ async function cargarBandeja() {
                   'Los ya entregados o rechazados están en el historial.</p>';
             return;
         }
-        const puedeDespachar = esGestionPed() || esAlmacenPpal();
-        const miSuc = String(window.SUCURSAL_ID || '');
         const catSuc = (catalogos && catalogos.sucursales) || [];
         $('#bandeja-contenido').innerHTML = grupos.map((g) => {
             const suGrupo = catSuc.find((s) => String(s.id) === String(g.sucursal_id));
@@ -4721,60 +4719,7 @@ async function cargarBandeja() {
             <div class="bandeja-sucursal">
                 <h3>${esc(nomGrupo)} <span class="ciudad-tag">${ciudadSucursal(g.nombre)}</span> <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
                 ${g.pedidos.map((p) => {
-                    // `destino_id` de una linea es el PROVEEDOR que despacha, no
-                    // quien recibe. `esProveedorMio` dice si ESTA sucursal es la
-                    // que tiene que despachar este pedido.
-                    const esProveedorMio = p.items.some((it) => String(it.destino_id || '') === miSuc)
-                        || (p.destino_id != null && String(p.destino_id) === miSuc);
-                    let editControl = '';
-                    const r = window.ROL || '';
                     const etapa = p.etapa || p.estado || 'pendiente';
-                    if (r === 'preparador' || r === 'repartidor') {
-                        // El rol logistico solo avanza pedidos que DESPACHA su
-                        // sucursal. Los que su sucursal le hizo a un almacen los
-                        // puede ver (para saber que espera) pero no tocar: la
-                        // mercaderia la prepara y despacha el almacen.
-                        if (!esProveedorMio) {
-                            editControl = '<span class="respaldo-txt">Lo despacha otra sucursal</span>';
-                        } else if (r === 'preparador') {
-                            editControl = etapa === 'pendiente'
-                                ? `<button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_camino')">En camino</button>`
-                                : `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
-                        } else if (etapa === 'en_camino') {
-                            editControl = `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="avanzarEtapa(${p.id}, 'entregado')">Entregado</button>`;
-                        } else {
-                            editControl = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
-                        }
-                    } else if (esGestionPed()) {
-                        // Gestión (admin/superadmin) conserva el control de `estado`,
-                        // que es el eje que usan los reportes y filtros.
-                        editControl = esProveedorMio
-                            ? `<select class="bandeja-estado" onchange="cambiarEstadoPedido(${p.id}, this.value)">
-                                <option value="pendiente" ${p.estado === 'pendiente' ? 'selected' : ''}>Pendiente</option>
-                                <option value="en_camino" ${p.estado === 'en_camino' ? 'selected' : ''}>En camino</option>
-                                <option value="entregado" ${p.estado === 'entregado' ? 'selected' : ''}>Entregado</option>
-                                ${p.estado === 'pendiente' ? `<option value="rechazado">Rechazado</option>` : ''}
-                              </select>`
-                            : '';
-                    } else {
-                        // El encargado tiene UN solo camino: etapa y estado van
-                        // juntos (pendiente -> en camino -> entregado, rechazo
-                        // solo desde pendiente). Antes había dos controles que
-                        // se pisaban entre si y movían stock dos veces.
-                        if (!esProveedorMio) {
-                            editControl = '';
-                        } else if (puedeDespachar) {
-                            editControl = `<button class="btn btn-sm" onclick="despacharPedido(${p.id})">Entregar</button>`;
-                        } else if (etapa === 'pendiente') {
-                            editControl = `
-                                <button class="btn btn-sm btn-primary" onclick="avanzarEtapa(${p.id}, 'en_camino')">En camino</button>
-                                <button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`;
-                        } else if (etapa === 'en_camino') {
-                            editControl = `<button class="btn btn-sm" style="background:#0F3D2E;color:#fff" onclick="avanzarEtapa(${p.id}, 'entregado')">Entregado</button>`;
-                        } else {
-                            editControl = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
-                        }
-                    }
                     // Un solo tag: etapa y estado ahora comparten el flujo, así
                     // que no hay dos etiquetas que parezcan contradictorias.
                     const chipEstado = `<span class="${({ pendiente: 'badge-pendiente', en_camino: 'badge-despachado', entregado: 'badge-cumplido', rechazado: 'badge-rechazado' })[etapa] || 'badge-pendiente'}">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
@@ -4787,9 +4732,8 @@ async function cargarBandeja() {
                             ${chipEstado}
                             ${p.nota ? '<span class="respaldo-txt">' + esc(p.nota) + '</span>' : ''}
                             <span class="flex-grow"></span>
-                            ${editControl}
                             <button class="btn btn-sm" onclick="window.open('/pedidos/ticket/${p.id}', '_blank')">Imprimir</button>
-                            <button class="btn btn-icon" onclick="verPedido(${p.id}, true)" title="Ver detalle" aria-label="Ver detalle">${eyeSvg}</button>
+                            <button class="btn btn-icon" onclick="verPedido(${p.id}, true)" title="Ver detalle y gestionar estado" aria-label="Ver detalle y gestionar estado">${eyeSvg}</button>
                         </div>
                         <table class="data-table compact">
                             <tbody>${p.items.map((it) => `
@@ -4810,35 +4754,6 @@ async function cargarBandeja() {
         if (cont) cont.innerHTML = '<p class="empty">' + esc(e.message) + '</p>';
     }
 }
-
-window.despacharPedido = async (id) => {
-    if (!confirm('¿Marcar este pedido como entregado? Se registrará la salida del almacén y la entrada a la sucursal.')) return;
-    try {
-        const res = await request(API + '/pedidos/' + id + '/despachar', { method: 'POST' });
-        toast(res.message, 'ok');
-        closeModal('modal-pedido');
-        cargarPestanaActiva();
-        syncPedidosNuevos();
-        loadDashboard();
-    } catch (e) {
-        toast(e.message, 'err');
-    }
-};
-
-window.cambiarEstadoPedido = async (id, nuevo) => {
-    if (!nuevo) return;
-    try {
-        const res = await request(API + '/pedidos/' + id + '/estado', {
-            method: 'PUT',
-            body: JSON.stringify({ estado: nuevo }),
-        });
-        toast(res.message, 'ok');
-        cargarPestanaActiva();
-        syncPedidosNuevos();
-    } catch (e) {
-        toast(e.message, 'err');
-    }
-};
 
 async function listarPedidos() {
     const qs = new URLSearchParams();
@@ -4944,19 +4859,27 @@ on('#pedido-sucursal-realizados', 'change', () => { pagState['#pedidos-paginacio
 // Botones de etapa dentro del modal del pedido. Es el mismo camino que usa la
 // bandeja, para que al encargado no le quede una vista donde no puede hacer
 // nada despues de sacarle el select de `estado`.
-function pintarEtapaEnModal(p, esDestinoMio) {
+function pintarEtapaEnModal(p, puedeGestionar) {
     const box = $('#det-pedido-etapa-ctrl');
     if (!box) return;
-    if (!esDestinoMio) { box.innerHTML = ''; return; }
+    if (!puedeGestionar) { box.innerHTML = ''; return; }
     const etapa = p.etapa || p.estado || 'pendiente';
+    const rol = window.ROL || '';
     const b = (txt, sig, dark) =>
         `<button class="btn btn-sm" style="${dark ? 'background:#0F3D2E;color:#fff' : ''}" onclick="avanzarEtapa(${p.id}, '${sig}')">${txt}</button>`;
-    box.innerHTML =
-        etapa === 'pendiente'
-            ? b('En camino', 'en_camino', true) +
-              `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`
-        : etapa === 'en_camino' ? b('Entregado', 'entregado', true)
-        : `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
+    if (etapa === 'pendiente') {
+        box.innerHTML = rol === 'repartidor'
+            ? '<span class="respaldo-txt">El preparador debe marcar «En camino» primero.</span>'
+            : b('En camino', 'en_camino', true) +
+              (rol === 'preparador' ? '' :
+                  `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`);
+    } else if (etapa === 'en_camino') {
+        box.innerHTML = rol === 'preparador'
+            ? '<span class="respaldo-txt">El repartidor debe confirmar la entrega.</span>'
+            : b('Entregado', 'entregado', true);
+    } else {
+        box.innerHTML = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
+    }
 }
 
 window.verPedido = async (id, accionables = true) => {
@@ -5003,25 +4926,14 @@ window.verPedido = async (id, accionables = true) => {
                 <td>${esc(sucMap[d.destino_id] || '—')}</td></tr>`).join('');
         openModal('modal-pedido');
         window._pedidoActual = { id, estado: p.estado };
-        const despacharBtn = $('#btn-pedido-despachar');
-        const cambia = $('#pedido-cambiar-estado');
-        const esAdmin = window.ROL === 'superadmin' || window.ROL === 'admin';
-        const esAlmacenPrincipal = window.ROL === 'encargado' && window.SUCURSAL_PRINCIPAL;
-        // Admins y sus encargados solo pueden cambiar estado/despachar pedidos que
-        // llegan a SU almacén (destino = su sucursal); los de otras sucursales solo lectura.
-        const esDestinoMio = destIds.includes(window.SUCURSAL_ID);
+        const esDestinoMio = destIds.some((sid) => String(sid) === String(window.SUCURSAL_ID));
+        const puedeGestionarEtapa = window.ROL === 'repartidor'
+            ? String(p.sucursal_id) === String(window.SUCURSAL_ID)
+            : esDestinoMio;
         if (accionables) {
-            if (despacharBtn) despacharBtn.style.display = (esAdmin || esAlmacenPrincipal) && esDestinoMio && (p.estado === 'pendiente' || p.estado === 'en_camino') ? 'inline-flex' : 'none';
-            // El `estado` (Pendiente/En camino/Entregado/Rechazado) es el eje
-            // de los reportes: queda en manos de gestion. El encargado avanza
-            // la etapa, que es el unico camino que mueve stock, asi que antes
-            // de sacarle este select se le da su equivalente aca en el modal.
-            if (cambia) { cambia.value = ''; cambia.style.display = esAdmin && esDestinoMio ? 'inline-flex' : 'none'; }
-            pintarEtapaEnModal(p, esDestinoMio);
+            pintarEtapaEnModal(p, puedeGestionarEtapa);
         } else {
-            if (despacharBtn) despacharBtn.style.display = 'none';
-            if (cambia) cambia.style.display = 'none';
-            pintarEtapaEnModal(p, esDestinoMio);
+            pintarEtapaEnModal(p, false);
         }
     } catch (e) {
         toast(e.message, 'err');
@@ -5031,29 +4943,6 @@ window.verPedido = async (id, accionables = true) => {
 $('#btn-pedido-ticket').addEventListener('click', () => {
     if (!window._pedidoActual) return;
     window.open('/pedidos/ticket/' + window._pedidoActual.id, '_blank');
-});
-
-$('#btn-pedido-despachar').addEventListener('click', () => {
-    if (window._pedidoActual) despacharPedido(window._pedidoActual.id);
-});
-
-$('#pedido-cambiar-estado').addEventListener('change', async () => {
-    if (!window._pedidoActual) return;
-    const nuevo = $('#pedido-cambiar-estado').value;
-    if (!nuevo || nuevo === window._pedidoActual.estado) return;
-    try {
-        const res = await request(API + '/pedidos/' + window._pedidoActual.id + '/estado', {
-            method: 'PUT',
-            body: JSON.stringify({ estado: nuevo }),
-        });
-        toast(res.message, 'ok');
-        closeModal('modal-pedido');
-        cargarPestanaActiva();
-        syncPedidosNuevos();
-    } catch (e) {
-        toast(e.message, 'err');
-        $('#pedido-cambiar-estado').value = '';
-    }
 });
 
 // ---------------- Aviso de tickets nuevos ----------------

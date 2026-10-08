@@ -109,15 +109,12 @@ def _texto_tacho(fraccion):
 
 
 def _puede_ver_pedido(conn, pedido, detalle):
-    """Visibilidad para encargados filiales: solo lo que piden o lo que proveen."""
+    """Limita los pedidos a la sucursal propia, salvo para superadmin."""
     sid = sucursal_actual()
-    if sid is None or es_superadmin():
+    if es_superadmin():
         return True
-    if session.get("rol") != "encargado":
-        return True
-    f = conn.execute("SELECT principal FROM sucursales WHERE id = ?", (sid,)).fetchone()
-    if f and f["principal"]:
-        return True
+    if sid is None:
+        return False
     if pedido["sucursal_id"] == sid or pedido.get("destino_id") == sid:
         return True
     return any((d.get("destino_id") or pedido.get("destino_id")) == sid for d in detalle)
@@ -347,32 +344,15 @@ def pedidos():
     """
     params = []
     sid = sucursal_actual()
-    if not es_superadmin() and sid:
-        if es_logistica():
-            # El rol logistico VE dos cosas: los pedidos que su sucursal le hizo
-            # a un almacen (para saber que esta esperando) y los pedidos que
-            # OTRAS sucursales le hicieron a ella, que son los que realmente
-            # puede preparar y despachar.
-            #
-            # OJO, `destino_id` NO es quien recibe: es el PROVEEDOR que despacha
-            # la linea (ver _despachar_stock, que hace `origen_id =
-            # d["destino_id"]`). `p.sucursal_id` es quien pidio.
+    if not es_superadmin():
+        if sid:
+            # `sucursal_id` es quien solicita y `destino_id` quien provee.
             q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
-                  "EXISTS (SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
+                  "EXISTS (SELECT 1 FROM pedido_detalle d4 "
+                  "WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
             params += [sid, sid, sid]
-        elif session.get("rol") == "encargado":
-            # Encargado (de filial O de almacen principal): ve lo que PIDE su
-            # sucursal y lo que le PIDEN a ella como proveedor.
-            #
-            # Antes el almacen principal se quedaba SIN filtro y veia todos los
-            # pedidos del negocio, incluidos los que otras sucursales le hacen
-            # entre si. No corresponde: los almacenes principales no piden, solo
-            # despachan, asi que su bandeja es la cola de pedidos que les
-            # llegan y cambian de estado.
-            q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
-                  "EXISTS (SELECT 1 FROM pedido_detalle d4 WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
-            params += [sid, sid, sid]
-        # Los admin de sucursal y los superadmin ven todos los pedidos
+        else:
+            q += " AND 1 = 0"
     # `estado` admite "pendiente,en_camino" (coma separada) para filtrar varios
     # estados a la vez, como usa el badge de pendientes del menú.
     estados = [e for e in estado.split(",") if e in _ESTADOS]
@@ -408,10 +388,13 @@ def pedidos():
         LEFT JOIN sucursales d ON d.id = p.destino_id
         WHERE 1=1
     """
-    if not es_superadmin() and sid and (es_logistica() or session.get("rol") == "encargado"):
-        count_q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
-                    "EXISTS (SELECT 1 FROM pedido_detalle d4 "
-                    "WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
+    if not es_superadmin():
+        if sid:
+            count_q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
+                        "EXISTS (SELECT 1 FROM pedido_detalle d4 "
+                        "WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
+        else:
+            count_q += " AND 1 = 0"
     count_params = list(params)
     # Aplicar los mismos filtros WHERE que la consulta principal
     if estados:
@@ -566,21 +549,12 @@ def pedido_estado(pedido_id):
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
-    sid = sucursal_actual()
     sid_op = sucursal_operativa()
-    puede = True  # Permisivo ante cambios post-migración para que no bloquee operador
-    try:
-        if not (es_gestion() or es_encargado_almacen(conn)):
-            if session.get("rol") == "encargado" and sid:
-                det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
-                                   (pedido_id,)).fetchall()
-                es_proveedor = any(((d.get("destino_id") if isinstance(d, dict) else d[0]) or pedido["destino_id"]) == sid for d in det) if det else True
-                puede = es_proveedor or (pedido["sucursal_id"] == sid)
-    except Exception:
-        puede = True
-    if not puede:
+    detalle = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
+                           (pedido_id,)).fetchall()
+    if not _puede_ver_pedido(conn, pedido, detalle):
         conn.close()
-        return err("No tienes permisos para esta acción", 403)
+        return err("No tienes permisos para ver este pedido", 403)
     data = request.get_json() or {}
     estado = data.get("estado", "")
     actual = pedido["estado"]
@@ -595,6 +569,14 @@ def pedido_estado(pedido_id):
     # La logística (preparador/repartidor) mueve la ETAPA, no el `estado`:
     # ver PUT /api/pedidos/<id>/etapa. Aquí el cambio de estado sigue siendo
     # exclusivo de quien coordina el inventario, como siempre.
+    if not es_gestion():
+        conn.close()
+        return err("Solo administración puede cambiar el estado directamente", 403)
+    es_destino = any((d.get("destino_id") or pedido.get("destino_id")) == sid_op
+                     for d in detalle)
+    if not es_superadmin() and not es_destino:
+        conn.close()
+        return err("Solo puedes cambiar el estado de pedidos que despacha tu sucursal", 403)
 
     # El stock se mueve SOLO al marcar 'entregado' (baja del almacén que
     # despacha y suma a la sucursal que lo pidió). 'en_camino' y 'rechazado'
@@ -606,7 +588,8 @@ def pedido_estado(pedido_id):
         det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
                            (pedido_id,)).fetchall()
         es_destino = any((d["destino_id"] or pedido["destino_id"]) == sid_op for d in det)
-        if not (es_gestion() or es_encargado_almacen(conn)) or not es_destino:
+        if not (es_gestion() or es_encargado_almacen(conn)) \
+                or (not es_superadmin() and not es_destino):
             conn.close()
             return err("Para entregar la mercadería tienes que usar «Entregar». "
                        "Marcar el estado no descuenta el inventario.")
@@ -753,6 +736,11 @@ def pedido_despachar(pedido_id):
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
+    detalle = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
+                           (pedido_id,)).fetchall()
+    if not _puede_ver_pedido(conn, pedido, detalle):
+        conn.close()
+        return err("No tienes permisos para despachar este pedido", 403)
     if pedido["estado"] not in ("pendiente", "en_camino"):
         conn.close()
         return err(f"Este pedido no se puede despachar (estado actual: {pedido['estado']})", 400)
@@ -760,10 +748,10 @@ def pedido_despachar(pedido_id):
         conn.close()
         return err("No tienes permisos para despachar pedidos", 403)
     # Admins/almacén despachan SOLO pedidos destinados a su propia sucursal.
+    # Superadmin conserva acceso global.
     sid_op = sucursal_operativa()
-    det_prov = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
-                            (pedido_id,)).fetchall()
-    if not any((d["destino_id"] or pedido["destino_id"]) == sid_op for d in det_prov):
+    if not es_superadmin() and not any(
+            (d["destino_id"] or pedido["destino_id"]) == sid_op for d in detalle):
         conn.close()
         return err("Solo puedes despachar pedidos destinados a tu almacén", 403)
     if pedido["estado"] not in ("pendiente", "en_camino"):
@@ -807,7 +795,8 @@ def pedidos_bandeja():
     esperando, pero NO puede avanzarlos, porque la mercaderia la prepara y
     despacha el almacen. Eso lo aplica pedido_etapa, no el listado.
 
-    Un admin/superadmin sin sucursal asignada consolida todos los pendientes."""
+    El superadmin sin sucursal asignada consolida todos los pendientes. Un admin
+    de sucursal sin asignación no recibe pedidos."""
     conn = get_conn()
     sid = sucursal_actual()
     where = "WHERE 1=1"
@@ -822,10 +811,6 @@ def pedidos_bandeja():
     # pedidos"), no despacha. Antes bastaba con ser proveedor (provee=1) y el
     # encargado de América y el receptor AS America veían el MISMO panel; ahora
     # la recepción es solo del usuario receptor.
-    if sid and not es_logistica() and not es_gestion() and not (
-            es_encargado_almacen(conn)):
-        # Permitir encargado normal también si su sucursal despacha o recibe
-        pass
     if sid:
         # La cola de trabajo son los pedidos que tu sucursal DESPACHA (las lineas
         # que le piden a ella).
@@ -844,7 +829,7 @@ def pedidos_bandeja():
             where += (" AND EXISTS (SELECT 1 FROM pedido_detalle dd "
                       "WHERE dd.pedido_id = p.id AND dd.destino_id = ?)")
             params.append(sid)
-    elif not es_gestion():
+    elif not es_superadmin():
         conn.close()
         return ok([])
     # La bandeja es una COLA DE TRABAJO, no un parte diario: por defecto muestra
@@ -977,10 +962,7 @@ _ETIQUETA_ETAPA = {
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/etapa", methods=["PUT"])
 @login_requerido
 def pedido_etapa(pedido_id):
-    """Avanza la etapa logistica del pedido. Es lo unico que puede cambiar un
-    preparador o un repartidor, y también el almacén receptor (los usuarios "AS
-    ..." con rol receptor, que reciben los pedidos y los marcan En camino /
-    Entregado); el `estado` lo sigue manejando quien coordina."""
+    """Avanza la etapa logística del pedido desde quien prepara o recibe."""
     conn = get_conn()
     # FOR UPDATE: dos personas marcando a la vez no pueden saltarse la
     # validacion de la etapa actual ni duplicar el movimiento de stock.
@@ -989,6 +971,11 @@ def pedido_etapa(pedido_id):
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
+    detalle = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
+                           (pedido_id,)).fetchall()
+    if not _puede_ver_pedido(conn, pedido, detalle):
+        conn.close()
+        return err("No tienes permisos para ver este pedido", 403)
 
     data = request.get_json() or {}
     destino_etapa = (data.get("etapa") or "").strip()
@@ -998,28 +985,31 @@ def pedido_etapa(pedido_id):
 
     rol = session.get("rol")
     sid = sucursal_actual()
-    # Los roles logísticos marcan la etapa del pedido, y también el encargado
-    # receptor (el "AS ..." que recibe los pedidos en su sucursal).
+    # Los roles logísticos, administración y el encargado de almacén pueden
+    # avanzar la etapa desde la sucursal que despacha. Superadmin conserva
+    # acceso global.
     if rol not in ("preparador", "repartidor") and not es_receptor() \
             and not (es_gestion() or es_encargado_almacen(conn)):
         conn.close()
         return err("Tu rol no puede cambiar la etapa del pedido", 403)
-    if not sid:
+    if not sid and not es_superadmin():
         conn.close()
         return err("No tenes sucursal asignada", 403)
 
-    # Solo se avanza un pedido que DESPACHA tu sucursal. Verlo es otra cosa: el
-    # rol logistico puede ver los pedidos que su sucursal le hizo al almacen
-    # (para saber que esta esperando), pero no puede tocarlos, porque la
-    # mercaderia la prepara y despacha el almacen, no la sucursal que pidio.
-    # Para el receptor vale lo mismo: marca los pedidos que RECIBE su almacén.
-    if rol in ("preparador", "repartidor") or es_receptor():
-        det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
-                           (pedido_id,)).fetchall()
-        es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in det)
-        if not es_proveedor:
-            conn.close()
-            return err("Ese pedido no lo despacha tu sucursal", 403)
+    # El preparador actúa en la sucursal proveedora; el repartidor confirma la
+    # recepción en la sucursal solicitante. Administración/encargado de almacén
+    # solo gestiona los pedidos que despacha su sucursal.
+    es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in detalle)
+    if rol == "preparador" and not es_proveedor:
+        conn.close()
+        return err("Ese pedido no lo despacha tu sucursal", 403)
+    if rol == "repartidor" and pedido["sucursal_id"] != sid:
+        conn.close()
+        return err("Ese pedido no lo recibe tu sucursal", 403)
+    if rol not in ("preparador", "repartidor") and not es_superadmin() \
+            and not es_proveedor:
+        conn.close()
+        return err("Ese pedido no lo despacha tu sucursal", 403)
 
     actual_etapa = pedido["etapa"] or "pendiente"
     if destino_etapa == actual_etapa:

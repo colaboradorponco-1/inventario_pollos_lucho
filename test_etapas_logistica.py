@@ -5,10 +5,11 @@ al llegar a 'entregado' se intente mover el stock una sola vez.
 """
 import io
 import inspect
+import os
 import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.path.insert(0, r"C:\Users\escal\OneDrive\Desktop\Inventario-Pollos-Lucho")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import core.pedidos as ped  # noqa: E402
 
@@ -91,6 +92,27 @@ for nombre in ("pedido_despachar", "pedido_estado", "pedido_etapa"):
     bloquea_pedido = "FOR UPDATE" in inspect.getsource(vista)
     check(f"{nombre} bloquea el pedido antes de cambiar stock/estado",
           bloquea_pedido)
+
+# Los roles actúan en el lado que les corresponde: preparar desde el proveedor
+# y confirmar entrega desde la sucursal que solicitó.
+fuente_etapa = inspect.getsource(ped.pedido_etapa)
+check("preparador limitado a su sucursal proveedora",
+      'rol == "preparador" and not es_proveedor' in fuente_etapa)
+check("repartidor limitado a su sucursal solicitante",
+      'rol == "repartidor" and pedido["sucursal_id"] != sid' in fuente_etapa)
+
+# La interfaz debe conservar una sola ubicación para gestionar los estados.
+base = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(base, "static", "app.js"), encoding="utf-8") as archivo:
+    app_js = archivo.read()
+with open(os.path.join(base, "templates", "index.html"), encoding="utf-8") as archivo:
+    index_html = archivo.read()
+check("sin controles duplicados de cambio de estado",
+      all(control not in app_js + index_html for control in (
+          "btn-pedido-despachar", "pedido-cambiar-estado",
+          "window.despacharPedido", "window.cambiarEstadoPedido")))
+check("acciones centralizadas en el detalle",
+      "function pintarEtapaEnModal" in app_js and "verPedido(${p.id}, true)" in app_js)
 
 print("\n" + "=" * 70)
 print("FALLOS:", fallos)
