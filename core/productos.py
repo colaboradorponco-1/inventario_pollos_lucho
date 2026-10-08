@@ -48,9 +48,13 @@ def _para_proveer(data):
 
 def _sucursal_puede_proveer(conn, sucursal_id):
     sucursal = conn.execute(
-        "SELECT principal, provee, es_as FROM sucursales WHERE id = ?", (sucursal_id,)).fetchone()
+        "SELECT s.principal, s.provee, s.es_as, "
+        "EXISTS (SELECT 1 FROM usuarios u "
+        "WHERE u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1) AS receptor "
+        "FROM sucursales s WHERE s.id = ?", (sucursal_id,)).fetchone()
     return bool(sucursal and (
-        sucursal.get("principal") or sucursal.get("provee") or sucursal.get("es_as")))
+        sucursal.get("principal") or sucursal.get("provee") or sucursal.get("es_as")
+        or sucursal.get("receptor")))
 
 
 def _stock_sucursal_permitido(conn, ver_todo, sid):
@@ -309,7 +313,9 @@ def productos():
               "AND p.sucursal_id IS NOT NULL "
               "AND EXISTS (SELECT 1 FROM sucursales sp "
               "WHERE sp.id = p.sucursal_id "
-              "AND (sp.principal = 1 OR sp.provee = 1 OR sp.es_as = 1))")
+              "AND (sp.principal = 1 OR sp.provee = 1 OR sp.es_as = 1 "
+              "OR EXISTS (SELECT 1 FROM usuarios u "
+              "WHERE u.sucursal_id = sp.id AND IFNULL(u.receptor, 0) = 1)))")
         # «La versión para proveer del AS manda»: si el artículo ya tiene una
         # fila con casilla «para proveer» en un almacén de sucursal (AS) de la
         # misma ciudad, SOLO esa fila se ofrece en los pedidos. La misma

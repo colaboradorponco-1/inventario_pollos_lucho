@@ -30,13 +30,15 @@ from database import get_conn, requerir_credenciales  # noqa: E402
 
 def _sucursales(conn):
     return {r["id"]: r for r in conn.execute(
-        "SELECT id, nombre, principal, IFNULL(provee, 0) AS provee, "
-        "IFNULL(es_as, 0) AS es_as "
-        "FROM sucursales ORDER BY principal DESC, nombre").fetchall()}
+        "SELECT s.id, s.nombre, s.principal, IFNULL(s.provee, 0) AS provee, "
+        "IFNULL(s.es_as, 0) AS es_as, "
+        "EXISTS (SELECT 1 FROM usuarios u "
+        "WHERE u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1) AS receptor "
+        "FROM sucursales s ORDER BY principal DESC, nombre").fetchall()}
 
 
 def _puede_ser_destino(s):
-    return bool(s["principal"]) or bool(s["provee"]) or bool(s["es_as"])
+    return bool(s["principal"]) or bool(s["provee"]) or bool(s["es_as"]) or bool(s["receptor"])
 
 
 def main():
