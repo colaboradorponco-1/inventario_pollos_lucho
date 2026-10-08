@@ -134,7 +134,8 @@ def prueba_catalogo_provee_coincide_con_backend():
     _check("el listado de sucursales cuenta sus productos",
            "num_productos" in suc and "AS num_productos" in suc)
     _check("avisa cuando tiene productos pero no provee",
-           "num_productos" in js and "¿Provee a otras?" in js)
+           "num_productos" in js and "¿Provee a otras?" in js
+           and "!s.es_as" in js and "s.provee || s.es_as" in js)
 
 
 # --------------------------------------------------------------- frontend ----
@@ -377,8 +378,8 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
 
     _check("existe stock_por_destino (una consulta para todos los productos)",
            "def stock_por_destino" in lotes)
-    _check("solo mira destinos que pueden atender (principal o provee)",
-           re.search(r"principal = 1 OR IFNULL\(s?\.?provee, 0\) = 1", lotes) is not None)
+    _check("solo mira destinos que pueden atender (principal, provee o AS)",
+           "principal = 1 OR IFNULL(s.provee, 0) = 1 OR IFNULL(s.es_as, 0) = 1" in lotes)
     _check("existe destinos_validos con el principal primero",
            "def destinos_validos" in lotes and "ORDER BY principal DESC, nombre" in lotes)
     _check("elegir_destino devuelve la sucursal del catalogo si puede atender",
@@ -430,11 +431,11 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
 
     # La sucursal se habilita como proveedor explícitamente; la opción del
     # producto solo decide si ese artículo se ofrece.
-    _check("destinos_validos usa solo principales y sucursales proveedoras",
-           "WHERE principal = 1 OR IFNULL(provee, 0) = 1" in lotes
+    _check("destinos_validos incluye principales, proveedoras y almacenes AS",
+           "WHERE principal = 1 OR IFNULL(provee, 0) = 1 OR IFNULL(es_as, 0) = 1" in lotes
            and "EXISTS (SELECT 1 FROM productos p" not in lotes)
-    _check("stock_por_destino usa la misma autorización explícita",
-           "s.principal = 1 OR IFNULL(s.provee, 0) = 1" in lotes
+    _check("stock_por_destino usa la misma autorización",
+           "s.principal = 1 OR IFNULL(s.provee, 0) = 1 OR IFNULL(s.es_as, 0) = 1" in lotes
            and "EXISTS (SELECT 1 FROM productos p" not in lotes)
 
     # Auto-pedido: una sucursal puede pedirse a si misma (su propio almacén
@@ -444,8 +445,8 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
            "no puede pedirse a ti mismo" not in py)
     _check("el frontend ya NO esconde los productos del propio AS",
            "provId === sid" not in js)
-    _check("el selector de destino incluye la propia sucursal",
-           re.search(r"const pueden = sucursales\.filter\(\(x\) => \(x\.principal \|\| x\.provee\)\);", js) is not None)
+    _check("el selector de destino incluye principal, provee y AS",
+           re.search(r"const pueden = sucursales\.filter\(\(x\) => \(x\.principal \|\| x\.provee \|\| x\.es_as\)\);", js) is not None)
 
 
 def prueba_sin_stock_no_bloquea():
@@ -494,23 +495,26 @@ def prueba_control_oferta_productos():
     tpl = _leer(os.path.join("templates", "index.html"))
     ns = {}
     exec(_py_def(prod, "_para_proveer"), ns)
+    exec(_py_def(prod, "_sucursal_puede_proveer"), ns)
     _check("la opción de ofrecer producto respeta Sí/No",
            ns["_para_proveer"]({"para_proveer": True}) == 1
            and ns["_para_proveer"]({"para_proveer": False}) == 0
            and ns["_para_proveer"]({}) == 0)
-    _check("solo una sucursal principal o marcada como proveedora ofrece un producto",
+    _check("una sucursal principal, proveedora o AS puede ofrecer un producto",
            "_sucursal_puede_proveer" in prod
-           and "SELECT principal, provee FROM sucursales" in prod
+           and "SELECT principal, provee, es_as FROM sucursales" in prod
+           and "sucursal.get(\"es_as\")" in prod
            and "if para_proveer and not _sucursal_puede_proveer(conn, sid)" in prod)
-    _check("el catálogo de pedidos exige producto habilitado y sucursal proveedora",
+    _check("el catálogo de pedidos incluye productos de almacenes AS",
            "IFNULL(p.para_proveer, 1) = 1" in prod
            and "p.sucursal_id IS NOT NULL" in prod
-           and "sp.principal = 1 OR sp.provee = 1" in prod)
+           and "sp.principal = 1 OR sp.provee = 1 OR sp.es_as = 1" in prod)
     _check("el formulario guarda la opción al crear y editar productos",
            'id="prod-para-proveer"' in tpl
            and "para_proveer: $('#prod-para-proveer').checked" in js
            and "actualizarControlProductoPedido" in js
            and "function sucursalPermiteOfrecerProductos" in js
+           and "!!sucursal.es_as" in js
            and "async function sucursalPermiteOfrecerProductos" not in js)
     _check("desactivar la opción conserva el producto en inventario",
            "Desactivarlo no cambia el inventario" in tpl
@@ -519,6 +523,31 @@ def prueba_control_oferta_productos():
            "sucursal_id, para_proveer, activo)" in prod
            and "NULL, ?, ?, 0, 1)" in prod)
 
+    class Resultado:
+        def __init__(self, fila):
+            self.fila = fila
+
+        def fetchone(self):
+            return self.fila
+
+    class Conexion:
+        def __init__(self, fila):
+            self.fila = fila
+
+        def execute(self, _query, _params):
+            return Resultado(self.fila)
+
+    puede = ns.get("_sucursal_puede_proveer")
+    _check("un almacén AS puede habilitar productos para pedidos",
+           callable(puede) and puede(Conexion({"principal": 0, "provee": 0, "es_as": 1}), 5))
+    _check("una sucursal normal aún requiere activar provee",
+           callable(puede)
+           and not puede(Conexion({"principal": 0, "provee": 0, "es_as": 0}), 5)
+           and puede(Conexion({"principal": 0, "provee": 1, "es_as": 0}), 5))
+
+    db = _leer("database.py")
+    _check("el arranque ya no fusiona ni elimina sucursales AS",
+           "_destruir_sucursales_as" not in db)
 
 
 def main():

@@ -48,8 +48,9 @@ def _para_proveer(data):
 
 def _sucursal_puede_proveer(conn, sucursal_id):
     sucursal = conn.execute(
-        "SELECT principal, provee FROM sucursales WHERE id = ?", (sucursal_id,)).fetchone()
-    return bool(sucursal and (sucursal.get("principal") or sucursal.get("provee")))
+        "SELECT principal, provee, es_as FROM sucursales WHERE id = ?", (sucursal_id,)).fetchone()
+    return bool(sucursal and (
+        sucursal.get("principal") or sucursal.get("provee") or sucursal.get("es_as")))
 
 
 def _stock_sucursal_permitido(conn, ver_todo, sid):
@@ -307,7 +308,8 @@ def productos():
         q += (" AND IFNULL(p.para_proveer, 1) = 1 "
               "AND p.sucursal_id IS NOT NULL "
               "AND EXISTS (SELECT 1 FROM sucursales sp "
-              "WHERE sp.id = p.sucursal_id AND (sp.principal = 1 OR sp.provee = 1))")
+              "WHERE sp.id = p.sucursal_id "
+              "AND (sp.principal = 1 OR sp.provee = 1 OR sp.es_as = 1))")
         # «La versión para proveer del AS manda»: si el artículo ya tiene una
         # fila con casilla «para proveer» en un almacén de sucursal (AS) de la
         # misma ciudad, SOLO esa fila se ofrece en los pedidos. La misma
@@ -325,7 +327,7 @@ def productos():
               "        SELECT 1 FROM productos p2"
               "        JOIN sucursales as_ ON as_.id = p2.sucursal_id"
               "        WHERE p2.activo = 1 AND IFNULL(p2.para_proveer, 1) = 1"
-              "          AND as_.es_as = 1 AND as_.provee = 1 "
+              "          AND as_.es_as = 1 "
               "          AND p2.id <> p.id AND " + ciudad_ok + " AND ("
               "            (IFNULL(p2.codigo, '') <> '' "
               "             AND IFNULL(p2.codigo, '') = IFNULL(p.codigo, '')"

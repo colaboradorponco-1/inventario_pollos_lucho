@@ -2,7 +2,7 @@
 """Reporte de productos que NO puede pedir nadie. Solo lectura.
 
 Un producto se puede pedir únicamente si está registrado bajo una sucursal que
-de verdad provee (la principal, o una marcada con "¿Provee a otras?"). Por eso
+de verdad provee (la principal, una marcada como proveedora o un almacén AS). Por eso
 los productos registrados bajo una sucursal que NO provee quedan varados:
 
   - otra sucursal no puede pedirlos (el destino no es válido)
@@ -30,12 +30,13 @@ from database import get_conn, requerir_credenciales  # noqa: E402
 
 def _sucursales(conn):
     return {r["id"]: r for r in conn.execute(
-        "SELECT id, nombre, principal, IFNULL(provee, 0) AS provee "
+        "SELECT id, nombre, principal, IFNULL(provee, 0) AS provee, "
+        "IFNULL(es_as, 0) AS es_as "
         "FROM sucursales ORDER BY principal DESC, nombre").fetchall()}
 
 
 def _puede_ser_destino(s):
-    return bool(s["principal"]) or bool(s["provee"])
+    return bool(s["principal"]) or bool(s["provee"]) or bool(s["es_as"])
 
 
 def main():

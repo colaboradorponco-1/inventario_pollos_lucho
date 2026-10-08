@@ -385,7 +385,8 @@ def correr_casos():
     print("CASO C: una sucursal que NO distribuye no puede ser proveedor")
     print("-" * 74)
     validos = {r["id"] for r in CONN.execute(
-        "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1").fetchall()}
+        "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1 "
+        "OR IFNULL(es_as, 0) = 1").fetchall()}
     check(f"'{no_dist['nombre']}' NO puede ser proveedor", no_dist["id"] not in validos)
     check(f"'{dist['nombre']}' SI puede ser proveedor", dist["id"] in validos)
     for s in no_distribuidoras:

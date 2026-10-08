@@ -535,63 +535,6 @@ def _limpiar_pedidos_huerfanos(cur):
         pass
 
 
-def _destruir_sucursales_as(cur):
-    """ELIMINA TODO rastro de las sucursales AS (de producción) y deja cada
-    ciudad como UN SOLO almacén normal, CON SUS STOCK, como estaba antes.
-
-    Decisión del dueño (2026-10-07): los AS no van. America, Simón López y
-    La Paz - 6 de Agosto vuelven a ser la única sucursal/almacén de su ciudad,
-    con todos sus productos, lotes, stock y movimientos.
-
-    Idempotente: solo actúa si todavía existen sucursales con es_as = 1.
-    Orden seguro (primero se mueven los datos a la sucursal madre y al final
-    se borra la fila AS), así no se pierde nada:
-      1) lotes          -> sucursal madre
-      2) productos      -> sucursal madre
-      3) movimientos    -> sucursal madre
-      4) almacenes      -> sucursal madre
-      5) inventario     -> sucursal madre
-      6) pedidos/detalle (destino histórico) -> sucursal madre
-      7) repartos       -> sucursal madre
-      8) usuarios       -> sucursal madre
-      9) se BORRA la sucursal AS
-    """
-    cur.execute("SELECT id, nombre, padre_id FROM sucursales "
-                "WHERE IFNULL(es_as, 0) = 1")
-    for a in cur.fetchall():
-        asid = a["id"]
-        if a["padre_id"]:
-            cur.execute("SELECT id FROM sucursales WHERE id = %s", (a["padre_id"],))
-            padre = cur.fetchone()
-        else:
-            nom = (a["nombre"] or "").strip()
-            guess = nom[3:].strip() if nom.upper().startswith("AS ") else None
-            padre = None
-            if guess:
-                cur.execute("SELECT id FROM sucursales "
-                            "WHERE UPPER(nombre) = %s AND IFNULL(es_as, 0) = 0 "
-                            "LIMIT 1", (guess.upper(),))
-                padre = cur.fetchone()
-        if not padre or padre["id"] == asid:
-            continue  # sin sucursal madre identificable: no se toca nada
-        pid = padre["id"]
-        cur.execute("UPDATE lotes SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
-        cur.execute("UPDATE productos SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
-        cur.execute("UPDATE movimientos SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
-        cur.execute("UPDATE almacenes SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
-        cur.execute("UPDATE inventario_diario SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
-        cur.execute("UPDATE pedidos SET destino_id = %s WHERE destino_id = %s", (pid, asid))
-        cur.execute("UPDATE pedido_detalle SET destino_id = %s WHERE destino_id = %s", (pid, asid))
-        cur.execute("UPDATE repartos SET origen_sucursal_id = %s WHERE origen_sucursal_id = %s", (pid, asid))
-        cur.execute("UPDATE repartos SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
-        cur.execute("UPDATE usuarios SET sucursal_id = %s WHERE sucursal_id = %s", (pid, asid))
-        try:
-            cur.execute("DELETE FROM sucursales WHERE id = %s", (asid,))
-        except Exception:
-            pass  # si alguna tabla extra la referencia, la fila queda vacía e inofensiva
-    return None
-
-
 def _col_existe(cur, tabla, columna):
     cur.execute(
         "SELECT COUNT(*) c FROM information_schema.COLUMNS "
@@ -1114,11 +1057,6 @@ def migrar_esquema():
                 pass
             print(f"[migrar] AVISO: no se pudieron normalizar las fechas con 'T': {_e}")
 
-        # 9) Destrucción de las sucursales AS (producción): America, Simon Lopez
-        # y 6 de Agosto vuelven a ser UN SOLO almacén por ciudad, con sus stock.
-        # Todo lo del AS (productos, lotes, movimientos, usuarios) pasa a la
-        # sucursal madre y la fila AS se borra. Idempotente.
-        _destruir_sucursales_as(cur)
         # Limpieza de pedidos huérfanos para asegurar que aparezcan en las bandejas
         _limpiar_pedidos_huerfanos(cur)
         db.commit()

@@ -1245,7 +1245,8 @@ function exportarProductos() {
 function sucursalPermiteOfrecerProductos(sucursalId) {
     const sucursal = (catalogos.sucursales || [])
         .find((s) => String(s.id) === String(sucursalId));
-    return !!sucursal && (Number(sucursal.principal) === 1 || !!sucursal.provee);
+    return !!sucursal && (
+        Number(sucursal.principal) === 1 || !!sucursal.provee || !!sucursal.es_as);
 }
 
 function actualizarControlProductoPedido(sucursalId, ofrecer = false) {
@@ -2810,12 +2811,12 @@ async function cargarSucursales() {
     const sucursales = sucursalesTienda(await request(API + '/sucursales'));
     $('#sucursales-tbody').innerHTML = ordenarSucursales(sucursales).map((s) => `
         <tr>
-            <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s)}</span>${(s.num_productos && !s.principal && !s.provee)
+            <td><strong>${esc(s.nombre)}</strong> <span class="badge badge-ciudad">${ciudadSucursal(s)}</span>${(s.num_productos && !s.principal && !s.provee && !s.es_as)
                 ? `<span class="badge badge-pendiente" title="Esta sucursal tiene ${s.num_productos} producto(s) en el catálogo pero no está marcada como proveedora, así que NADIE puede pedirlos: el servidor los rechaza. Si de verdad despacha mercadería, editá la sucursal y marcá «¿Provee a otras?».">⚠ ${s.num_productos} no se pueden pedir</span>`
                 : ''}</td>
             <td>${s.direccion || '—'}</td>
             <td><span class="badge ${s.principal ? 'badge-bajo' : 'badge-entrada'}">${s.principal ? 'Principal' : 'Sucursal'}</span></td>
-            <td>${s.principal || s.provee
+            <td>${s.principal || s.provee || s.es_as
                 ? '<span class="badge badge-compra" title="Las otras sucursales pueden pedirle mercadería">Sí</span>'
                 : '<span class="respaldo-txt" title="Nadie le puede pedir mercadería desde el formulario de pedidos">No</span>'}</td>
             <td>${s.num_repartos}</td>
@@ -4208,9 +4209,8 @@ function proveedorCantShow(p) {
     return (sucPrincipalPed() || {}).nombre || 'Almacén Principal';
 }
 
-// Solo las sucursales que PROVEEN pueden aparecer como proveedoras en el
-// pedido: los almacenes principales proveen a todos; América y Simón López
-// pueden configurarse como proveedoras. Siglo XX y La Paz no proveen.
+// Solo los almacenes principales, las sucursales marcadas como proveedoras y
+// los almacenes AS pueden aparecer como proveedores en el pedido.
 //
 // OJO: `provee` sí existe como columna en `sucursales`. Antes se leía aquí
 // sin que existiera, daba `undefined` y por eso TODAS las filiales quedaban
@@ -4219,7 +4219,7 @@ function proveeActivo(provId) {
     const s = (catalogos.sucursales || []).find((x) => x.id === provId);
     if (!s) return false;
     if (s.principal) return true;
-    if (!s.provee) return false;
+    if (!s.provee && !s.es_as) return false;
     // Restricción de ciudad: solo se puede pedir a proveedores de la MISMA
     // ciudad que la sucursal que pide (los Principales quedan arriba, exentos).
     return proveedoresAlcance([s]).length === 1;
@@ -4703,7 +4703,7 @@ async function loadPedidos() {
         // almacén principal (auto-pedido).
         const selDest = $('#pedido-destino');
         if (selDest) {
-            const pueden = sucursales.filter((x) => (x.principal || x.provee));
+            const pueden = sucursales.filter((x) => (x.principal || x.provee || x.es_as));
             // Cada sucursal es un almacén independiente: el pedido va DIRECTO al
             // almacén que despacha (los Principales y los de la misma ciudad).
             const destinosP = pueden;
@@ -4748,16 +4748,12 @@ let pestanaPedidos = puedeVerBandeja() ? 'realizados' : 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
 
-// ¿Esta sucursal abastece a otras? La respuesta es SIEMPRE la casilla "¿Provee a
-// otras?" de la base (`sucursales.provee`). NO se decide por el nombre: las
-// sucursales se crean y se renombran, y un atajo por nombre dejaba a América y
-// Simón López viendo la bandeja aunque nadie las hubiera marcado como
-// proveedoras. La única excepción son los almacenes principales, que ya
-// vienen marcados aparte en `SUCURSAL_PRINCIPAL`.
+// ¿Esta sucursal abastece a otras? Se respeta la configuración guardada; los
+// almacenes AS y principales son proveedores por su tipo.
 function sucursalProvee() {
     const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
     if (!m) return false;
-    return !!m.provee || !!window.SUCURSAL_PRINCIPAL;
+    return !!m.provee || !!m.es_as || !!window.SUCURSAL_PRINCIPAL;
 }
 
 // «Mis pedidos» (wizard + historial de los que yo realicé) es visible para

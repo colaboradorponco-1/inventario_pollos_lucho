@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """Que la lista de destinos de un pedido la mande la base, y no el nombre.
 
-Regla de negocio: una sucursal puede ser destino de un pedido SOLO si tiene
-marcada la casilla "¿Provee a otras?" (`sucursales.provee`), o si es un
-almacen principal. America y Simon Lopez aparecen en la lista de destinos
-porque su casilla esta marcada, no porque el codigo las reconozca por nombre.
+Regla de negocio: una sucursal puede ser destino de un pedido si tiene marcada
+la casilla "¿Provee a otras?" (`sucursales.provee`), si es almacen principal o
+si es un almacen AS (`es_as`). El resto de sucursales requiere la casilla.
 
 El bug que este test caza: `sucursalProvee()` tenia un atajo escrito a mano,
 por nombre:
@@ -120,8 +119,8 @@ def prueba_la_lista_de_destinos_usa_la_misma_columna():
     if m is None:
         return
     expr = m.group(0)
-    _check("la lista de destinos se arma con `principal || provee`",
-           "principal" in expr and "provee" in expr,
+    _check("la lista de destinos contempla principal, provee y AS",
+           "principal" in expr and "provee" in expr and "es_as" in expr,
            f"el filtro es: {expr}")
     colados = [n for n in NOMBRES_SUCURSAL if n in expr.lower()]
     _check("la lista de destinos no filtra por nombre",
@@ -143,6 +142,9 @@ def prueba_el_servidor_tambien_exige_la_bandera():
            cuerpo is not None and "provee" in cuerpo,
            "la lista de destinos validos no mira `provee`: cualquier filial "
            "volveria a poder recibir pedidos")
+    _check("`destinos_validos` reconoce los almacenes AS",
+           cuerpo is not None and "es_as" in cuerpo,
+           "un almacén AS no podría ofrecer productos para pedidos")
 
     with io.open(os.path.join(RAIZ, "core", "pedidos.py"), encoding="utf-8") as fh:
         pedidos = fh.read()
