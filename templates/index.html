@@ -11,7 +11,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pollos Lucho">
-    <link rel="stylesheet" href="/static/style.css?v=202610072200">
+    <link rel="stylesheet" href="/static/style.css?v=202610072225">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }} {{ 'rol-logistica' if session.get('rol') in ('preparador', 'repartidor') else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
@@ -1287,6 +1287,17 @@
                         <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_4" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-4"></use></svg><small>Trenzas</small></button>
                         <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_5" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-5"></use></svg><small>Gorra</small></button>
                         <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_6" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-6"></use></svg><small>Ondulado</small></button>
+                    </div>
+                    <h4 class="perfil-avatar-categoria">Personajes divertidos</h4>
+                    <div class="perfil-avatar-opciones">
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollo_jefe" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-pollo-jefe"></use></svg><small>El jefe</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallo_dj" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-gallo-dj"></use></svg><small>Gallo DJ</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallina_detective" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-gallina-detective"></use></svg><small>Detective</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollo_ninja" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-pollo-ninja"></use></svg><small>Ninja</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollo_chef" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-pollo-chef"></use></svg><small>Chef</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollo_dormilon" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-pollo-dormilon"></use></svg><small>Dormilón</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallo_rockero" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-gallo-rockero"></use></svg><small>Rockero</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollo_vaquero" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-pollo-vaquero"></use></svg><small>Vaquero</small></button>
                     </div>
                     <div class="perfil-subir-foto">
                         <label class="btn" for="perfil-foto-archivo">Subir mi foto</label>

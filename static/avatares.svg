@@ -103,4 +103,90 @@
     <circle cx="27" cy="29" r="1.5" fill="#34231d"/><circle cx="37" cy="29" r="1.5" fill="#34231d"/>
     <path d="M28 37c2 2 6 2 8 0" fill="none" stroke="#a45e4b" stroke-width="1.7" stroke-linecap="round"/>
   </symbol>
+  <symbol id="avatar-pollo-jefe" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#fff0c9"/>
+    <path d="M9 59c1-11 9-17 23-17s22 6 23 17H9Z" fill="#25354b"/>
+    <path d="M28 42h8v12h-8z" fill="#f0b887"/>
+    <ellipse cx="32" cy="31" rx="17" ry="18" fill="#ffd84d"/>
+    <path d="M22 17c-2-7 4-10 8-5 3-7 10-5 10 2 5-3 9 3 5 7H19c-2-2 0-5 3-4Z" fill="#ee6547"/>
+    <path d="M22 29h8m4 0h8m-12 0h4" stroke="#4b3828" stroke-width="2.4" stroke-linecap="round"/>
+    <path d="M29 37c2 1 4 1 6 0" fill="none" stroke="#85502d" stroke-width="2" stroke-linecap="round"/>
+    <path d="m24 52 8 5 8-5-8-4-8 4Z" fill="#fff"/>
+    <path d="M32 48v9" stroke="#d9d4c5" stroke-width="1.5"/>
+  </symbol>
+  <symbol id="avatar-gallo-dj" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#e8e0ff"/>
+    <path d="M8 58c2-11 10-16 24-16s22 5 24 16H8Z" fill="#42265f"/>
+    <ellipse cx="32" cy="32" rx="17" ry="18" fill="#ffe06a"/>
+    <path d="M22 19c-4-8 4-12 9-6 4-8 12-4 10 3 6-2 8 5 4 7H19c-2-2 0-5 3-4Z" fill="#e74f56"/>
+    <path d="M17 27c1-8 8-12 15-12s14 4 15 12l-4 2H21l-4-2Z" fill="#252331"/>
+    <path d="M22 29h20" stroke="#65e3dc" stroke-width="3"/>
+    <circle cx="26" cy="33" r="3" fill="#292331"/><circle cx="38" cy="33" r="3" fill="#292331"/>
+    <path d="m29 39 3 2 3-2-3 5-3-5Z" fill="#f08a37"/>
+    <path d="M18 24 13 17m33 7 5-7" stroke="#f5a4ff" stroke-width="2.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="avatar-gallina-detective" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#dceef5"/>
+    <path d="M9 58c2-11 10-16 23-16s21 5 23 16H9Z" fill="#6a5140"/>
+    <ellipse cx="32" cy="32" rx="17" ry="18" fill="#fffdf4"/>
+    <path d="M22 18c-2-6 5-9 9-4 4-7 11-4 10 3 5-2 8 3 5 6H18c-2-2 0-5 4-5Z" fill="#e85055"/>
+    <path d="M14 26c5-9 29-9 36 0l-3 4H17l-3-4Z" fill="#594638"/>
+    <rect x="18" y="28" width="28" height="9" rx="4" fill="#d7a94c"/>
+    <path d="M20 30h9v6h-9zm15 0h9v6h-9z" fill="#b8e7ea" stroke="#513f32" stroke-width="2"/>
+    <path d="M29 32h6" stroke="#513f32" stroke-width="2"/>
+    <path d="m29 40 3 2 3-2-3 5-3-5Z" fill="#ed8b37"/>
+    <circle cx="51" cy="47" r="7" fill="#ffe486" stroke="#886a3f" stroke-width="2"/>
+    <path d="m56 52 4 4" stroke="#886a3f" stroke-width="3" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="avatar-pollo-ninja" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#e1e5ef"/>
+    <path d="M8 58c2-11 10-16 24-16s22 5 24 16H8Z" fill="#343744"/>
+    <ellipse cx="32" cy="32" rx="17" ry="18" fill="#f8d64e"/>
+    <path d="M20 18c-2-7 5-10 10-5 4-7 11-4 10 3 5-2 8 3 5 6H18c-2-2-1-4 2-4Z" fill="#e94e4e"/>
+    <path d="M14 27c10-5 26-5 37 0l-3 10c-10-4-21-4-31 0l-3-10Z" fill="#353744"/>
+    <path d="M24 31h5m6 0h5" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+    <path d="M14 28 6 25m43 2 9-4" stroke="#c23f46" stroke-width="3" stroke-linecap="round"/>
+    <path d="m29 39 3 2 3-2-3 5-3-5Z" fill="#ed8b37"/>
+    <path d="m24 49 8 4 8-4" fill="none" stroke="#f4f1e7" stroke-width="2"/>
+  </symbol>
+  <symbol id="avatar-pollo-chef" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#ffe9dc"/>
+    <path d="M8 59c2-12 10-17 24-17s22 5 24 17H8Z" fill="#fff"/>
+    <ellipse cx="32" cy="33" rx="17" ry="18" fill="#ffd94e"/>
+    <path d="M19 19c-3-7 4-10 8-5 2-7 10-7 11 0 5-5 11 0 7 6 5 1 5 6 1 7H17c-4-2-2-7 2-8Z" fill="#fff" stroke="#d8d2c9" stroke-width="1.5"/>
+    <circle cx="26" cy="33" r="2" fill="#34291f"/><circle cx="38" cy="33" r="2" fill="#34291f"/>
+    <path d="m29 38 3 2 3-2-3 5-3-5Z" fill="#ed8735"/>
+    <path d="m19 46 13-4 13 4-3 4H22l-3-4Z" fill="#fff" stroke="#ddd4c8" stroke-width="1.5"/>
+    <path d="M25 48h14" stroke="#e1ddd5" stroke-width="1.5"/>
+  </symbol>
+  <symbol id="avatar-pollo-dormilon" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#dfe7ff"/>
+    <path d="M8 59c2-12 10-17 24-17s22 5 24 17H8Z" fill="#7886c5"/>
+    <ellipse cx="32" cy="33" rx="17" ry="18" fill="#ffdc5a"/>
+    <path d="M22 19c-2-7 4-10 9-5 4-7 11-4 10 3 5-2 8 3 5 6H18c-2-2 0-4 4-4Z" fill="#ed7654"/>
+    <path d="M22 32c2 3 5 3 7 0m6 0c2 3 5 3 7 0" fill="none" stroke="#493828" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="m29 39 3 2 3-2-3 5-3-5Z" fill="#ed8735"/>
+    <path d="M45 18c5-4 9-2 9 2 0 3-3 5-7 4m10-10c4-3 7-1 6 2-1 2-3 3-6 3" fill="none" stroke="#7180c5" stroke-width="2" stroke-linecap="round"/>
+    <path d="M23 12c1-3 4-3 5 0m-4-3c1-3 4-3 5 0" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="avatar-gallo-rockero" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#ffe1e2"/>
+    <path d="M8 59c2-12 10-17 24-17s22 5 24 17H8Z" fill="#29252e"/>
+    <ellipse cx="32" cy="33" rx="17" ry="18" fill="#ffe05a"/>
+    <path d="M19 20c-3-8 5-11 10-5 3-8 11-5 10 2 6-3 9 4 4 7H18c-2-1-2-3 1-4Z" fill="#e44c52"/>
+    <path d="m23 31 7 2m11-2-7 2" stroke="#29252e" stroke-width="3" stroke-linecap="round"/>
+    <path d="m29 38 3 2 3-2-3 5-3-5Z" fill="#ed8735"/>
+    <path d="m17 11 3 5 6 1-4 4 1 6-6-3-5 3 1-6-4-4 6-1 2-5Zm30 3 2 4 5 1-4 3 1 5-4-2-4 2 1-5-4-3 5-1 2-4Z" fill="#f3bc35"/>
+  </symbol>
+  <symbol id="avatar-pollo-vaquero" viewBox="0 0 64 64">
+    <circle cx="32" cy="32" r="32" fill="#f7e7d0"/>
+    <path d="M8 59c2-12 10-17 24-17s22 5 24 17H8Z" fill="#95613c"/>
+    <ellipse cx="32" cy="33" rx="17" ry="18" fill="#ffda50"/>
+    <path d="M22 19c-2-7 5-10 9-5 4-7 11-4 10 3 5-2 8 3 5 6H18c-2-2 0-4 4-4Z" fill="#e9574f"/>
+    <path d="M9 25c4-7 42-7 46 0l-5 4H14l-5-4Z" fill="#9e683d"/>
+    <path d="M20 27c6 2 18 2 24 0l-2 4c-6 2-14 2-20 0l-2-4Z" fill="#714829"/>
+    <circle cx="26" cy="34" r="1.7" fill="#392c22"/><circle cx="38" cy="34" r="1.7" fill="#392c22"/>
+    <path d="m29 39 3 2 3-2-3 5-3-5Z" fill="#ed8735"/>
+    <path d="M24 50h16" stroke="#f4e5cc" stroke-width="2"/>
+  </symbol>
 </svg>

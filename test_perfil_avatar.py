@@ -2,6 +2,7 @@
 import io
 import os
 import sys
+import xml.etree.ElementTree as ET
 
 from PIL import Image
 from flask import Flask
@@ -92,6 +93,15 @@ def ejecutar():
     with open(os.path.join(os.path.dirname(__file__), "templates", "login.html"),
               encoding="utf-8") as archivo:
         login = archivo.read()
+    with open(os.path.join(os.path.dirname(__file__), "static", "style.css"),
+              encoding="utf-8") as archivo:
+        estilos = archivo.read()
+    simbolos = {
+        nodo.attrib.get("id")
+        for nodo in ET.parse(os.path.join(os.path.dirname(__file__), "static", "avatares.svg"))
+        .getroot()
+        .findall("{http://www.w3.org/2000/svg}symbol")
+    }
 
     def check(nombre, condicion):
         print(f"  {'OK' if condicion else 'FALLO'} {nombre}")
@@ -112,6 +122,17 @@ def ejecutar():
           and 'id="avatar-persona-6"' in catalogo
           and "crearAvatarSvg" in javascript
           and "$$('.perfil-avatar-opciones').forEach" in javascript)
+    check("incluye ocho personajes graciosos con ilustración correspondiente",
+          all(f'data-avatar-preset="{avatar}"' in interfaz for avatar in (
+              "pollo_jefe", "gallo_dj", "gallina_detective", "pollo_ninja",
+              "pollo_chef", "pollo_dormilon", "gallo_rockero", "pollo_vaquero"))
+          and all(f"avatar-{nombre}" in simbolos for nombre in (
+              "pollo-jefe", "gallo-dj", "gallina-detective", "pollo-ninja",
+              "pollo-chef", "pollo-dormilon", "gallo-rockero", "pollo-vaquero")))
+    check("el selector de avatares se adapta a pantallas pequeñas",
+          "repeat(auto-fill, minmax(74px, 1fr))" in estilos
+          and "repeat(auto-fill, minmax(66px, 1fr))" in estilos
+          and ".perfil-avatar-guardar .btn { width: 100%; }" in estilos)
     check("el inicio de sesión permite mostrar u ocultar la contraseña",
           'id="login-password-toggle"' in login
           and "loginPassword.type = mostrar ? 'text' : 'password'" in login
@@ -122,13 +143,13 @@ def ejecutar():
 
     CONN.usuario.update(avatar="pollito", avatar_imagen=None)
     cliente = cliente_autenticado()
-    respuesta = cliente.put("/api/perfil/avatar", json={"avatar": "persona_3"})
-    check("permite elegir una ilustración de persona del catálogo",
-          respuesta.status_code == 200 and CONN.usuario["avatar"] == "persona_3")
+    respuesta = cliente.put("/api/perfil/avatar", json={"avatar": "gallo_dj"})
+    check("permite guardar un avatar gracioso del catálogo",
+          respuesta.status_code == 200 and CONN.usuario["avatar"] == "gallo_dj")
 
     respuesta_invalida = cliente.put("/api/perfil/avatar", json={"avatar": "no-permitido"})
     check("rechaza valores de avatar arbitrarios",
-          respuesta_invalida.status_code == 400 and CONN.usuario["avatar"] == "persona_3")
+          respuesta_invalida.status_code == 400 and CONN.usuario["avatar"] == "gallo_dj")
 
     respuesta_foto = cliente.put(
         "/api/perfil/avatar",

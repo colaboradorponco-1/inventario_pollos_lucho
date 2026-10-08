@@ -14,6 +14,8 @@ auth_bp = Blueprint("auth", __name__)
 AVATARES_PERMITIDOS = {
     "pollito", "gallina", "gallo", "pechuga", "alita",
     "persona_1", "persona_2", "persona_3", "persona_4", "persona_5", "persona_6",
+    "pollo_jefe", "gallo_dj", "gallina_detective", "pollo_ninja",
+    "pollo_chef", "pollo_dormilon", "gallo_rockero", "pollo_vaquero",
 }
 AVATAR_IMAGEN_MAX_BYTES = 3 * 1024 * 1024
 AVATAR_IMAGEN_MAX_PIXELES = 20_000_000
