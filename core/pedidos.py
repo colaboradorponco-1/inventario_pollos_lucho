@@ -475,6 +475,46 @@ def pedido_detalle(pedido_id):
                "repartos": [dict(r) for r in repartos]})
 
 
+@pedidos_bp.route("/api/pedidos/<int:pedido_id>", methods=["DELETE"])
+@login_requerido
+def pedido_eliminar_archivado(pedido_id):
+    conn = get_conn()
+    pedido = conn.execute(
+        "SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
+    if not pedido:
+        conn.close()
+        return err("Pedido no encontrado", 404)
+    detalle = conn.execute(
+        "SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,)).fetchall()
+    if not _puede_ver_pedido(conn, pedido, detalle):
+        conn.close()
+        return err("No tienes permisos para este pedido", 403)
+    if pedido["estado"] not in ("entregado", "rechazado"):
+        conn.close()
+        return err("Solo se pueden eliminar pedidos entregados o rechazados", 400)
+    sid = sucursal_operativa() if es_superadmin() else sucursal_actual()
+    if sid is None:
+        conn.close()
+        return err("Necesitas una sucursal asignada para eliminar pedidos archivados", 403)
+    archivo = conn.execute(
+        "SELECT id FROM pedidos_archivados WHERE pedido_id = ? AND sucursal_id = ?",
+        (pedido_id, sid)).fetchone()
+    if not archivo:
+        conn.close()
+        return err("Solo puedes eliminar pedidos archivados por tu sucursal", 403)
+
+    conn.execute("UPDATE repartos SET pedido_id = NULL WHERE pedido_id = ?", (pedido_id,))
+    conn.execute("DELETE FROM pedidos_archivados WHERE pedido_id = ?", (pedido_id,))
+    conn.execute("DELETE FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,))
+    conn.execute("DELETE FROM pedidos WHERE id = ?", (pedido_id,))
+    conn.commit()
+    conn.close()
+    registrar_auditoria("Pedido eliminado definitivamente",
+                        f"{pedido['nro_ticket']} (archivo de sucursal ID {sid}); "
+                        "se conservaron movimientos y repartos")
+    return ok(message="Pedido eliminado; se conservaron el stock y el historial de movimientos")
+
+
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/archivar", methods=["PUT"])
 @login_requerido
 def pedido_archivar(pedido_id):

@@ -4753,7 +4753,8 @@ async function cargarBandeja() {
                             <span class="flex-grow"></span>
                             ${window.SUCURSAL_ID && alcanceBandeja !== 'todas' &&
                                 (vistaBandeja === 'historial' || vistaBandeja === 'archivados')
-                                ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaBandeja === 'historial'})">${vistaBandeja === 'historial' ? 'Archivar' : 'Restaurar'}</button>`
+                                ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaBandeja === 'historial'})">${vistaBandeja === 'historial' ? 'Archivar' : 'Restaurar'}</button>
+                                   ${vistaBandeja === 'archivados' ? `<button class="btn btn-sm btn-danger" onclick="eliminarPedidoArchivado(${p.id})">Eliminar</button>` : ''}`
                                 : ''}
                             <button class="btn btn-sm" onclick="window.open('/pedidos/ticket/${p.id}', '_blank')">Imprimir</button>
                             <button class="btn btn-icon" onclick="verPedido(${p.id}, true)" title="Ver detalle y gestionar estado" aria-label="Ver detalle y gestionar estado">${eyeSvg}</button>
@@ -4785,6 +4786,25 @@ window.archivarPedido = async (id, archivar) => {
             method: 'PUT',
             body: JSON.stringify({ archivado: archivar }),
         });
+        toast(res.message, 'ok');
+        if (pestanaPedidos === 'mis-pedidos') {
+            pagState['#pedidos-paginacion'] = 1;
+            await listarPedidos();
+        } else {
+            await cargarBandeja();
+        }
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+};
+
+window.eliminarPedidoArchivado = async (id) => {
+    const aviso = 'Esta acción es permanente: se eliminarán el pedido, sus productos y sus archivos de sucursales. ' +
+        'El stock no cambiará; se conservarán los movimientos de inventario y el historial de reparto, ' +
+        'aunque el reparto dejará de estar vinculado al pedido. ¿Estás seguro de que deseas continuar?';
+    if (!confirm(aviso)) return;
+    try {
+        const res = await request(API + '/pedidos/' + id, { method: 'DELETE' });
         toast(res.message, 'ok');
         if (pestanaPedidos === 'mis-pedidos') {
             pagState['#pedidos-paginacion'] = 1;
@@ -4840,6 +4860,9 @@ async function listarPedidos() {
             <td>
                 ${window.SUCURSAL_ID && ['entregado', 'rechazado'].includes(estado)
                     ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaPropios !== 'archivados'})">${vistaPropios === 'archivados' ? 'Restaurar' : 'Archivar'}</button>`
+                    : ''}
+                ${window.SUCURSAL_ID && vistaPropios === 'archivados' && ['entregado', 'rechazado'].includes(estado)
+                    ? `<button class="btn btn-sm btn-danger" onclick="eliminarPedidoArchivado(${p.id})">Eliminar</button>`
                     : ''}
                 <button class="btn btn-icon" onclick="verPedido(${p.id}, false)" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             </td>

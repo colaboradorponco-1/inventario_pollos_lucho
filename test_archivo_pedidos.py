@@ -14,6 +14,7 @@ import core.pedidos as ped  # noqa: E402
 CAPTURADO = []
 ESTADO_PEDIDO = "entregado"
 SUCURSAL_PRINCIPAL = 0
+ARCHIVADO_EN_SUCURSAL = True
 
 
 class FakeConn:
@@ -33,6 +34,8 @@ class FakeConn:
                 "sucursal_id": 42,
                 "destino_id": 30,
             }
+        if "SELECT id FROM pedidos_archivados" in sql:
+            return {"id": 1} if ARCHIVADO_EN_SUCURSAL else None
         return {"principal": 0, "nombre": "", "c": 0}
 
     def fetchall(self):
@@ -109,6 +112,18 @@ def ejecutar_archivo(estado, archivado, rol="admin", sucursal_id=30):
         session["rol"] = rol
         session["sucursal_id"] = sucursal_id
         return ped.pedido_archivar(7)
+
+
+def ejecutar_eliminar(archivado=True, estado="entregado", sucursal_id=30):
+    global ARCHIVADO_EN_SUCURSAL, ESTADO_PEDIDO
+    ARCHIVADO_EN_SUCURSAL = archivado
+    ESTADO_PEDIDO = estado
+    CAPTURADO.clear()
+    with srv.test_request_context("/api/pedidos/7", method="DELETE"):
+        session["user_id"] = 1
+        session["rol"] = "admin"
+        session["sucursal_id"] = sucursal_id
+        return ped.pedido_eliminar_archivado(7)
 
 
 fallos = 0
@@ -222,6 +237,28 @@ respuesta_restaurar = ejecutar_archivo("rechazado", False)
 check("un pedido terminal se puede restaurar al historial",
       not isinstance(respuesta_restaurar, tuple)
       and any("DELETE FROM pedidos_archivados" in sql for sql, _ in CAPTURADO))
+
+respuesta_eliminar = ejecutar_eliminar()
+sqls_eliminar = [sql for sql, _ in CAPTURADO]
+check("solo se elimina definitivamente un pedido archivado por la sucursal actual",
+      not isinstance(respuesta_eliminar, tuple)
+      and any("SELECT id FROM pedidos_archivados" in sql for sql in sqls_eliminar)
+      and "DELETE FROM pedidos WHERE id = ?" in sqls_eliminar)
+check("se preservan los movimientos y los repartos al eliminar el pedido",
+      not any("DELETE FROM movimientos" in sql for sql in sqls_eliminar)
+      and "UPDATE repartos SET pedido_id = NULL WHERE pedido_id = ?" in sqls_eliminar)
+respuesta_no_archivado = ejecutar_eliminar(archivado=False)
+check("no se puede eliminar un pedido archivado solo por otra sucursal",
+      isinstance(respuesta_no_archivado, tuple)
+      and not any("DELETE FROM pedidos WHERE id = ?" in sql for sql, _ in CAPTURADO))
+respuesta_activo = ejecutar_eliminar(archivado=True, estado="en_camino")
+check("no se puede eliminar un pedido que no llegó a un estado terminal",
+      isinstance(respuesta_activo, tuple)
+      and not any("DELETE FROM pedidos WHERE id = ?" in sql for sql, _ in CAPTURADO))
+check("la interfaz confirma y ofrece eliminar solo en las vistas archivadas",
+      "eliminarPedidoArchivado(${p.id})" in interfaz
+      and "window.eliminarPedidoArchivado = async (id)" in interfaz
+      and "¿Estás seguro de que deseas continuar?" in interfaz)
 
 print("=" * 68)
 print("FALLOS:", fallos)
