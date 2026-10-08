@@ -1246,7 +1246,8 @@ function sucursalPermiteOfrecerProductos(sucursalId) {
     const sucursal = (catalogos.sucursales || [])
         .find((s) => String(s.id) === String(sucursalId));
     return !!sucursal && (
-        Number(sucursal.principal) === 1 || !!sucursal.provee || !!sucursal.es_as);
+        Number(sucursal.principal) === 1 || !!sucursal.provee || !!sucursal.es_as
+        || (window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID)));
 }
 
 function actualizarControlProductoPedido(sucursalId, ofrecer = false) {

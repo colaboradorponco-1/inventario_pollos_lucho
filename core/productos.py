@@ -54,7 +54,8 @@ def _sucursal_puede_proveer(conn, sucursal_id):
         "FROM sucursales s WHERE s.id = ?", (sucursal_id,)).fetchone()
     return bool(sucursal and (
         sucursal.get("principal") or sucursal.get("provee") or sucursal.get("es_as")
-        or sucursal.get("receptor")))
+        or sucursal.get("receptor")
+        or (session.get("receptor") and str(sucursal_actual()) == str(sucursal_id))))
 
 
 def _stock_sucursal_permitido(conn, ver_todo, sid):

@@ -548,6 +548,17 @@ def prueba_control_oferta_productos():
     _check("una sucursal con usuario receptor puede ofrecer productos",
            callable(puede) and puede(Conexion({
                "principal": 0, "provee": 0, "es_as": 0, "receptor": 1}), 5))
+    if callable(puede):
+        ns["session"] = {"receptor": True}
+        ns["sucursal_actual"] = lambda: 5
+        receptor_por_sesion = puede(
+            Conexion({"principal": 0, "provee": 0, "es_as": 0, "receptor": 0}), 5)
+        ns["session"] = {"receptor": False}
+    else:
+        receptor_por_sesion = False
+    _check("la sesión receptora propia permite ofrecer aunque falte la marca del catálogo",
+           receptor_por_sesion
+           and "window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID)" in js)
     _check("una sucursal normal aún requiere activar provee",
            callable(puede)
            and not puede(Conexion({
