@@ -12,6 +12,7 @@ import core.pedidos as ped  # noqa: E402
 
 CAPTURADO = []
 ESTADO_PEDIDO = "entregado"
+SUCURSAL_PRINCIPAL = 0
 
 
 class FakeConn:
@@ -20,7 +21,10 @@ class FakeConn:
         return self
 
     def fetchone(self):
-        if any("SELECT * FROM pedidos WHERE id" in sql for sql, _ in CAPTURADO[-1:]):
+        sql = CAPTURADO[-1][0] if CAPTURADO else ""
+        if "SELECT principal, nombre FROM sucursales" in sql:
+            return {"principal": SUCURSAL_PRINCIPAL, "nombre": "Almacen Principal 1"}
+        if "SELECT * FROM pedidos WHERE id" in sql:
             return {
                 "id": 7,
                 "nro_ticket": "TKT-00007",
@@ -49,12 +53,13 @@ srv = Flask(__name__)
 srv.secret_key = "prueba"
 
 
-def ejecutar_bandeja(vista):
+def ejecutar_bandeja(vista, rol="admin", sucursal_id=30, alcance="mi-almacen"):
     CAPTURADO.clear()
-    with srv.test_request_context(f"/api/pedidos/bandeja?vista={vista}"):
+    with srv.test_request_context(
+            f"/api/pedidos/bandeja?vista={vista}&alcance={alcance}"):
         session["user_id"] = 1
-        session["rol"] = "admin"
-        session["sucursal_id"] = 30
+        session["rol"] = rol
+        session["sucursal_id"] = sucursal_id
         ped.pedidos_bandeja()
     return next(sql for sql, _ in CAPTURADO if "FROM pedidos p JOIN sucursales" in sql)
 
@@ -65,6 +70,16 @@ def ejecutar_vista_invalida():
         session["rol"] = "admin"
         session["sucursal_id"] = 30
         return ped.pedidos_bandeja()
+
+
+def ejecutar_creacion(rol, sucursal_id=30, principal=0):
+    global SUCURSAL_PRINCIPAL
+    SUCURSAL_PRINCIPAL = principal
+    with srv.test_request_context("/api/pedidos", method="POST", json={}):
+        session["user_id"] = 1
+        session["rol"] = rol
+        session["sucursal_id"] = sucursal_id
+        return ped.pedidos()
 
 
 def ejecutar_archivo(estado, archivado):
@@ -106,6 +121,28 @@ check("la vista archivados se limita a la sucursal actual",
       and "pa.sucursal_id = ?" in sql_archivados)
 check("una vista no reconocida devuelve error",
       isinstance(ejecutar_vista_invalida(), tuple))
+sql_superadmin = ejecutar_bandeja("activos", rol="superadmin", alcance="mi-almacen")
+check("superadmin por defecto queda limitado a su almacén",
+      "dd.destino_id = ?" in sql_superadmin)
+sql_global = ejecutar_bandeja("activos", rol="superadmin", alcance="todas")
+check("superadmin puede elegir la vista global",
+      "dd.destino_id = ?" not in sql_global)
+with srv.test_request_context("/api/pedidos/bandeja?vista=activos&alcance=todas"):
+    session["user_id"] = 1
+    session["rol"] = "admin"
+    session["sucursal_id"] = 30
+    vista_global_no_autorizada = ped.pedidos_bandeja()
+check("otros roles no pueden solicitar la vista global",
+      isinstance(vista_global_no_autorizada, tuple))
+check("admin no puede crear solicitudes",
+      isinstance(ejecutar_creacion("admin"), tuple))
+check("encargado de almacén no puede crear solicitudes",
+      isinstance(ejecutar_creacion("encargado", principal=1), tuple))
+with open(os.path.join(os.path.dirname(__file__), "static", "app.js"),
+          encoding="utf-8") as archivo:
+    interfaz = archivo.read()
+check("el alcance global se elige desde el control exclusivo del superadmin",
+      "pedido-bandeja-alcance" in interfaz and "Todas las sucursales" in interfaz)
 
 respuesta = ejecutar_archivo("entregado", True)
 inserciones = [(sql, params) for sql, params in CAPTURADO

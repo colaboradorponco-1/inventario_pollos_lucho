@@ -125,6 +125,9 @@ def _puede_ver_pedido(conn, pedido, detalle):
 def pedidos():
     conn = get_conn()
     if request.method == "POST":
+        if es_gestion() or es_encargado_almacen(conn):
+            conn.close()
+            return err("Administración y encargados de almacén solo reciben y gestionan pedidos", 403)
         data = request.get_json() or {}
         detalle = data.get("detalle", [])
         if not detalle:
@@ -474,7 +477,7 @@ def pedido_archivar(pedido_id):
     if pedido["estado"] not in ("entregado", "rechazado"):
         conn.close()
         return err("Solo se pueden archivar pedidos entregados o rechazados", 400)
-    sid = sucursal_actual()
+    sid = sucursal_operativa() if es_superadmin() else sucursal_actual()
     if sid is None:
         conn.close()
         return err("Necesitas una sucursal asignada para archivar pedidos", 403)
@@ -850,7 +853,19 @@ def pedidos_bandeja():
     El superadmin sin sucursal asignada consolida todos los pendientes. Un admin
     de sucursal sin asignación no recibe pedidos."""
     conn = get_conn()
-    sid = sucursal_actual()
+    sid = sucursal_operativa() if es_superadmin() else sucursal_actual()
+    alcance = (request.args.get("alcance", "") or "mi-almacen").strip().lower()
+    if alcance not in ("mi-almacen", "todas"):
+        conn.close()
+        return err("Alcance de bandeja inválido", 400)
+    if alcance == "todas" and not es_superadmin():
+        conn.close()
+        return err("Solo el superadmin puede ver todas las sucursales", 403)
+    if es_superadmin() and alcance == "todas":
+        sid = None
+    elif es_superadmin() and sid is None:
+        conn.close()
+        return err("No tienes almacén asignado; elige la vista de todas las sucursales", 400)
     where = "WHERE 1=1"
     params = []
     # La bandeja es la recepción de pedidos. La ven:
@@ -916,8 +931,6 @@ def pedidos_bandeja():
             where += (" AND NOT EXISTS (SELECT 1 FROM pedidos_archivados pa "
                       "WHERE pa.pedido_id = p.id AND pa.sucursal_id = ?)")
             params.append(sid)
-        elif es_superadmin():
-            where += " AND NOT EXISTS (SELECT 1 FROM pedidos_archivados pa WHERE pa.pedido_id = p.id)"
     else:
         where += " AND p.estado IN ('pendiente', 'en_camino')"
     desde = (request.args.get("desde", "") or "").strip()

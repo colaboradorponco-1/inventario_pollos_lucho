@@ -867,7 +867,7 @@
             <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap;">
                 <div>
                     <h2>Gestión de Pedidos y Despachos</h2>
-                    <p>Revisa los pedidos que otras sucursales te hicieron (bandeja) o elabora tus propias solicitudes de mercadería.</p>
+                    <p>El administrador y su encargado de almacén reciben y gestionan pedidos; el encargado no crea solicitudes. Las sucursales realizan sus pedidos desde «Mis solicitudes».</p>
                 </div>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     <span class="respaldo-txt" id="pedidos-info"></span>
@@ -940,6 +940,10 @@
                         <span class="tb-tag">Búsqueda y filtros</span>
                         <input type="date" id="pedido-bandeja-desde" data-sin-fecha-defecto>
                         <input type="date" id="pedido-bandeja-hasta" data-sin-fecha-defecto>
+                        <select id="pedido-bandeja-alcance" aria-label="Alcance de la bandeja" style="display:none">
+                            <option value="mi-almacen">Mi almacén</option>
+                            <option value="todas">Todas las sucursales</option>
+                        </select>
                         <select id="pedido-sucursal-filtro" style="max-width:220px"></select>
                         <select id="pedido-bandeja-vista" aria-label="Vista de pedidos">
                             <option value="activos">Pendientes y en camino</option>

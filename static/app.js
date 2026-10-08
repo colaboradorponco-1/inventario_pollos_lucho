@@ -4553,7 +4553,7 @@ function inicializarPestanasPedidos() {
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
         || window.ROL === 'preparador' || window.ROL === 'repartidor'
         || window.RECEPTOR
-        || ((typeof esAlmacenPpal === 'function' && esAlmacenPpal()) && !sucursalProvee());
+        || (typeof esAlmacenPpal === 'function' && esAlmacenPpal());
 
     if (soloBandeja) {
         if (tabMis) tabMis.style.display = 'none';
@@ -4673,8 +4673,16 @@ async function cargarBandeja() {
         const desde = ($('#pedido-bandeja-desde') || {}).value || '';
         const hasta = ($('#pedido-bandeja-hasta') || {}).value || '';
         const vistaBandeja = ($('#pedido-bandeja-vista') || {}).value || 'activos';
+        const alcanceEl = $('#pedido-bandeja-alcance');
+        const esSuperadmin = window.ROL === 'superadmin';
+        if (alcanceEl) {
+            alcanceEl.style.display = esSuperadmin ? '' : 'none';
+            if (esSuperadmin && !window.SUCURSAL_ID) alcanceEl.value = 'todas';
+        }
+        const alcanceBandeja = esSuperadmin ? (alcanceEl?.value || 'mi-almacen') : 'mi-almacen';
         const qs = new URLSearchParams();
         qs.set('vista', vistaBandeja);
+        qs.set('alcance', alcanceBandeja);
         if (desde) qs.set('desde', desde);
         if (hasta) qs.set('hasta', hasta);
         const gruposRaw = (await request(API + '/pedidos/bandeja' + (qs.toString() ? '?' + qs.toString() : ''))) || [];
@@ -4743,7 +4751,8 @@ async function cargarBandeja() {
                             ${chipEstado}
                             ${p.nota ? '<span class="respaldo-txt">' + esc(p.nota) + '</span>' : ''}
                             <span class="flex-grow"></span>
-                            ${window.SUCURSAL_ID && (vistaBandeja === 'historial' || vistaBandeja === 'archivados')
+                            ${window.SUCURSAL_ID && alcanceBandeja !== 'todas' &&
+                                (vistaBandeja === 'historial' || vistaBandeja === 'archivados')
                                 ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaBandeja === 'historial'})">${vistaBandeja === 'historial' ? 'Archivar' : 'Restaurar'}</button>`
                                 : ''}
                             <button class="btn btn-sm" onclick="window.open('/pedidos/ticket/${p.id}', '_blank')">Imprimir</button>
@@ -4871,6 +4880,7 @@ async function pintarBadgePedidos() {
 
 $('#btn-filtrar-pedidos').addEventListener('click', cargarBandeja);
 on('#pedido-bandeja-vista', 'change', cargarBandeja);
+on('#pedido-bandeja-alcance', 'change', cargarBandeja);
 on('#pedido-sucursal-filtro', 'change', () => { bandejaSucF = ''; cargarBandeja(); });
 on('#bandeja-suc-btns', 'click', (e) => {
     const b = e.target.closest('[data-bsuc]');
