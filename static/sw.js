@@ -2,7 +2,7 @@
    Estrategia: si hay internet, SIEMPRE se sirve la última versión de los
    archivos (red primero). La caché solo se usa como respaldo sin conexión.
    Los datos (/api/) NUNCA se cachean, siempre van al servidor. */
-const CACHE = 'pollos-lucho-v5';
+const CACHE = 'pollos-lucho-v6';
 
 const PRECACHE = [
     '/static/style.css',

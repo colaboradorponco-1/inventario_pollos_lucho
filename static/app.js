@@ -1247,12 +1247,10 @@ function sucursalPermiteOfrecerProductos(sucursalId, almacenId = $('#prod-almace
         .find((s) => String(s.id) === String(sucursalId));
     const almacenAS = (catalogos.almacenes || []).some((a) =>
         String(a.id) === String(almacenId)
-        && String(a.sucursal_id) === String(sucursalId)
         && /^AS\s/i.test((a.nombre || '').trim()));
-    return !!sucursal && (
+    return almacenAS || (!!sucursal && (
         Number(sucursal.principal) === 1 || !!sucursal.provee || !!sucursal.es_as
-        || almacenAS
-        || (window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID)));
+        || (window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID))));
 }
 
 function actualizarControlProductoPedido(sucursalId, ofrecer = false) {
