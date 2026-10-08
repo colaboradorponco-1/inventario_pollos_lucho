@@ -1251,21 +1251,58 @@
 
     <!-- MODAL MI PERFIL -->
     <div id="modal-perfil" class="modal">
-        <div class="modal-content">
+        <div class="modal-content modal-perfil-content">
             <button type="button" class="close" data-close="modal-perfil" aria-label="Cerrar">&times;</button>
-            <h2>Mi perfil</h2>
-            <form id="form-perfil">
+            <div class="perfil-hero">
                 <div class="perfil-avatar-lg" id="perfil-avatar-lg"></div>
-                <label>Nombre
-                    <input type="text" id="perfil-nombre" placeholder="Tu nombre" required>
-                </label>
-                <label>Contraseña actual
-                    <input type="password" id="perfil-pass-actual" placeholder="Dejar en blanco si no cambias">
-                </label>
-                <label>Nueva contraseña
-                    <input type="password" id="perfil-pass-nueva" placeholder="Mínimo 4 caracteres" minlength="4">
-                </label>
-                <button type="submit" class="btn btn-primary">Guardar cambios</button>
+                <div class="perfil-hero-copy">
+                    <span class="perfil-eyebrow">MI CUENTA</span>
+                    <h2 id="perfil-titulo-nombre">Mi perfil</h2>
+                    <div class="perfil-identidad">
+                        <span id="perfil-usuario"></span>
+                        <span class="perfil-pill" id="perfil-rol"></span>
+                    </div>
+                    <div class="perfil-sucursal" id="perfil-sucursal"></div>
+                </div>
+            </div>
+            <form id="form-perfil">
+                <section class="perfil-seccion">
+                    <div class="perfil-seccion-titulo">
+                        <span class="perfil-seccion-icon" aria-hidden="true">✎</span>
+                        <div><h3>Información personal</h3><p>Así aparecerá tu nombre en el sistema.</p></div>
+                    </div>
+                    <label>Nombre para mostrar
+                        <input type="text" id="perfil-nombre" placeholder="Tu nombre" autocomplete="name" required>
+                    </label>
+                </section>
+                <section class="perfil-seccion">
+                    <div class="perfil-seccion-titulo">
+                        <span class="perfil-seccion-icon" aria-hidden="true">⌑</span>
+                        <div><h3>Seguridad</h3><p>Deja estos campos vacíos si no deseas cambiar la contraseña.</p></div>
+                    </div>
+                    <label>Contraseña actual
+                        <span class="perfil-password-wrap">
+                            <input type="password" id="perfil-pass-actual" placeholder="Tu contraseña actual" autocomplete="current-password">
+                            <button type="button" class="perfil-password-toggle" data-password-target="perfil-pass-actual" aria-label="Mostrar contraseña actual" aria-pressed="false">Mostrar</button>
+                        </span>
+                    </label>
+                    <label>Nueva contraseña
+                        <span class="perfil-password-wrap">
+                            <input type="password" id="perfil-pass-nueva" placeholder="Mínimo 4 caracteres" minlength="4" autocomplete="new-password">
+                            <button type="button" class="perfil-password-toggle" data-password-target="perfil-pass-nueva" aria-label="Mostrar nueva contraseña" aria-pressed="false">Mostrar</button>
+                        </span>
+                    </label>
+                    <label>Confirmar nueva contraseña
+                        <span class="perfil-password-wrap">
+                            <input type="password" id="perfil-pass-confirmar" placeholder="Repite la nueva contraseña" minlength="4" autocomplete="new-password">
+                            <button type="button" class="perfil-password-toggle" data-password-target="perfil-pass-confirmar" aria-label="Mostrar confirmación de contraseña" aria-pressed="false">Mostrar</button>
+                        </span>
+                    </label>
+                </section>
+                <div class="perfil-acciones">
+                    <button type="button" class="btn" data-close="modal-perfil">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar cambios</button>
+                </div>
             </form>
         </div>
     </div>

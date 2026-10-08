@@ -3790,16 +3790,50 @@ async function borrarInventario() {
 }
 
 // ---------------- Perfil y sesión ----------------
+function inicialesPerfil(nombre, usuario) {
+    const partes = String(nombre || usuario || '?').trim().split(/\s+/).filter(Boolean);
+    if (partes.length > 1) return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+    return (partes[0] || '?').slice(0, 2).toUpperCase();
+}
+
+function etiquetaRolPerfil(sesion) {
+    if (sesion.receptor) return 'Almacén receptor';
+    const etiquetas = {
+        superadmin: 'Superadministrador',
+        admin: 'Administrador',
+        encargado: sesion.sucursal_principal ? 'Encargado de almacén' : 'Encargado',
+        preparador: 'Preparador',
+        repartidor: 'Repartidor',
+    };
+    return etiquetas[sesion.rol] || 'Usuario';
+}
+
+function actualizarPresentacionPerfil(nombre) {
+    const limpio = String(nombre || '').trim();
+    $('#perfil-avatar-lg').textContent = inicialesPerfil(limpio, window.USUARIO);
+    $('#perfil-titulo-nombre').textContent = limpio || 'Mi perfil';
+}
+
 const tSes = $('#sidebar-sesion');
 if (tSes) {
     tSes.addEventListener('click', async () => {
         try {
             const s = await request(API + '/sesion');
-            const ini = esc((s.nombre || s.usuario || '?')[0].toUpperCase());
-            $('#perfil-avatar-lg').textContent = (s.nombre || s.usuario || '?')[0].toUpperCase();
+            window.USUARIO = s.usuario || window.USUARIO || '';
             $('#perfil-nombre').value = s.nombre || '';
+            actualizarPresentacionPerfil(s.nombre);
+            $('#perfil-usuario').textContent = s.usuario ? '@' + s.usuario : '';
+            $('#perfil-rol').textContent = etiquetaRolPerfil(s);
+            $('#perfil-sucursal').textContent = s.sucursal_nombre || 'Sin sucursal asignada';
             $('#perfil-pass-actual').value = '';
             $('#perfil-pass-nueva').value = '';
+            $('#perfil-pass-confirmar').value = '';
+            $$('.perfil-password-toggle').forEach((button) => {
+                const input = $('#' + button.dataset.passwordTarget);
+                if (input) input.type = 'password';
+                button.textContent = 'Mostrar';
+                button.setAttribute('aria-pressed', 'false');
+            });
             openModal('modal-perfil');
         } catch (e) {
             toast('Error al cargar perfil', 'err');
@@ -3807,14 +3841,41 @@ if (tSes) {
     });
 }
 
+$('#perfil-nombre').addEventListener('input', (e) => {
+    actualizarPresentacionPerfil(e.target.value);
+});
+
+$$('.perfil-password-toggle').forEach((button) => {
+    button.addEventListener('click', () => {
+        const input = $('#' + button.dataset.passwordTarget);
+        if (!input) return;
+        const mostrar = input.type === 'password';
+        input.type = mostrar ? 'text' : 'password';
+        button.textContent = mostrar ? 'Ocultar' : 'Mostrar';
+        button.setAttribute('aria-pressed', String(mostrar));
+        const etiqueta = input.labels[0]?.childNodes[0]?.textContent.trim() || 'contraseña';
+        button.setAttribute('aria-label', `${mostrar ? 'Ocultar' : 'Mostrar'} ${etiqueta}`);
+    });
+});
+
 $('#form-perfil').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
         const body = { nombre: $('#perfil-nombre').value.trim() };
         const passActual = $('#perfil-pass-actual').value;
         const passNueva = $('#perfil-pass-nueva').value;
+        const passConfirmar = $('#perfil-pass-confirmar').value;
+        if (passConfirmar && !passNueva) {
+            toast('Ingresa primero la nueva contraseña', 'err');
+            return;
+        }
         if (passNueva) {
             if (!passActual) { toast('Ingresa tu contraseña actual', 'err'); return; }
+            if (passNueva !== passConfirmar) {
+                toast('La confirmación no coincide con la nueva contraseña', 'err');
+                $('#perfil-pass-confirmar').focus();
+                return;
+            }
             body.actual = passActual;
             body.nueva = passNueva;
         }
