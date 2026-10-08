@@ -1,5 +1,6 @@
 """Pruebas del archivo reversible y separado por sucursal para pedidos."""
 import io
+import inspect
 import os
 import sys
 
@@ -138,11 +139,22 @@ check("admin no puede crear solicitudes",
       isinstance(ejecutar_creacion("admin"), tuple))
 check("encargado de almacén no puede crear solicitudes",
       isinstance(ejecutar_creacion("encargado", principal=1), tuple))
+check("superadmin no puede crear solicitudes",
+      isinstance(ejecutar_creacion("superadmin"), tuple))
+fuente_etapa = inspect.getsource(ped.pedido_etapa)
+check("encargado de almacén puede gestionar etapas",
+      "es_encargado_almacen(conn)" in fuente_etapa
+      and "_AVANCE_ORDENANTE.get(actual_etapa)" in fuente_etapa)
 with open(os.path.join(os.path.dirname(__file__), "static", "app.js"),
           encoding="utf-8") as archivo:
     interfaz = archivo.read()
 check("el alcance global se elige desde el control exclusivo del superadmin",
       "pedido-bandeja-alcance" in interfaz and "Todas las sucursales" in interfaz)
+with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
+          encoding="utf-8") as archivo:
+    texto = archivo.read()
+check("se explica que el superadmin y el encargado no crean solicitudes",
+      "incluido el superadmin" in texto and "El encargado puede cambiar estados" in texto)
 
 respuesta = ejecutar_archivo("entregado", True)
 inserciones = [(sql, params) for sql, params in CAPTURADO
