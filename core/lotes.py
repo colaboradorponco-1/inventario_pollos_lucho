@@ -78,6 +78,8 @@ def destinos_validos(conn, desde=None):
         "WHERE principal = 1 OR IFNULL(provee, 0) = 1 OR IFNULL(es_as, 0) = 1 "
         "OR EXISTS (SELECT 1 FROM usuarios u "
         "WHERE u.sucursal_id = sucursales.id AND IFNULL(u.receptor, 0) = 1) "
+        "OR EXISTS (SELECT 1 FROM almacenes a "
+        "WHERE a.sucursal_id = sucursales.id AND a.nombre LIKE 'AS %') "
         "ORDER BY principal DESC, nombre, id").fetchall()
     ids = [int(f["id"]) for f in filas]
     permitidos = _ids_proveedores_misma_ciudad(conn, desde)
@@ -105,6 +107,8 @@ def stock_por_destino(conn, desde=None):
               s.principal = 1 OR IFNULL(s.provee, 0) = 1 OR IFNULL(s.es_as, 0) = 1
               OR EXISTS (SELECT 1 FROM usuarios u
                          WHERE u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1)
+              OR EXISTS (SELECT 1 FROM almacenes a
+                         WHERE a.sucursal_id = s.id AND a.nombre LIKE 'AS %')
           )
         GROUP BY l.producto_id, l.sucursal_id, s.nombre
         ORDER BY s.principal DESC, s.nombre, l.sucursal_id

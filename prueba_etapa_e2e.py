@@ -387,7 +387,9 @@ def correr_casos():
     validos = {r["id"] for r in CONN.execute(
         "SELECT id FROM sucursales WHERE principal = 1 OR IFNULL(provee, 0) = 1 "
         "OR IFNULL(es_as, 0) = 1 OR EXISTS (SELECT 1 FROM usuarios u "
-        "WHERE u.sucursal_id = sucursales.id AND IFNULL(u.receptor, 0) = 1)").fetchall()}
+        "WHERE u.sucursal_id = sucursales.id AND IFNULL(u.receptor, 0) = 1) "
+        "OR EXISTS (SELECT 1 FROM almacenes a "
+        "WHERE a.sucursal_id = sucursales.id AND a.nombre LIKE 'AS %')").fetchall()}
     check(f"'{no_dist['nombre']}' NO puede ser proveedor", no_dist["id"] not in validos)
     check(f"'{dist['nombre']}' SI puede ser proveedor", dist["id"] in validos)
     for s in no_distribuidoras:

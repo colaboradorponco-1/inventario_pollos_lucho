@@ -33,12 +33,15 @@ def _sucursales(conn):
         "SELECT s.id, s.nombre, s.principal, IFNULL(s.provee, 0) AS provee, "
         "IFNULL(s.es_as, 0) AS es_as, "
         "EXISTS (SELECT 1 FROM usuarios u "
-        "WHERE u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1) AS receptor "
+        "WHERE u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1) AS receptor, "
+        "EXISTS (SELECT 1 FROM almacenes a "
+        "WHERE a.sucursal_id = s.id AND a.nombre LIKE 'AS %') AS almacen_as "
         "FROM sucursales s ORDER BY principal DESC, nombre").fetchall()}
 
 
 def _puede_ser_destino(s):
-    return bool(s["principal"]) or bool(s["provee"]) or bool(s["es_as"]) or bool(s["receptor"])
+    return (bool(s["principal"]) or bool(s["provee"]) or bool(s["es_as"])
+            or bool(s["receptor"]) or bool(s["almacen_as"]))
 
 
 def main():

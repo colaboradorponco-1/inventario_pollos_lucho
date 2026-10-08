@@ -380,7 +380,8 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
            "def stock_por_destino" in lotes)
     _check("stock de destino reconoce principales, proveedores, AS y receptores",
            "s.principal = 1 OR IFNULL(s.provee, 0) = 1 OR IFNULL(s.es_as, 0) = 1" in lotes
-           and "u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1" in lotes)
+           and "u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1" in lotes
+           and "a.sucursal_id = s.id AND a.nombre LIKE 'AS %'" in lotes)
     _check("existe destinos_validos con el principal primero",
            "def destinos_validos" in lotes and "ORDER BY principal DESC, nombre" in lotes)
     _check("elegir_destino devuelve la sucursal del catalogo si puede atender",
@@ -435,10 +436,12 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
     _check("destinos_validos incluye principales, proveedoras, AS y receptores",
            "WHERE principal = 1 OR IFNULL(provee, 0) = 1 OR IFNULL(es_as, 0) = 1" in lotes
            and "u.sucursal_id = sucursales.id AND IFNULL(u.receptor, 0) = 1" in lotes
+           and "a.sucursal_id = sucursales.id AND a.nombre LIKE 'AS %'" in lotes
            and "EXISTS (SELECT 1 FROM productos p" not in lotes)
     _check("stock_por_destino usa la misma autorización",
            "s.principal = 1 OR IFNULL(s.provee, 0) = 1 OR IFNULL(s.es_as, 0) = 1" in lotes
            and "u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1" in lotes
+           and "a.sucursal_id = s.id AND a.nombre LIKE 'AS %'" in lotes
            and "EXISTS (SELECT 1 FROM productos p" not in lotes)
 
     # Auto-pedido: una sucursal puede pedirse a si misma (su propio almacén
@@ -508,12 +511,14 @@ def prueba_control_oferta_productos():
            and            "SELECT s.principal, s.provee, s.es_as" in prod
            and "sucursal.get(\"es_as\")" in prod
            and "sucursal.get(\"receptor\")" in prod
+           and "sucursal.get(\"almacen_as\")" in prod
            and "if para_proveer and not _sucursal_puede_proveer(conn, sid)" in prod)
     _check("el catálogo de pedidos incluye productos de almacenes AS",
            "IFNULL(p.para_proveer, 1) = 1" in prod
            and "p.sucursal_id IS NOT NULL" in prod
            and "sp.principal = 1 OR sp.provee = 1 OR sp.es_as = 1" in prod
-           and "u.sucursal_id = sp.id AND IFNULL(u.receptor, 0) = 1" in prod)
+           and "u.sucursal_id = sp.id AND IFNULL(u.receptor, 0) = 1" in prod
+           and "a.sucursal_id = sp.id AND a.nombre LIKE 'AS %'" in prod)
     _check("el formulario guarda la opción al crear y editar productos",
            'id="prod-para-proveer"' in tpl
            and "para_proveer: $('#prod-para-proveer').checked" in js
@@ -548,6 +553,9 @@ def prueba_control_oferta_productos():
     _check("una sucursal con usuario receptor puede ofrecer productos",
            callable(puede) and puede(Conexion({
                "principal": 0, "provee": 0, "es_as": 0, "receptor": 1}), 5))
+    _check("una sucursal con almacén AS puede ofrecer productos",
+           callable(puede) and puede(Conexion({
+               "principal": 0, "provee": 0, "es_as": 0, "receptor": 0, "almacen_as": 1}), 5))
     if callable(puede):
         ns["session"] = {"receptor": True}
         ns["sucursal_actual"] = lambda: 5
