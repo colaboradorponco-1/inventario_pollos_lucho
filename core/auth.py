@@ -1,13 +1,49 @@
 import time
 import unicodedata
+from io import BytesIO
 
-from flask import Blueprint, request, session
+from flask import Blueprint, request, send_file, session
+from PIL import Image, ImageOps, UnidentifiedImageError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from database import get_conn
 from .util import ok, err, login_requerido, registrar_auditoria
 
 auth_bp = Blueprint("auth", __name__)
+
+AVATARES_PERMITIDOS = {"pollito", "gallina", "gallo", "pechuga", "alita"}
+AVATAR_IMAGEN_MAX_BYTES = 3 * 1024 * 1024
+AVATAR_IMAGEN_MAX_PIXELES = 20_000_000
+AVATAR_IMAGEN_TAMANO = (256, 256)
+
+
+def _normalizar_imagen_perfil(contenido):
+    if not contenido or len(contenido) > AVATAR_IMAGEN_MAX_BYTES:
+        raise ValueError("La imagen debe pesar menos de 3 MB")
+    try:
+        origen = Image.open(BytesIO(contenido))
+        if origen.format not in ("JPEG", "PNG", "WEBP"):
+            raise ValueError("Usa una imagen JPG, PNG o WebP")
+        ancho, alto = origen.size
+        if (ancho <= 0 or alto <= 0 or ancho * alto > AVATAR_IMAGEN_MAX_PIXELES
+                or max(ancho, alto) > 8000):
+            raise ValueError("La imagen tiene dimensiones demasiado grandes")
+        origen.verify()
+        imagen = Image.open(BytesIO(contenido))
+        imagen = ImageOps.exif_transpose(imagen)
+        if imagen.mode in ("RGBA", "LA") or "transparency" in imagen.info:
+            rgba = imagen.convert("RGBA")
+            fondo = Image.new("RGB", rgba.size, "white")
+            fondo.paste(rgba, mask=rgba.getchannel("A"))
+            imagen = fondo
+        else:
+            imagen = imagen.convert("RGB")
+        imagen = ImageOps.fit(imagen, AVATAR_IMAGEN_TAMANO, method=Image.Resampling.LANCZOS)
+        salida = BytesIO()
+        imagen.save(salida, format="WEBP", quality=82, method=6)
+        return salida.getvalue()
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("No se pudo leer la imagen. Selecciona un JPG, PNG o WebP válido") from exc
 
 
 def _es_sucursal_paz(nombre):
@@ -63,7 +99,9 @@ def login():
     usuario = (data.get("usuario") or "").strip()
     password = data.get("password") or ""
     conn = get_conn()
-    row = conn.execute("SELECT * FROM usuarios WHERE usuario = ?", (usuario,)).fetchone()
+    row = conn.execute(
+        "SELECT id, usuario, password_hash, nombre, rol, sucursal_id, activo, receptor "
+        "FROM usuarios WHERE usuario = ?", (usuario,)).fetchone()
     sucursal_nombre = ""
     if row and row.get("sucursal_id"):
         s = conn.execute("SELECT nombre FROM sucursales WHERE id = ?", (row["sucursal_id"],)).fetchone()
@@ -114,9 +152,14 @@ def sesion():
     es_la_paz = _es_sucursal_paz(nombre_suc)
     if es_la_paz:
         principal = False  # La Paz es filial: nunca es almacén principal
+    conn = get_conn()
+    fila_avatar = conn.execute(
+        "SELECT avatar FROM usuarios WHERE id = ?", (session["user_id"],)).fetchone()
+    conn.close()
     return ok({"usuario": session.get("usuario"), "nombre": session.get("nombre"),
                "rol": session.get("rol"), "sucursal_id": sid,
                "sucursal_nombre": session.get("sucursal_nombre", ""),
+               "avatar": (fila_avatar or {}).get("avatar") or "pollito",
                "sucursal_principal": principal,
                "es_la_paz": es_la_paz,
                "receptor": bool(session.get("receptor")),
@@ -132,7 +175,8 @@ def cambiar_password():
     if len(nueva) < 4:
         return err("La nueva contraseña debe tener al menos 4 caracteres")
     conn = get_conn()
-    row = conn.execute("SELECT * FROM usuarios WHERE id = ?", (session["user_id"],)).fetchone()
+    row = conn.execute(
+        "SELECT password_hash FROM usuarios WHERE id = ?", (session["user_id"],)).fetchone()
     if not row or not check_password_hash(row["password_hash"], actual):
         conn.close()
         return err("La contraseña actual es incorrecta")
@@ -154,7 +198,8 @@ def editar_perfil():
     if not nombre:
         return err("El nombre es obligatorio")
     conn = get_conn()
-    row = conn.execute("SELECT * FROM usuarios WHERE id = ?", (session["user_id"],)).fetchone()
+    row = conn.execute(
+        "SELECT id, password_hash FROM usuarios WHERE id = ?", (session["user_id"],)).fetchone()
     if not row:
         conn.close()
         return err("Usuario no encontrado", 404)
@@ -176,3 +221,58 @@ def editar_perfil():
     conn.commit()
     conn.close()
     return ok(message="Perfil actualizado")
+
+
+@auth_bp.route("/api/perfil/avatar", methods=["PUT"])
+@login_requerido
+def editar_avatar_perfil():
+    conn = get_conn()
+    user_id = session["user_id"]
+    if request.mimetype == "multipart/form-data":
+        if request.content_length and request.content_length > AVATAR_IMAGEN_MAX_BYTES + 65536:
+            conn.close()
+            return err("La imagen debe pesar menos de 3 MB", 413)
+        archivo = request.files.get("imagen")
+        if not archivo or not archivo.filename:
+            conn.close()
+            return err("Selecciona una imagen")
+        contenido = archivo.stream.read(AVATAR_IMAGEN_MAX_BYTES + 1)
+        try:
+            imagen = _normalizar_imagen_perfil(contenido)
+        except ValueError as exc:
+            conn.close()
+            return err(str(exc), 400)
+        conn.execute(
+            "UPDATE usuarios SET avatar = 'foto', avatar_imagen = ? WHERE id = ?",
+            (imagen, user_id))
+        avatar = "foto"
+    else:
+        data = request.get_json(silent=True) or {}
+        avatar = data.get("avatar")
+        if avatar not in AVATARES_PERMITIDOS:
+            conn.close()
+            return err("Elige uno de los avatares disponibles", 400)
+        conn.execute(
+            "UPDATE usuarios SET avatar = ?, avatar_imagen = NULL WHERE id = ?",
+            (avatar, user_id))
+    conn.commit()
+    conn.close()
+    registrar_auditoria("Avatar actualizado", f"Usuario {session.get('usuario', '')}")
+    return ok({"avatar": avatar}, message="Foto de perfil actualizada")
+
+
+@auth_bp.route("/api/perfil/avatar/imagen")
+@login_requerido
+def imagen_avatar_perfil():
+    conn = get_conn()
+    fila = conn.execute(
+        "SELECT avatar, avatar_imagen FROM usuarios WHERE id = ?",
+        (session["user_id"],)).fetchone()
+    conn.close()
+    if not fila or fila.get("avatar") != "foto" or not fila.get("avatar_imagen"):
+        return err("No hay una foto de perfil", 404)
+    respuesta = send_file(BytesIO(fila["avatar_imagen"]), mimetype="image/webp",
+                          max_age=0, download_name="avatar.webp")
+    respuesta.headers["Cache-Control"] = "private, no-store"
+    respuesta.headers["X-Content-Type-Options"] = "nosniff"
+    return respuesta

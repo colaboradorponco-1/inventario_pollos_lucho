@@ -97,7 +97,9 @@ const nomProd = (p) => esc(p.nombre) + (p.marca ? ` - ${esc(p.marca)}` : '');
 async function request(url, opts = {}) {
     const init = { headers: { 'Content-Type': 'application/json' }, ...opts };
     // fetch() convierte un objeto en "[object Object]" y Flask responde 400.
-    if (init.body && typeof init.body === 'object' && !(init.body instanceof FormData)) {
+    if (init.body instanceof FormData) {
+        delete init.headers['Content-Type'];
+    } else if (init.body && typeof init.body === 'object') {
         init.body = JSON.stringify(init.body);
     }
     const res = await fetch(url, init);
@@ -3796,6 +3798,75 @@ function inicialesPerfil(nombre, usuario) {
     return (partes[0] || '?').slice(0, 2).toUpperCase();
 }
 
+const AVATARES_PERFIL = {
+    pollito: '🐣',
+    gallina: '🐔',
+    gallo: '🐓',
+    pechuga: '🍗',
+    alita: '🪽',
+};
+let avatarPerfilActual = 'pollito';
+let avatarPerfilPendiente = null;
+let avatarPerfilArchivo = null;
+let avatarPerfilPreviewUrl = '';
+
+function pintarAvatar(elemento, avatar, usuario = window.USUARIO) {
+    if (!elemento) return;
+    elemento.replaceChildren();
+    if (avatar === 'foto') {
+        const imagen = document.createElement('img');
+        imagen.src = API + '/perfil/avatar/imagen?v=' + Date.now();
+        imagen.alt = 'Foto de perfil';
+        imagen.addEventListener('error', () => {
+            elemento.textContent = AVATARES_PERFIL.pollito;
+        }, { once: true });
+        elemento.appendChild(imagen);
+    } else if (AVATARES_PERFIL[avatar]) {
+        elemento.textContent = AVATARES_PERFIL[avatar];
+    } else {
+        elemento.textContent = inicialesPerfil(window.NOMBRE_USUARIO, usuario);
+    }
+}
+
+function mostrarAvatarPendiente(avatar, previewUrl = '') {
+    avatarPerfilPendiente = avatar;
+    avatarPerfilArchivo = null;
+    if (avatarPerfilPreviewUrl) URL.revokeObjectURL(avatarPerfilPreviewUrl);
+    avatarPerfilPreviewUrl = previewUrl;
+    const grande = $('#perfil-avatar-lg');
+    if (previewUrl) {
+        const imagen = document.createElement('img');
+        imagen.src = previewUrl;
+        imagen.alt = 'Vista previa de la foto de perfil';
+        grande.replaceChildren(imagen);
+    } else {
+        pintarAvatar(grande, avatar);
+    }
+    $$('.perfil-avatar-opcion').forEach((boton) => {
+        boton.setAttribute('aria-pressed', String(boton.dataset.avatarPreset === avatar));
+    });
+    $('#perfil-avatar-estado').textContent = 'Cambios de avatar sin guardar';
+    $('#btn-guardar-avatar').disabled = false;
+}
+
+function mostrarAvatarSeleccionado(avatar) {
+    const seleccionado = avatar || 'pollito';
+    pintarAvatar($('#perfil-avatar-lg'), seleccionado);
+    $$('.perfil-avatar-opcion').forEach((boton) => {
+        boton.setAttribute('aria-pressed', String(boton.dataset.avatarPreset === seleccionado));
+    });
+    $('#perfil-avatar-estado').textContent = '';
+    const nombreArchivo = $('#perfil-foto-nombre');
+    if (nombreArchivo) nombreArchivo.textContent = 'JPG, PNG o WebP; máximo 3 MB.';
+    $('#btn-guardar-avatar').disabled = true;
+}
+
+function actualizarAvatarMenu(avatar) {
+    window.AVATAR = avatar || 'pollito';
+    const contenedor = $('#sidebar-sesion .sesion-avatar');
+    if (contenedor) pintarAvatar(contenedor, window.AVATAR);
+}
+
 function etiquetaRolPerfil(sesion) {
     if (sesion.receptor) return 'Almacén receptor';
     const etiquetas = {
@@ -3810,7 +3881,6 @@ function etiquetaRolPerfil(sesion) {
 
 function actualizarPresentacionPerfil(nombre) {
     const limpio = String(nombre || '').trim();
-    $('#perfil-avatar-lg').textContent = inicialesPerfil(limpio, window.USUARIO);
     $('#perfil-titulo-nombre').textContent = limpio || 'Mi perfil';
 }
 
@@ -3820,6 +3890,7 @@ if (tSes) {
         try {
             const s = await request(API + '/sesion');
             window.USUARIO = s.usuario || window.USUARIO || '';
+            window.NOMBRE_USUARIO = s.nombre || '';
             $('#perfil-nombre').value = s.nombre || '';
             actualizarPresentacionPerfil(s.nombre);
             $('#perfil-usuario').textContent = s.usuario ? '@' + s.usuario : '';
@@ -3828,6 +3899,12 @@ if (tSes) {
             $('#perfil-pass-actual').value = '';
             $('#perfil-pass-nueva').value = '';
             $('#perfil-pass-confirmar').value = '';
+            avatarPerfilPendiente = null;
+            avatarPerfilArchivo = null;
+            if (avatarPerfilPreviewUrl) URL.revokeObjectURL(avatarPerfilPreviewUrl);
+            avatarPerfilPreviewUrl = '';
+            mostrarAvatarSeleccionado(s.avatar);
+            $('#perfil-foto-archivo').value = '';
             $$('.perfil-password-toggle').forEach((button) => {
                 const input = $('#' + button.dataset.passwordTarget);
                 if (input) input.type = 'password';
@@ -3840,6 +3917,72 @@ if (tSes) {
         }
     });
 }
+
+$('#perfil-avatar-opciones').addEventListener('click', (e) => {
+    const boton = e.target.closest('[data-avatar-preset]');
+    if (!boton) return;
+    mostrarAvatarPendiente(boton.dataset.avatarPreset);
+    $('#perfil-foto-archivo').value = '';
+    $('#perfil-foto-nombre').textContent = 'JPG, PNG o WebP; máximo 3 MB.';
+});
+
+$('#perfil-foto-archivo').addEventListener('change', (e) => {
+    const archivo = e.target.files && e.target.files[0];
+    if (!archivo) return;
+    const tiposPermitidos = ['image/jpeg', 'image/png', 'image/webp'];
+    const extensionesPermitidas = /\.(jpe?g|png|webp)$/i.test(archivo.name);
+    if (archivo.type ? !tiposPermitidos.includes(archivo.type) : !extensionesPermitidas) {
+        e.target.value = '';
+        toast('Elige una imagen JPG, PNG o WebP', 'err');
+        return;
+    }
+    if (archivo.size > 3 * 1024 * 1024) {
+        e.target.value = '';
+        toast('La imagen debe pesar menos de 3 MB', 'err');
+        return;
+    }
+    avatarPerfilArchivo = archivo;
+    avatarPerfilPendiente = 'foto';
+    if (avatarPerfilPreviewUrl) URL.revokeObjectURL(avatarPerfilPreviewUrl);
+    avatarPerfilPreviewUrl = URL.createObjectURL(archivo);
+    const imagen = document.createElement('img');
+    imagen.src = avatarPerfilPreviewUrl;
+    imagen.alt = 'Vista previa de la foto de perfil';
+    $('#perfil-avatar-lg').replaceChildren(imagen);
+    $$('.perfil-avatar-opcion').forEach((boton) => boton.setAttribute('aria-pressed', 'false'));
+    $('#perfil-foto-nombre').textContent = archivo.name;
+    $('#perfil-avatar-estado').textContent = 'Vista previa lista; guarda para aplicar la foto.';
+    $('#btn-guardar-avatar').disabled = false;
+});
+
+$('#btn-guardar-avatar').addEventListener('click', async () => {
+    if (!avatarPerfilPendiente) return;
+    const boton = $('#btn-guardar-avatar');
+    boton.disabled = true;
+    try {
+        let respuesta;
+        if (avatarPerfilArchivo) {
+            const form = new FormData();
+            form.append('imagen', avatarPerfilArchivo);
+            respuesta = await request(API + '/perfil/avatar', { method: 'PUT', body: form });
+        } else {
+            respuesta = await request(API + '/perfil/avatar', {
+                method: 'PUT',
+                body: JSON.stringify({ avatar: avatarPerfilPendiente }),
+            });
+        }
+        avatarPerfilPendiente = null;
+        avatarPerfilArchivo = null;
+        if (avatarPerfilPreviewUrl) URL.revokeObjectURL(avatarPerfilPreviewUrl);
+        avatarPerfilPreviewUrl = '';
+        mostrarAvatarSeleccionado(respuesta.avatar);
+        actualizarAvatarMenu(respuesta.avatar);
+        toast('Foto de perfil actualizada', 'ok');
+    } catch (e) {
+        boton.disabled = false;
+        toast(e.message, 'err');
+    }
+});
 
 $('#perfil-nombre').addEventListener('input', (e) => {
     actualizarPresentacionPerfil(e.target.value);
@@ -5215,9 +5358,14 @@ async function init() {
             else if (s.rol === 'admin') rol = 'Administrador';
             else if (window.RECEPTOR) rol = 'Almacén receptor';
             else rol = 'Encargado';
-            const ini = esc((s.nombre || s.usuario || '?')[0].toUpperCase());
+            window.USUARIO = s.usuario || '';
+            window.NOMBRE_USUARIO = s.nombre || '';
+            window.AVATAR = s.avatar || 'pollito';
+            const avatarMenu = window.AVATAR === 'foto'
+                ? `<img src="${API}/perfil/avatar/imagen?v=${Date.now()}" alt="" loading="lazy">`
+                : esc(AVATARES_PERFIL[window.AVATAR] || inicialesPerfil(s.nombre, s.usuario));
             const suc = window.SUCURSAL ? `<div class="sesion-suc">${esc(window.SUCURSAL)}</div>` : '';
-            tSes.innerHTML = '<div class="sesion-header"><div class="sesion-avatar">' + ini + '</div><span class="sesion-dot"></span><span class="sesion-nombre">' + esc(s.nombre || s.usuario) + '</span></div><div class="sesion-rol">' + esc(rol) + ' - Conectado</div>' + suc;
+            tSes.innerHTML = '<div class="sesion-header"><div class="sesion-avatar">' + avatarMenu + '</div><span class="sesion-dot"></span><span class="sesion-nombre">' + esc(s.nombre || s.usuario) + '</span></div><div class="sesion-rol">' + esc(rol) + ' - Conectado</div>' + suc;
         }
     } catch (e) {
         window.location.href = '/login';

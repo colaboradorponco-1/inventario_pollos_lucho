@@ -346,6 +346,8 @@ def init_db():
                     "nombre VARCHAR(255) DEFAULT '',"
                     "rol VARCHAR(50) DEFAULT 'encargado',"
                     "sucursal_id INT,"
+                    "avatar VARCHAR(30) NOT NULL DEFAULT 'pollito',"
+                    "avatar_imagen MEDIUMBLOB,"
                     "activo TINYINT DEFAULT 1)")
         cur.execute("CREATE TABLE IF NOT EXISTS ventas ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
@@ -677,6 +679,10 @@ def migrar_esquema():
         # misma sucursal (mismo rol, misma sucursal) y ven el mismo panel.
         if not _col_existe(cur, "usuarios", "receptor"):
             _add_columna(cur, "usuarios", "receptor TINYINT NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "usuarios", "avatar"):
+            _add_columna(cur, "usuarios", "avatar VARCHAR(30) NOT NULL DEFAULT 'pollito'")
+        if not _col_existe(cur, "usuarios", "avatar_imagen"):
+            _add_columna(cur, "usuarios", "avatar_imagen MEDIUMBLOB")
         # Backfill auto de receptores: los almacenes receptor se llaman
         # "AS <Sucursal>" (p. ej. "AS America", "AS Simon Lopez"). Se marcan
         # solos en cada arranque, para que el usuario no tenga que correr

@@ -11,7 +11,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pollos Lucho">
-    <link rel="stylesheet" href="/static/style.css?v=202610071950">
+    <link rel="stylesheet" href="/static/style.css?v=202610072123">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }} {{ 'rol-logistica' if session.get('rol') in ('preparador', 'repartidor') else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
@@ -1266,6 +1266,28 @@
                 </div>
             </div>
             <form id="form-perfil">
+                <section class="perfil-seccion perfil-avatar-seccion">
+                    <div class="perfil-seccion-titulo">
+                        <span class="perfil-seccion-icon" aria-hidden="true">✿</span>
+                        <div><h3>Foto de perfil</h3><p>Elige un avatar de Pollos Lucho o sube una foto tuya.</p></div>
+                    </div>
+                    <div class="perfil-avatar-opciones" id="perfil-avatar-opciones">
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollito" aria-pressed="false"><span>🐣</span><small>Pollito</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallina" aria-pressed="false"><span>🐔</span><small>Gallina</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallo" aria-pressed="false"><span>🐓</span><small>Gallo</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pechuga" aria-pressed="false"><span>🍗</span><small>Pechuga</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="alita" aria-pressed="false"><span>🪽</span><small>Alita</small></button>
+                    </div>
+                    <div class="perfil-subir-foto">
+                        <label class="btn" for="perfil-foto-archivo">Subir mi foto</label>
+                        <input type="file" id="perfil-foto-archivo" accept="image/jpeg,image/png,image/webp" hidden>
+                        <span id="perfil-foto-nombre" class="perfil-foto-nombre">JPG, PNG o WebP; máximo 3 MB.</span>
+                    </div>
+                    <div class="perfil-avatar-guardar">
+                        <span id="perfil-avatar-estado" class="perfil-avatar-estado" aria-live="polite"></span>
+                        <button type="button" class="btn btn-primary" id="btn-guardar-avatar" disabled>Guardar avatar</button>
+                    </div>
+                </section>
                 <section class="perfil-seccion">
                     <div class="perfil-seccion-titulo">
                         <span class="perfil-seccion-icon" aria-hidden="true">✎</span>
@@ -1443,7 +1465,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610071950"></script>
+    <script src="/static/app.js?v=202610072123"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
