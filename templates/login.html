@@ -110,6 +110,30 @@
             background: #fff;
             box-shadow: 0 0 0 3px rgba(252,195,2,.18);
         }
+        .login-password-wrap { display: block; position: relative; }
+        .field .login-password-wrap input { padding-right: 48px; }
+        .login-password-toggle {
+            position: absolute;
+            top: 50%;
+            right: 8px;
+            display: grid;
+            width: 34px;
+            height: 34px;
+            place-items: center;
+            padding: 0;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            color: #55514a;
+            cursor: pointer;
+            transform: translateY(-50%);
+        }
+        .login-password-toggle:hover { background: #f2f0eb; color: #0C0908; }
+        .login-password-toggle:focus-visible { outline: 2px solid #FCC302; outline-offset: 1px; }
+        .login-password-toggle svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+        .login-password-toggle .login-eye-hidden { display: none; }
+        .login-password-toggle[aria-pressed="true"] .login-eye-visible { display: none; }
+        .login-password-toggle[aria-pressed="true"] .login-eye-hidden { display: block; }
 
         .btn-login {
             width: 100%;
@@ -195,7 +219,13 @@
                 </div>
                 <div class="field">
                     <label for="login-password">Contraseña</label>
-                    <input type="password" id="login-password" placeholder="••••••" autocomplete="current-password" required>
+                    <span class="login-password-wrap">
+                        <input type="password" id="login-password" placeholder="••••••" autocomplete="current-password" required>
+                        <button type="button" id="login-password-toggle" class="login-password-toggle" aria-label="Mostrar contraseña" aria-pressed="false">
+                            <svg class="login-eye-visible" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>
+                            <svg class="login-eye-hidden" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8"/><path d="M9.9 5.2A10.8 10.8 0 0 1 12 5c6.4 0 10 7 10 7a15.7 15.7 0 0 1-3.1 3.8M6.2 6.2C3.5 8 2 12 2 12s3.6 7 10 7a10.5 10.5 0 0 0 4-.8"/></svg>
+                        </button>
+                    </span>
                 </div>
                 <button type="submit" class="btn-login">ENTRAR</button>
             </form>
@@ -210,6 +240,15 @@
     </div>
 
     <script>
+        const loginPassword = document.getElementById('login-password');
+        const loginPasswordToggle = document.getElementById('login-password-toggle');
+        loginPasswordToggle.addEventListener('click', () => {
+            const mostrar = loginPassword.type === 'password';
+            loginPassword.type = mostrar ? 'text' : 'password';
+            loginPasswordToggle.setAttribute('aria-label', mostrar ? 'Ocultar contraseña' : 'Mostrar contraseña');
+            loginPasswordToggle.setAttribute('aria-pressed', String(mostrar));
+        });
+
         document.getElementById('form-login').addEventListener('submit', async (e) => {
             e.preventDefault();
             const res = await fetch('/api/login', {

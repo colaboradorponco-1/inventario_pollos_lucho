@@ -86,6 +86,12 @@ def ejecutar():
     with open(os.path.join(os.path.dirname(__file__), "static", "app.js"),
               encoding="utf-8") as archivo:
         javascript = archivo.read()
+    with open(os.path.join(os.path.dirname(__file__), "static", "avatares.svg"),
+              encoding="utf-8") as archivo:
+        catalogo = archivo.read()
+    with open(os.path.join(os.path.dirname(__file__), "templates", "login.html"),
+              encoding="utf-8") as archivo:
+        login = archivo.read()
 
     def check(nombre, condicion):
         print(f"  {'OK' if condicion else 'FALLO'} {nombre}")
@@ -98,21 +104,31 @@ def ejecutar():
     check("la base agrega columnas persistentes y compatibles con los respaldos",
           '"avatar_imagen MEDIUMBLOB"' in esquema
           and '_add_columna(cur, "usuarios", "avatar_imagen MEDIUMBLOB")' in esquema)
-    check("la interfaz ofrece avatares de pollo y carga de foto",
+    check("el catálogo incluye ilustraciones locales de pollos y personas",
           'data-avatar-preset="pollito"' in interfaz
           and 'data-avatar-preset="alita"' in interfaz
-          and 'id="perfil-foto-archivo"' in interfaz
+          and 'data-avatar-preset="persona_6"' in interfaz
+          and 'id="avatar-pollito"' in catalogo
+          and 'id="avatar-persona-6"' in catalogo
+          and "crearAvatarSvg" in javascript
+          and "$$('.perfil-avatar-opciones').forEach" in javascript)
+    check("el inicio de sesión permite mostrar u ocultar la contraseña",
+          'id="login-password-toggle"' in login
+          and "loginPassword.type = mostrar ? 'text' : 'password'" in login
+          and 'aria-pressed="false"' in login)
+    check("la interfaz conserva la carga de foto propia",
+          'id="perfil-foto-archivo"' in interfaz
           and "new FormData()" in javascript)
 
     CONN.usuario.update(avatar="pollito", avatar_imagen=None)
     cliente = cliente_autenticado()
-    respuesta = cliente.put("/api/perfil/avatar", json={"avatar": "gallina"})
-    check("permite elegir un avatar de pollo disponible",
-          respuesta.status_code == 200 and CONN.usuario["avatar"] == "gallina")
+    respuesta = cliente.put("/api/perfil/avatar", json={"avatar": "persona_3"})
+    check("permite elegir una ilustración de persona del catálogo",
+          respuesta.status_code == 200 and CONN.usuario["avatar"] == "persona_3")
 
     respuesta_invalida = cliente.put("/api/perfil/avatar", json={"avatar": "no-permitido"})
     check("rechaza valores de avatar arbitrarios",
-          respuesta_invalida.status_code == 400 and CONN.usuario["avatar"] == "gallina")
+          respuesta_invalida.status_code == 400 and CONN.usuario["avatar"] == "persona_3")
 
     respuesta_foto = cliente.put(
         "/api/perfil/avatar",

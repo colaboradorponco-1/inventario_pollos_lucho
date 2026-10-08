@@ -768,6 +768,8 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
 }
+.perfil-avatar-categoria { margin: 14px 0 7px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.perfil-avatar-categoria:first-child { margin-top: 0; }
 .perfil-avatar-opcion {
     display: flex;
     min-width: 0;
@@ -788,13 +790,14 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
     background: #fff9df;
     box-shadow: 0 0 0 2px rgba(252,195,2,.13);
 }
-.perfil-avatar-opcion span { font-size: 28px; line-height: 1.2; }
+.perfil-avatar-opcion svg { display: block; width: 48px; height: 48px; }
 .perfil-avatar-opcion small { font-size: 10px; font-weight: 700; }
 .perfil-subir-foto { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .perfil-foto-nombre { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .perfil-avatar-guardar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; }
 .perfil-avatar-estado { color: var(--success, #16803c); font-size: 12px; }
 .sesion-avatar img, .perfil-avatar-lg img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.sesion-avatar svg, .perfil-avatar-lg svg { display: block; width: 100%; height: 100%; border-radius: 50%; }
 .sesion-avatar img { display: block; }
 .perfil-hero .perfil-avatar-lg { overflow: hidden; }
 .perfil-password-wrap { position: relative; display: flex; align-items: center; margin-top: 5px; }
@@ -817,9 +820,9 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
     .perfil-hero { gap: 13px; padding: 24px 20px 20px; }
     .perfil-hero .perfil-avatar-lg { width: 64px; height: 64px; flex-basis: 64px; }
     #form-perfil { padding: 4px 20px 20px; }
-    .perfil-avatar-opciones { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 5px; }
+    .perfil-avatar-opciones { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
     .perfil-avatar-opcion { padding: 8px 2px; }
-    .perfil-avatar-opcion span { font-size: 23px; }
+    .perfil-avatar-opcion svg { width: 42px; height: 42px; }
     .perfil-avatar-opcion small { font-size: 9px; }
 }
 @media (max-width: 900px) {

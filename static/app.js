@@ -3799,16 +3799,32 @@ function inicialesPerfil(nombre, usuario) {
 }
 
 const AVATARES_PERFIL = {
-    pollito: '🐣',
-    gallina: '🐔',
-    gallo: '🐓',
-    pechuga: '🍗',
-    alita: '🪽',
+    pollito: 'avatar-pollito',
+    gallina: 'avatar-gallina',
+    gallo: 'avatar-gallo',
+    pechuga: 'avatar-pechuga',
+    alita: 'avatar-alita',
+    persona_1: 'avatar-persona-1',
+    persona_2: 'avatar-persona-2',
+    persona_3: 'avatar-persona-3',
+    persona_4: 'avatar-persona-4',
+    persona_5: 'avatar-persona-5',
+    persona_6: 'avatar-persona-6',
 };
 let avatarPerfilActual = 'pollito';
 let avatarPerfilPendiente = null;
 let avatarPerfilArchivo = null;
 let avatarPerfilPreviewUrl = '';
+
+function crearAvatarSvg(avatar) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 64 64');
+    svg.setAttribute('aria-hidden', 'true');
+    const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '/static/avatares.svg#' + AVATARES_PERFIL[avatar]);
+    svg.appendChild(use);
+    return svg;
+}
 
 function pintarAvatar(elemento, avatar, usuario = window.USUARIO) {
     if (!elemento) return;
@@ -3818,11 +3834,11 @@ function pintarAvatar(elemento, avatar, usuario = window.USUARIO) {
         imagen.src = API + '/perfil/avatar/imagen?v=' + Date.now();
         imagen.alt = 'Foto de perfil';
         imagen.addEventListener('error', () => {
-            elemento.textContent = AVATARES_PERFIL.pollito;
+            elemento.replaceChildren(crearAvatarSvg('pollito'));
         }, { once: true });
         elemento.appendChild(imagen);
     } else if (AVATARES_PERFIL[avatar]) {
-        elemento.textContent = AVATARES_PERFIL[avatar];
+        elemento.appendChild(crearAvatarSvg(avatar));
     } else {
         elemento.textContent = inicialesPerfil(window.NOMBRE_USUARIO, usuario);
     }
@@ -3918,12 +3934,14 @@ if (tSes) {
     });
 }
 
-$('#perfil-avatar-opciones').addEventListener('click', (e) => {
-    const boton = e.target.closest('[data-avatar-preset]');
-    if (!boton) return;
-    mostrarAvatarPendiente(boton.dataset.avatarPreset);
-    $('#perfil-foto-archivo').value = '';
-    $('#perfil-foto-nombre').textContent = 'JPG, PNG o WebP; máximo 3 MB.';
+$$('.perfil-avatar-opciones').forEach((opciones) => {
+    opciones.addEventListener('click', (e) => {
+        const boton = e.target.closest('[data-avatar-preset]');
+        if (!boton) return;
+        mostrarAvatarPendiente(boton.dataset.avatarPreset);
+        $('#perfil-foto-archivo').value = '';
+        $('#perfil-foto-nombre').textContent = 'JPG, PNG o WebP; máximo 3 MB.';
+    });
 });
 
 $('#perfil-foto-archivo').addEventListener('change', (e) => {
@@ -5363,7 +5381,9 @@ async function init() {
             window.AVATAR = s.avatar || 'pollito';
             const avatarMenu = window.AVATAR === 'foto'
                 ? `<img src="${API}/perfil/avatar/imagen?v=${Date.now()}" alt="" loading="lazy">`
-                : esc(AVATARES_PERFIL[window.AVATAR] || inicialesPerfil(s.nombre, s.usuario));
+                : AVATARES_PERFIL[window.AVATAR]
+                    ? `<svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#${AVATARES_PERFIL[window.AVATAR]}"></use></svg>`
+                    : esc(inicialesPerfil(s.nombre, s.usuario));
             const suc = window.SUCURSAL ? `<div class="sesion-suc">${esc(window.SUCURSAL)}</div>` : '';
             tSes.innerHTML = '<div class="sesion-header"><div class="sesion-avatar">' + avatarMenu + '</div><span class="sesion-dot"></span><span class="sesion-nombre">' + esc(s.nombre || s.usuario) + '</span></div><div class="sesion-rol">' + esc(rol) + ' - Conectado</div>' + suc;
         }

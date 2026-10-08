@@ -11,7 +11,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Pollos Lucho">
-    <link rel="stylesheet" href="/static/style.css?v=202610072123">
+    <link rel="stylesheet" href="/static/style.css?v=202610072145">
 </head>
 <body class="{{ 'rol-encargado' if session.get('rol') == 'encargado' else '' }} {{ 'rol-logistica' if session.get('rol') in ('preparador', 'repartidor') else '' }}">
     <button class="hamburger" id="btn-menu" aria-label="Abrir menú">
@@ -1271,12 +1271,22 @@
                         <span class="perfil-seccion-icon" aria-hidden="true">✿</span>
                         <div><h3>Foto de perfil</h3><p>Elige un avatar de Pollos Lucho o sube una foto tuya.</p></div>
                     </div>
+                    <h4 class="perfil-avatar-categoria">Avatares de Pollos Lucho</h4>
                     <div class="perfil-avatar-opciones" id="perfil-avatar-opciones">
-                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollito" aria-pressed="false"><span>🐣</span><small>Pollito</small></button>
-                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallina" aria-pressed="false"><span>🐔</span><small>Gallina</small></button>
-                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallo" aria-pressed="false"><span>🐓</span><small>Gallo</small></button>
-                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pechuga" aria-pressed="false"><span>🍗</span><small>Pechuga</small></button>
-                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="alita" aria-pressed="false"><span>🪽</span><small>Alita</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pollito" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-pollito"></use></svg><small>Pollito</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallina" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-gallina"></use></svg><small>Gallina</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="gallo" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-gallo"></use></svg><small>Gallo</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="pechuga" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-pechuga"></use></svg><small>Pechuga</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="alita" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-alita"></use></svg><small>Alita</small></button>
+                    </div>
+                    <h4 class="perfil-avatar-categoria">Personas</h4>
+                    <div class="perfil-avatar-opciones">
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_1" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-1"></use></svg><small>Clásico</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_2" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-2"></use></svg><small>Sonrisa</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_3" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-3"></use></svg><small>Rizado</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_4" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-4"></use></svg><small>Trenzas</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_5" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-5"></use></svg><small>Gorra</small></button>
+                        <button type="button" class="perfil-avatar-opcion" data-avatar-preset="persona_6" aria-pressed="false"><svg viewBox="0 0 64 64" aria-hidden="true"><use href="/static/avatares.svg#avatar-persona-6"></use></svg><small>Ondulado</small></button>
                     </div>
                     <div class="perfil-subir-foto">
                         <label class="btn" for="perfil-foto-archivo">Subir mi foto</label>
@@ -1465,7 +1475,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=202610072123"></script>
+    <script src="/static/app.js?v=202610072145"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

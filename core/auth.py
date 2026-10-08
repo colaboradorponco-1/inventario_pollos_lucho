@@ -11,7 +11,10 @@ from .util import ok, err, login_requerido, registrar_auditoria
 
 auth_bp = Blueprint("auth", __name__)
 
-AVATARES_PERMITIDOS = {"pollito", "gallina", "gallo", "pechuga", "alita"}
+AVATARES_PERMITIDOS = {
+    "pollito", "gallina", "gallo", "pechuga", "alita",
+    "persona_1", "persona_2", "persona_3", "persona_4", "persona_5", "persona_6",
+}
 AVATAR_IMAGEN_MAX_BYTES = 3 * 1024 * 1024
 AVATAR_IMAGEN_MAX_PIXELES = 20_000_000
 AVATAR_IMAGEN_TAMANO = (256, 256)
