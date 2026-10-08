@@ -102,8 +102,8 @@ def es_logistica():
 
 
 def es_receptor():
-    """Ya no existen sucursales AS separadas; siempre devuelve False."""
-    return False
+    """True si la cuenta está configurada como receptora de pedidos."""
+    return bool(session.get("receptor"))
 
 
 def _nombre_norm(nombre):

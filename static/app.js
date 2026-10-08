@@ -4113,6 +4113,11 @@ window.avanzarEtapa = async (id, etapa) => {
         });
         toast((r && r.message) || 'Etapa actualizada', 'ok');
         await cargarBandeja();
+        const modalPedido = $('#modal-pedido');
+        if (modalPedido && modalPedido.classList.contains('show') &&
+            window._pedidoActual && Number(window._pedidoActual.id) === Number(id)) {
+            await window.verPedido(id, true);
+        }
         try { await pintarBadgePedidos(); } catch (_) { }
         const vista = nombreVistaActiva();
         if (vista === 'logistica') loadLogistica();
@@ -5191,11 +5196,16 @@ function pintarEtapaEnModal(p, puedeGestionar) {
     const b = (txt, sig, dark) =>
         `<button class="btn btn-sm" style="${dark ? 'background:#0F3D2E;color:#fff' : ''}" onclick="avanzarEtapa(${p.id}, '${sig}')">${txt}</button>`;
     if (etapa === 'pendiente') {
-        box.innerHTML = rol === 'repartidor'
-            ? '<span class="respaldo-txt">El preparador debe marcar «En camino» primero.</span>'
-            : b('En camino', 'en_camino', true) +
-              (rol === 'preparador' ? '' :
-                  `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`);
+        if (rol === 'repartidor') {
+            box.innerHTML = '<span class="respaldo-txt">El preparador debe marcar «En camino» primero.</span>';
+        } else if (rol === 'preparador') {
+            box.innerHTML = p.miProveedorPreparado
+                ? '<span class="respaldo-txt">Tu parte está lista. El pedido avanzará cuando terminen los demás proveedores.</span>'
+                : b('Marcar mi parte lista', 'en_camino', true);
+        } else {
+            box.innerHTML = b('En camino', 'en_camino', true) +
+                `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`;
+        }
     } else if (etapa === 'en_camino') {
         box.innerHTML = rol === 'preparador'
             ? '<span class="respaldo-txt">El repartidor debe confirmar la entrega.</span>'
@@ -5250,6 +5260,10 @@ window.verPedido = async (id, accionables = true) => {
         openModal('modal-pedido');
         window._pedidoActual = { id, estado: p.estado };
         const esDestinoMio = destIds.some((sid) => String(sid) === String(window.SUCURSAL_ID));
+        const misLineas = data.detalle.filter((d) =>
+            String(d.destino_id || p.destino_id) === String(window.SUCURSAL_ID));
+        p.miProveedorPreparado = misLineas.length > 0 &&
+            misLineas.every((d) => Boolean(d.preparado));
         const puedeGestionarEtapa = window.ROL === 'repartidor'
             ? String(p.sucursal_id) === String(window.SUCURSAL_ID)
             : esDestinoMio;

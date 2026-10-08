@@ -77,8 +77,39 @@ def _solo_fecha(f):
 
 
 def _nro_ticket(conn):
-    fila = conn.execute("SELECT MAX(id) m FROM pedidos").fetchone()["m"] or 0
-    return f"TKT-{int(fila) + 1:05d}"
+    conn.execute("""
+        INSERT IGNORE INTO pedido_ticket_secuencia (id, ultimo_id)
+        SELECT 1, GREATEST(
+            COALESCE((SELECT MAX(id) FROM pedidos), 0),
+            COALESCE((SELECT MAX(CAST(SUBSTRING(nro_ticket, 5) AS UNSIGNED))
+                      FROM pedidos WHERE nro_ticket LIKE 'TKT-%'), 0))
+    """)
+    fila = conn.execute(
+        "SELECT ultimo_id FROM pedido_ticket_secuencia WHERE id = 1 FOR UPDATE"
+    ).fetchone()
+    existentes = conn.execute("""
+        SELECT GREATEST(
+            COALESCE((SELECT MAX(id) FROM pedidos), 0),
+            COALESCE((SELECT MAX(CAST(SUBSTRING(nro_ticket, 5) AS UNSIGNED))
+                      FROM pedidos WHERE nro_ticket LIKE 'TKT-%'), 0)) AS max_ticket
+    """).fetchone()
+    siguiente = max(int(fila["ultimo_id"] or 0),
+                    int(existentes["max_ticket"] or 0)) + 1
+    conn.execute("UPDATE pedido_ticket_secuencia SET ultimo_id = ? WHERE id = 1",
+                 (siguiente,))
+    return f"TKT-{siguiente:05d}"
+
+
+def _proveedores_preparados(detalle, pedido):
+    """Indica si cada proveedor del pedido confirmó su parte."""
+    preparados = {}
+    for linea in detalle:
+        proveedor_id = linea.get("destino_id") or pedido.get("destino_id")
+        if not proveedor_id:
+            return False
+        preparados[proveedor_id] = (
+            preparados.get(proveedor_id, True) and bool(linea.get("preparado")))
+    return bool(preparados) and all(preparados.values())
 
 
 def _texto_tacho(fraccion):
@@ -703,7 +734,7 @@ def pedido_estado(pedido_id):
             conn.close()
             return err("Para entregar la mercadería tienes que usar «Entregar». "
                        "Marcar el estado no descuenta el inventario.")
-        movido = _despachar_stock(conn, pedido)
+        movido = _despachar_stock(conn, pedido, origen_propio=not es_superadmin())
         if movido[0] == "error":
             conn.close()
             return err(movido[1])
@@ -769,19 +800,24 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
     if not suc:
         return "error", "Sucursal solicitante no encontrada"
 
-    # Validar stock en cada proveedor antes de despachar (evita stock negativo).
-    # Se valida TODO antes de mover nada: si una línea falla, no se movió ninguna.
+    # Validar el total por producto y proveedor antes de despachar. Las líneas
+    # repetidas no deben validar cada una contra el mismo stock disponible.
     for origen_id, items in grupos.items():
         org = conn.execute("SELECT nombre FROM sucursales WHERE id = ?", (origen_id,)).fetchone()
         if not org:
             return "error", f"Proveedor {origen_id} no encontrado"
+        # Auto-pedido: no hay traslado, así que no se valida stock de salida.
+        if origen_id == pedido["sucursal_id"]:
+            continue
+        cantidades = {}
         for d in items:
-            # Auto-pedido: no hay traslado, así que no se valida stock de salida.
-            if origen_id == pedido["sucursal_id"]:
-                continue
-            stock = stock_actual(conn, d["producto_id"], origen_id)
-            if stock < d["cantidad"]:
-                return "error", (f"Stock insuficiente de {d['producto_nombre']} en "
+            producto = cantidades.setdefault(
+                d["producto_id"], {"cantidad": 0, "nombre": d["producto_nombre"]})
+            producto["cantidad"] += d["cantidad"]
+        for producto_id, producto in cantidades.items():
+            stock = stock_actual(conn, producto_id, origen_id)
+            if stock < producto["cantidad"]:
+                return "error", (f"Stock insuficiente de {producto['nombre']} en "
                                  f"{org['nombre']}. Disponible: {stock}")
 
     # La mercadería se mueve HOY, no el día en que se hizo el pedido.
@@ -823,8 +859,13 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
             # Los auto-pedidos no mueven stock (origen == sucursal que pide):
             # el reparto queda como constancia y el total, sin salida ni entrada.
             if origen_id != pedido["sucursal_id"]:
-                registrar_movimiento(conn, d["producto_id"], "salida", d["cantidad"], costo, fecha_mov,
-                                      f"Despacho pedido {pedido['nro_ticket']}", session.get("usuario", ""), origen_id)
+                try:
+                    registrar_movimiento(
+                        conn, d["producto_id"], "salida", d["cantidad"], costo, fecha_mov,
+                        f"Despacho pedido {pedido['nro_ticket']}",
+                        session.get("usuario", ""), origen_id)
+                except ValueError as exc:
+                    return "error", str(exc)
                 registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, fecha_mov,
                                       f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
                                       pedido["sucursal_id"])
@@ -872,7 +913,7 @@ def pedido_despachar(pedido_id):
         conn.close()
         return err("El pedido no tiene productos")
 
-    movido = _despachar_stock(conn, pedido, detalle)
+    movido = _despachar_stock(conn, pedido, detalle, origen_propio=not es_superadmin())
     if movido[0] == "error":
         conn.close()
         return err(movido[1])
@@ -1106,7 +1147,7 @@ def pedido_etapa(pedido_id):
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
-    detalle = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
+    detalle = conn.execute("SELECT destino_id, preparado FROM pedido_detalle WHERE pedido_id = ?",
                            (pedido_id,)).fetchall()
     if not _puede_ver_pedido(conn, pedido, detalle):
         conn.close()
@@ -1147,6 +1188,34 @@ def pedido_etapa(pedido_id):
         return err("Ese pedido no lo despacha tu sucursal", 403)
 
     actual_etapa = pedido["etapa"] or "pendiente"
+    if rol == "preparador" and destino_etapa == "en_camino" \
+            and actual_etapa == "pendiente":
+        conn.execute(
+            "UPDATE pedido_detalle SET preparado = 1 "
+            "WHERE pedido_id = ? AND COALESCE(destino_id, ?) = ?",
+            (pedido_id, pedido["destino_id"], sid))
+        detalle = conn.execute(
+            "SELECT destino_id, preparado FROM pedido_detalle WHERE pedido_id = ?",
+            (pedido_id,)).fetchall()
+        if _proveedores_preparados(detalle, pedido):
+            conn.execute(
+                "UPDATE pedidos SET etapa = 'en_camino', estado = 'en_camino' WHERE id = ?",
+                (pedido_id,))
+            conn.commit()
+            conn.close()
+            registrar_auditoria(
+                "Pedido listo para envío",
+                f"{pedido['nro_ticket']}: todos los proveedores prepararon su parte")
+            return ok(message=f"Todos los proveedores prepararon el pedido "
+                              f"{pedido['nro_ticket']}; ya está en camino.")
+        conn.commit()
+        conn.close()
+        registrar_auditoria(
+            "Proveedor preparó pedido",
+            f"{pedido['nro_ticket']} listo en sucursal ID {sid}")
+        return ok(message="Tu parte quedó lista. El pedido pasará a «En camino» "
+                          "cuando los demás proveedores terminen.")
+
     if destino_etapa == actual_etapa:
         conn.close()
         return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")

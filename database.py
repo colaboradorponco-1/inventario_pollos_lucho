@@ -384,6 +384,9 @@ def init_db():
                     "nota TEXT,"
                     "destino_id INT,"
                     "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS pedido_ticket_secuencia ("
+                    "id TINYINT NOT NULL PRIMARY KEY,"
+                    "ultimo_id BIGINT NOT NULL)")
         cur.execute("CREATE TABLE IF NOT EXISTS pedidos_archivados ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "pedido_id INT NOT NULL,"
@@ -403,7 +406,9 @@ def init_db():
                     "unidad VARCHAR(50) DEFAULT 'unidad',"
                     "tacho_fraccion DOUBLE DEFAULT 0,"
                     "tacho_texto VARCHAR(50) DEFAULT '',"
+                    "tacho_unidad DOUBLE DEFAULT 0,"
                     "sin_stock TINYINT NOT NULL DEFAULT 0,"
+                    "preparado TINYINT NOT NULL DEFAULT 0,"
                     "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS repartos ("
@@ -766,6 +771,18 @@ def migrar_esquema():
         # los pedidos ya cargados no generan avisos falsos.
         if not _col_existe(cur, "pedido_detalle", "sin_stock"):
             _add_columna(cur, "pedido_detalle", "sin_stock TINYINT NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "pedido_detalle", "preparado"):
+            _add_columna(cur, "pedido_detalle", "preparado TINYINT NOT NULL DEFAULT 0")
+        cur.execute("CREATE TABLE IF NOT EXISTS pedido_ticket_secuencia ("
+                    "id TINYINT NOT NULL PRIMARY KEY,"
+                    "ultimo_id BIGINT NOT NULL)")
+        cur.execute("""
+            INSERT IGNORE INTO pedido_ticket_secuencia (id, ultimo_id)
+            SELECT 1, GREATEST(
+                COALESCE((SELECT MAX(id) FROM pedidos), 0),
+                COALESCE((SELECT MAX(CAST(SUBSTRING(nro_ticket, 5) AS UNSIGNED))
+                          FROM pedidos WHERE nro_ticket LIKE 'TKT-%'), 0))
+        """)
         if _col_existe(cur, "pedidos", "etapa") and \
                 not _indice_existe(cur, "pedidos", "idx_pedidos_etapa"):
             try:
