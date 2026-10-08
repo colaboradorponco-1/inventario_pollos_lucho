@@ -4,7 +4,10 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
-from .util import ok, err, login_requerido, rol_requerido, registrar_auditoria, registrar_movimiento, stock_actual, ok_paginado, paginar_params, sucursal_actual, sucursal_operativa, clausula_sucursal, es_gestion, es_encargado_almacen
+from .util import (ok, err, login_requerido, rol_requerido, registrar_auditoria,
+                   registrar_movimiento, stock_actual, ok_paginado, paginar_params,
+                   sucursal_actual, sucursal_operativa, clausula_sucursal,
+                   es_gestion, es_encargado_almacen, puede_ver_repartos, es_receptor)
 
 sucursales_bp = Blueprint("sucursales", __name__)
 
@@ -145,10 +148,10 @@ def sucursal(suc_id):
 def repartos():
     conn = get_conn()
     if request.method == "POST":
-        rol = session.get("rol")
-        if rol not in ("superadmin", "admin", "encargado"):
+        if not (es_gestion() or es_encargado_almacen(conn) or es_receptor()):
             conn.close()
             return err("No tienes permisos para esta acción", 403)
+        rol = session.get("rol")
         data = request.get_json() or {}
         fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         sucursal_id = data.get("sucursal_id")
@@ -218,6 +221,9 @@ def repartos():
                             f"Reparto #{reparto_id} de {org['nombre']} a {suc['nombre']} por Bs {round(total, 2)}")
         return ok({"id": reparto_id, "total": round(total, 2)}, message="Reparto registrado")
 
+    if not puede_ver_repartos(conn):
+        conn.close()
+        return err("No tienes permisos para ver los repartos", 403)
     desde = request.args.get("desde", "")
     hasta = request.args.get("hasta", "")
     filtro = request.args.get("filtro", "").strip()
@@ -269,6 +275,9 @@ def repartos():
 @login_requerido
 def reparto_detalle(reparto_id):
     conn = get_conn()
+    if not puede_ver_repartos(conn):
+        conn.close()
+        return err("No tienes permisos para ver los repartos", 403)
     reparto = conn.execute(
         "SELECT r.*, s.nombre AS sucursal_nombre, p4.nro_ticket AS pedido_ticket, "
         "p4.estado AS pedido_estado "
@@ -279,7 +288,10 @@ def reparto_detalle(reparto_id):
         conn.close()
         return err("Reparto no encontrado", 404)
     # Igual que en ventas: el listado filtra por sucursal, el detalle también.
-    if not (es_gestion() or es_encargado_almacen(conn) or reparto["sucursal_id"] == sucursal_actual()):
+    sid = sucursal_actual()
+    if not (es_gestion() or es_encargado_almacen(conn)
+            or reparto["sucursal_id"] == sid
+            or reparto["origen_sucursal_id"] == sid):
         conn.close()
         return err("No tienes permisos para ver este reparto", 403)
     detalle = conn.execute(

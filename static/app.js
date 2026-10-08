@@ -557,6 +557,10 @@ async function loadCatalogos() {
     const esGestion = window.ROL === 'admin' || window.ROL === 'superadmin';
     ['#mov-export-sucursal', '#gasto-export-sucursal', '#venta-export-sucursal', '#reparto-export-sucursal']
         .forEach((id) => { const el = $(id); if (el) el.style.display = esGestion ? 'inline-flex' : 'none'; });
+    const esGestionRepartos = esGestion ||
+        (window.ROL === 'encargado' && window.SUCURSAL_PRINCIPAL && !window.ES_LA_PAZ);
+    const exportRepartos = $('#reparto-export-sucursal');
+    if (exportRepartos) exportRepartos.style.display = esGestionRepartos ? 'inline-flex' : 'none';
     const selUserSuc = $('#user-sucursal');
     if (selUserSuc) selUserSuc.innerHTML = '<option value="">— Asignar después —</option>' + opcionesSucursales(sucursalesTienda(catalogos.sucursales), '');
 }
@@ -1875,7 +1879,8 @@ async function delProveedor(id) {
 // ---------------- Gastos ----------------
 async function loadGastos() {
     try {
-        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' || window.SUCURSAL_PRINCIPAL);
+        const esGestion = (window.ROL === 'admin' || window.ROL === 'superadmin' ||
+            (window.ROL === 'encargado' && window.SUCURSAL_PRINCIPAL && !window.ES_LA_PAZ));
         const tabs = $('#gasto-tabs'), select = $('#gasto-sucursal-select');
         if (tabs) {
             const btnSuc = $('#btn-gasto-sucursales');
@@ -2597,6 +2602,19 @@ let repartoItems = [];
 
 async function loadRepartos() {
     try {
+        const soloConsulta = window.ROL === 'repartidor';
+        const panelNuevoReparto = $('#form-reparto')?.closest('.panel');
+        if (panelNuevoReparto) panelNuevoReparto.style.display = soloConsulta ? 'none' : '';
+        ['#reparto-export-sucursal', '#btn-exportar-repartos'].forEach((selector) => {
+            const el = $(selector);
+            if (el) el.style.display = soloConsulta ? 'none' : '';
+        });
+        if (soloConsulta) {
+            const tabs = $('#reparto-tabs');
+            if (tabs) tabs.style.display = 'none';
+            await listarRepartos();
+            return;
+        }
         await loadCatalogos();
         const respP = await request(API + '/productos?por_pagina=1000&stock_sucursal=' + (window.SUCURSAL_ID || ''));
         const prods = respP.data || respP;
@@ -5355,19 +5373,23 @@ async function init() {
         // Preparador y repartidor SOLO ven pedidos operativos, se oculta todo lo demas.
         if (s.rol === 'encargado') {
             ['usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
+            if (!window.RECEPTOR && (!window.SUCURSAL_PRINCIPAL || window.ES_LA_PAZ)) {
+                ocultar('repartos');
+            }
             // Usuario RECEPTOR (p. ej. "AS America" / "AS Simon Lopez"): es el
             // ALMACEN de una sucursal proveedora. Su trabajo es recibir los
             // pedidos que le hacen a esa sucursal (bandeja) y sus propios datos:
             // dashboard, productos, entradas/salidas, proveedores, reportes y
-            // configuración. No opera inventario, ventas, compras, repartos ni gastos.
+            // configuración. No opera inventario, ventas, compras ni gastos.
             if (window.RECEPTOR) {
-                ['inventario', 'ventas', 'compras', 'repartos', 'gastos'].forEach(ocultar);
+                ['inventario', 'ventas', 'compras', 'gastos'].forEach(ocultar);
             }
         } else if (s.rol === 'admin') {
             ['usuarios', 'respaldo', 'almacenes', 'categorias'].forEach(ocultar);
         } else if (s.rol === 'preparador' || s.rol === 'repartidor') {
             // Panel propio minimo + pedidos. Todo lo demas desaparece.
-            ['dashboard', 'inventario', 'productos', 'ventas', 'repartos', 'gastos', 'reportes', 'usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias', 'movimientos', 'compras', 'proveedores'].forEach(ocultar);
+            ['dashboard', 'inventario', 'productos', 'ventas', 'gastos', 'reportes', 'usuarios', 'auditoria', 'respaldo', 'almacenes', 'categorias', 'movimientos', 'compras', 'proveedores'].forEach(ocultar);
+            if (s.rol === 'preparador') ocultar('repartos');
             const btnLog = document.querySelector('.menu-btn[data-view="logistica"]');
             if (btnLog) btnLog.style.display = '';
             const btnPedidos = $('.menu-btn[data-view="pedidos"]');

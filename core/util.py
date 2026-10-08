@@ -153,13 +153,13 @@ def ids_sucursal_consolidada(conn, sucursal_id):
     return [sucursal_id]
 
 
-# Endpoints que un preparador/repartidor JAMAŚ debe tocar: todo lo que no sea
-# su cola de pedidos. Los pedidos (bandeja + etapa) quedan fuera.
+# Endpoints que preparador/repartidor no deben tocar. El repartidor tiene
+# lectura de repartos; las escrituras se autorizan en la ruta según su rol.
 RUTAS_BLOQUEADAS_LOGISTICA = (
     "/api/dashboard", "/api/categorias", "/api/movimientos",
     "/api/ventas", "/api/gastos", "/api/reportes", "/api/inventario",
     "/api/usuarios", "/api/auditoria", "/api/almacenes",
-    "/api/proveedores", "/api/repartos", "/api/backup",
+    "/api/proveedores", "/api/exportar/repartos", "/api/backup",
     "/api/config",
 )
 
@@ -173,6 +173,8 @@ def ruta_bloqueada_logistica(path, method="GET"):
     if not es_logistica():
         return False
     metodo = (method or "GET").upper()
+    if path == "/api/repartos" or path.startswith("/api/repartos/"):
+        return session.get("rol") != "repartidor" or metodo not in ("GET", "HEAD", "OPTIONS")
     for bloqueada in RUTAS_BLOQUEADAS_LOGISTICA:
         if path == bloqueada or path.startswith(bloqueada + "/"):
             return True
@@ -207,6 +209,12 @@ def es_encargado_almacen(conn):
     # principal en la base, su encargado NO actúa como almacén principal.
     norm = unicodedata.normalize("NFD", fila["nombre"] or "").encode("ascii", "ignore").decode().lower()
     return "la paz" not in norm
+
+
+def puede_ver_repartos(conn):
+    """Solo gestión, almacenes principales, receptores y repartidores ven repartos."""
+    return (es_gestion() or es_encargado_almacen(conn) or es_receptor()
+            or session.get("rol") == "repartidor")
 
 
 def sucursal_actual():

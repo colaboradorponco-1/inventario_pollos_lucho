@@ -4,7 +4,7 @@ from database import get_conn
 from .util import (ok, err, login_requerido, rol_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen, clausula_sucursal,
                    ids_ciudad_permitidos, cond_ciudad, registrar_auditoria,
-                   tipos_movimiento_desconocidos, signo_movimiento)
+                   tipos_movimiento_desconocidos, signo_movimiento, puede_ver_repartos)
 from .productos import scope_productos
 
 reportes_bp = Blueprint("reportes", __name__)
@@ -202,6 +202,9 @@ def exportar_repartos():
     hasta = request.args.get("hasta", "")
     sid_filtro = request.args.get("sucursal_id", "")
     conn = get_conn()
+    if not puede_ver_repartos(conn):
+        conn.close()
+        return err("No tienes permisos para exportar repartos", 403)
     g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     q = """
         SELECT r.id, r.fecha, s.nombre AS sucursal, o.nombre AS origen, r.total, r.usuario, r.nota,
@@ -212,15 +215,16 @@ def exportar_repartos():
         WHERE 1=1
     """
     params = []
-    # Admin/superadmin ven todos los repartos (filtrables por sucursal_id)
-    if es_gestion() and sid_filtro:
+    gestion_total = es_gestion() or es_encargado_almacen(conn)
+    # Admin/superadmin y almacenes principales pueden exportar todo o filtrar.
+    if gestion_total and sid_filtro:
         q += " AND r.sucursal_id = %s"
         params.append(int(sid_filtro))
     elif getattr(g, "ciudad_ids", None):
         cls, cls_params = _cls("r.sucursal_id")
         q += cls
         params += cls_params
-    elif not es_gestion():
+    elif not gestion_total:
         cls, cls_params = clausula_sucursal("r.sucursal_id")
         if cls:
             q += " AND (" + cls[5:] + " OR r.origen_sucursal_id = %s)"

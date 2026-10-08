@@ -81,7 +81,7 @@ def create_app():
 
     @app.before_request
     def bloquear_logistica():
-        """Preparador/repartidor: solo su cola de pedidos. Todo lo demás, bloqueado."""
+        """Limita preparador/repartidor a sus pedidos y lectura de repartos autorizada."""
         if "user_id" not in session:
             return None
         if ruta_bloqueada_logistica(flask_request.path, flask_request.method):
