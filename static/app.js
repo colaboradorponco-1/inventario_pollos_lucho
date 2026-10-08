@@ -1242,11 +1242,16 @@ function exportarProductos() {
     window.location.href = API + '/exportar/productos?' + qs.toString();
 }
 
-function sucursalPermiteOfrecerProductos(sucursalId) {
+function sucursalPermiteOfrecerProductos(sucursalId, almacenId = $('#prod-almacen')?.value) {
     const sucursal = (catalogos.sucursales || [])
         .find((s) => String(s.id) === String(sucursalId));
+    const almacenAS = (catalogos.almacenes || []).some((a) =>
+        String(a.id) === String(almacenId)
+        && String(a.sucursal_id) === String(sucursalId)
+        && /^AS\s/i.test((a.nombre || '').trim()));
     return !!sucursal && (
         Number(sucursal.principal) === 1 || !!sucursal.provee || !!sucursal.es_as
+        || almacenAS
         || (window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID)));
 }
 
@@ -1296,6 +1301,7 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
     // Si el selector no contiene la sucursal del usuario (las AS no figuran en
     // las opciones), se usa `window.SUCURSAL_ID`.
     poblarAlmacenes(+$('#prod-sucursal').value || Number(window.SUCURSAL_ID) || 0);
+    actualizarControlProductoPedido($('#prod-sucursal').value, false);
 
     if (id) {
         const p = lista.find((x) => x.id === id);
@@ -1320,12 +1326,12 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-proveedor').value = p.proveedor_id || '';
     
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
-        actualizarControlProductoPedido($('#prod-sucursal').value, !!p.para_proveer);
         if (esGestionDlg) poblarAlmacenes(+$('#prod-sucursal').value || 0);
         if (esGestionDlg && p.sucursal_id && !p.almacen_id) {
             const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === p.sucursal_id);
             if (match) $('#prod-almacen').value = match.id;
         }
+        actualizarControlProductoPedido($('#prod-sucursal').value, !!p.para_proveer);
         $('#campo-stock-inicial').style.display = 'none';
         $('#campo-stock-actual').style.display = 'flex';
         $('#prod-stock-hint').style.display = 'block';
@@ -1409,6 +1415,10 @@ function poblarAlmacenes(sid) {
 // Al elegir sucursal en el modal de producto, cargar los almacenes de esa sucursal
 $('#prod-sucursal').addEventListener('change', () => {
     poblarAlmacenes(+$('#prod-sucursal').value || 0);
+    actualizarControlProductoPedido($('#prod-sucursal').value, false);
+});
+
+$('#prod-almacen').addEventListener('change', () => {
     actualizarControlProductoPedido($('#prod-sucursal').value, false);
 });
 

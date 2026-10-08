@@ -508,7 +508,7 @@ def prueba_control_oferta_productos():
            and ns["_para_proveer"]({}) == 0)
     _check("una sucursal principal, proveedora o AS puede ofrecer un producto",
            "_sucursal_puede_proveer" in prod
-           and            "SELECT s.principal, s.provee, s.es_as" in prod
+           and "SELECT s.principal, s.provee, s.es_as" in prod
            and "sucursal.get(\"es_as\")" in prod
            and "sucursal.get(\"receptor\")" in prod
            and "sucursal.get(\"almacen_as\")" in prod
@@ -524,6 +524,9 @@ def prueba_control_oferta_productos():
            and "para_proveer: $('#prod-para-proveer').checked" in js
            and "actualizarControlProductoPedido" in js
            and "function sucursalPermiteOfrecerProductos" in js
+           and "String(a.sucursal_id) === String(sucursalId)" in js
+           and "/^AS\\s/i.test" in js
+           and "$('#prod-almacen').addEventListener('change'" in js
            and "!!sucursal.es_as" in js
            and "async function sucursalPermiteOfrecerProductos" not in js)
     _check("desactivar la opción conserva el producto en inventario",
