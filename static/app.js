@@ -4807,6 +4807,8 @@ async function listarPedidos() {
     if (sucF) qs.set('destino_id', sucF);
     const desdeR = ($('#pedido-realizados-desde') || {}).value || '';
     const hastaR = ($('#pedido-realizados-hasta') || {}).value || '';
+    const vistaPropios = ($('#pedido-propios-vista') || {}).value || 'activos';
+    if (vistaPropios === 'archivados') qs.set('archivados', '1');
     if (desdeR) qs.set('desde', desdeR);
     if (hastaR) qs.set('hasta', hastaR);
     if (window.ROL === 'encargado' && window.SUCURSAL_ID) qs.set('sucursal_id', window.SUCURSAL_ID);
@@ -4837,7 +4839,7 @@ async function listarPedidos() {
             <td>${esc(p.nota) || '—'}</td>
             <td>
                 ${window.SUCURSAL_ID && ['entregado', 'rechazado'].includes(estado)
-                    ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, true)">Archivar</button>`
+                    ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaPropios !== 'archivados'})">${vistaPropios === 'archivados' ? 'Restaurar' : 'Archivar'}</button>`
                     : ''}
                 <button class="btn btn-icon" onclick="verPedido(${p.id}, false)" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
             </td>
@@ -4901,6 +4903,10 @@ on('#bandeja-suc-btns', 'click', (e) => {
 $('#btn-filtrar-realizados').addEventListener('click', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
 on('#pedido-filtro', 'input', debounce(() => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); }, 300));
 on('#pedido-estado', 'change', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
+on('#pedido-propios-vista', 'change', () => {
+    pagState['#pedidos-paginacion'] = 1;
+    listarPedidos();
+});
 on('#pedido-sucursal-realizados', 'change', () => { pagState['#pedidos-paginacion'] = 1; listarPedidos(); });
 
 // Botones de etapa dentro del modal del pedido. Es el mismo camino que usa la

@@ -347,6 +347,7 @@ def pedidos():
     """
     params = []
     sid = sucursal_actual()
+    sid_archivo = sucursal_operativa() if es_superadmin() else sid
     if not es_superadmin():
         if sid:
             # `sucursal_id` es quien solicita y `destino_id` quien provee.
@@ -356,6 +357,14 @@ def pedidos():
             params += [sid, sid, sid]
         else:
             q += " AND 1 = 0"
+    ver_archivados = request.args.get("archivados", "") == "1"
+    if sid_archivo:
+        operador_archivo = "EXISTS" if ver_archivados else "NOT EXISTS"
+        q += (f" AND {operador_archivo} (SELECT 1 FROM pedidos_archivados pa "
+              "WHERE pa.pedido_id = p.id AND pa.sucursal_id = ?)")
+        params.append(sid_archivo)
+    elif ver_archivados:
+        q += " AND 1 = 0"
     # `estado` admite "pendiente,en_camino" (coma separada) para filtrar varios
     # estados a la vez, como usa el badge de pendientes del menú.
     estados = [e for e in estado.split(",") if e in _ESTADOS]
@@ -398,6 +407,12 @@ def pedidos():
                         "WHERE d4.pedido_id = p.id AND d4.destino_id = ?))")
         else:
             count_q += " AND 1 = 0"
+    if sid_archivo:
+        operador_archivo = "EXISTS" if ver_archivados else "NOT EXISTS"
+        count_q += (f" AND {operador_archivo} (SELECT 1 FROM pedidos_archivados pa "
+                    "WHERE pa.pedido_id = p.id AND pa.sucursal_id = ?)")
+    elif ver_archivados:
+        count_q += " AND 1 = 0"
     count_params = list(params)
     # Aplicar los mismos filtros WHERE que la consulta principal
     if estados:

@@ -923,6 +923,10 @@
                         <input type="date" id="pedido-realizados-hasta" title="Hasta">
                         <input type="text" id="pedido-filtro" placeholder="Buscar ticket, sucursal, nota...">
                         <select id="pedido-estado"><option value="">Todos los estados</option><option value="pendiente">Pendiente</option><option value="en_camino">En camino</option><option value="entregado">Entregado</option><option value="rechazado">Rechazado</option></select>
+                        <select id="pedido-propios-vista" aria-label="Vista de mis pedidos">
+                            <option value="activos">No archivados</option>
+                            <option value="archivados">Archivados</option>
+                        </select>
                         <select id="pedido-sucursal-realizados" style="max-width:220px"></select>
                         <button class="btn" id="btn-filtrar-realizados">Filtrar</button>
                     </div>

@@ -33,7 +33,7 @@ class FakeConn:
                 "sucursal_id": 42,
                 "destino_id": 30,
             }
-        return {"principal": 0, "nombre": ""}
+        return {"principal": 0, "nombre": "", "c": 0}
 
     def fetchall(self):
         if "SELECT destino_id FROM pedido_detalle" in CAPTURADO[-1][0]:
@@ -71,6 +71,22 @@ def ejecutar_vista_invalida():
         session["rol"] = "admin"
         session["sucursal_id"] = 30
         return ped.pedidos_bandeja()
+
+
+def ejecutar_listado(archivados=False):
+    CAPTURADO.clear()
+    query = "/api/pedidos?archivados=1" if archivados else "/api/pedidos"
+    with srv.test_request_context(query):
+        session["user_id"] = 1
+        session["rol"] = "admin"
+        session["sucursal_id"] = 30
+        ped.pedidos()
+    principal = next(sql for sql, _ in CAPTURADO if "SELECT p.*" in sql)
+    conteo = next(sql for sql, _ in CAPTURADO
+                  if sql.startswith("SELECT COUNT(*) AS c FROM pedidos p"))
+    parametros_principal = next(params for sql, params in CAPTURADO if sql == principal)
+    parametros_conteo = next(params for sql, params in CAPTURADO if sql == conteo)
+    return principal, conteo, parametros_principal, parametros_conteo
 
 
 def ejecutar_creacion(rol, sucursal_id=30, principal=0):
@@ -156,11 +172,25 @@ check("el filtro por botones lee la propiedad data-bsuc correctamente",
 check("mis solicitudes también permiten archivar estados terminales",
       "['entregado', 'rechazado'].includes(estado)" in interfaz
       and "await listarPedidos()" in interfaz)
+listado_activo, conteo_activo, params_activo, params_conteo_activo = ejecutar_listado()
+check("el listado normal oculta pedidos archivados de la sucursal",
+      "NOT EXISTS (SELECT 1 FROM pedidos_archivados" in listado_activo
+      and "pa.sucursal_id = ?" in listado_activo)
+check("el conteo normal usa el mismo filtro de archivo y parámetros",
+      "NOT EXISTS (SELECT 1 FROM pedidos_archivados" in conteo_activo
+      and params_activo[:-2] == params_conteo_activo)
+listado_archivado, conteo_archivado, params_archivado, params_conteo_archivado = ejecutar_listado(True)
+check("la vista archivada muestra solo pedidos archivados por esa sucursal",
+      "AND EXISTS (SELECT 1 FROM pedidos_archivados" in listado_archivado
+      and "AND EXISTS (SELECT 1 FROM pedidos_archivados" in conteo_archivado
+      and params_archivado[:-2] == params_conteo_archivado)
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()
 check("se explica que el superadmin y el encargado no crean solicitudes",
       "incluido el superadmin" in texto and "El encargado puede cambiar estados" in texto)
+check("mis solicitudes ofrece una vista para restaurar pedidos archivados",
+      "pedido-propios-vista" in texto and "Archivados" in texto)
 
 respuesta = ejecutar_archivo("entregado", True)
 inserciones = [(sql, params) for sql, params in CAPTURADO
