@@ -99,9 +99,10 @@ La tabla `usuarios` se crea con `admin/123456` como inicio de sesión inicial:
   Al abrir se cargan los datos ya guardados. El inicial lo calcula el sistema y es
   solo de lectura. Para corregir el stock, edita el producto de la sucursal en
   **Productos**, regresa a la planilla y pulsa **Actualizar stock**. El inicial se
-  actualiza hasta que se registra el conteo físico. En **Ingreso manual**, cada
-  encargado escribe solo la cantidad nueva que recibió; al guardar, se suma al
-  acumulado compartido (no se reemplaza). Los conteos y demás cambios también se
+  actualiza hasta que se registra el conteo físico. En **Ingreso manual**, ambos
+  encargados ven y editan el total actual recibido fuera del sistema. Al guardar,
+  el valor reemplaza el anterior; escribe `0` para dejar solo el inventario inicial.
+  Los conteos y demás cambios también se
   comparten, y la pantalla se sincroniza cada 10 segundos. Antes de cerrar, uno de los
   dos revisa que todos los
   productos estén contados; el sistema no permite cerrar con líneas pendientes. Si una

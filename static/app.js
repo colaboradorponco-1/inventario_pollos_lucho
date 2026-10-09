@@ -3513,7 +3513,7 @@ async function abrirInventario(invId) {
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
 : (INV_SOLO_LECTURA
             ? 'Solo lectura: esta planilla es de otra sucursal. Podés verla, pero solo el encargado de esa sucursal puede guardarla o cerrarla.'
-            : 'La planilla es compartida por los dos encargados: al abrirla aparecen los datos guardados. El inventario inicial lo calcula el sistema y es de solo lectura. En ingreso manual escribe solo la cantidad nueva que recibiste fuera del sistema; cada guardado se suma al acumulado compartido que aparece debajo. Completa el conteo final y guarda para que el otro encargado continúe.');
+            : 'La planilla es compartida por los dos encargados: al abrirla aparecen los datos guardados. El inventario inicial lo calcula el sistema y es de solo lectura. En ingreso manual aparece el total actual recibido fuera del sistema; reemplázalo por el total correcto o escribe 0 si no hubo ingreso. Completa el conteo final y guarda para que el otro encargado continúe.');
     $('#inv-observaciones').value = d.observaciones || '';
     INV_OBS_BASE = $('#inv-observaciones').value;
     $('#inv-observaciones').disabled = INV_CERRADA || INV_SOLO_LECTURA;
@@ -3564,12 +3564,13 @@ async function abrirInventario(invId) {
                 </td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
-                           value="${f.ultimo_ingreso_manual == null ? '' : esc(fmtInvQ(f.ultimo_ingreso_manual))}" placeholder="Cantidad a agregar" ${bloq}
-                           title="Muestra el último ingreso guardado. Reemplázalo con la cantidad nueva que vas a agregar."
+                           value="${esc(fmtInvQ(f.ingreso_manual))}" placeholder="Total manual" ${bloq}
+                           title="Escribe el total correcto recibido fuera del sistema. Escribe 0 para dejar solo el inventario inicial."
                            style="text-align:right">
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
+                    ${f.contado_por ? `<small data-inv-autor="${f.id}" style="display:block;color:${f.es_de_otro ? '#B45309' : '#6B7280'};font-size:10px;margin-bottom:3px">Lo contó: ${esc(f.contado_por)}</small>` : `<small data-inv-autor="${f.id}" style="display:none"></small>`}
                     <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
                            value="${conteo}" placeholder="—" ${bloq} style="text-align:right">
                 </td>
@@ -3655,10 +3656,15 @@ async function refrescarStockInicial(silencioso) {
         if (conteoIn && !editados.has('conteo_fisico')) {
             conteoIn.value = f.conteo_fisico === null || f.conteo_fisico === undefined
                 ? '' : f.conteo_fisico;
+            const autor = tr.querySelector(`[data-inv-autor="${f.id}"]`);
+            if (autor) {
+                autor.style.display = f.contado_por ? '' : 'none';
+                autor.style.color = f.es_de_otro ? '#B45309' : '#6B7280';
+                autor.textContent = f.contado_por ? `Lo contó: ${f.contado_por}` : '';
+            }
         }
         if (ingresoIn && !editados.has('ingreso_manual')) {
-            ingresoIn.value = f.ultimo_ingreso_manual == null
-                ? '' : fmtInvQ(f.ultimo_ingreso_manual);
+            ingresoIn.value = fmtInvQ(f.ingreso_manual);
         }
         if (obsIn && !editados.has('observaciones')) {
             obsIn.value = f.observaciones || '';
@@ -3698,12 +3704,14 @@ function recalcFilaInv(e) {
     const manIn = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
     const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
     const camposEditados = INV_CAMPOS_EDITADOS.get(id);
-    const aporteNuevo = camposEditados && camposEditados.has('ingreso_manual') &&
-        manIn && manIn.value !== '' ? Number(manIn.value) : 0;
-    const ingMan = (Number(f.ingreso_manual) || 0) + aporteNuevo;
+    const ingMan = manIn && manIn.value !== ''
+        ? Number(manIn.value)
+        : (camposEditados && camposEditados.has('ingreso_manual')
+            ? 0 : (Number(f.ingreso_manual) || 0));
     const ingreso = ingMan;
     const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
-    const conteo = inp.value === '' ? null : Number(inp.value);
+    const conteoIn = $(`#inv-tbody .inv-conteo[data-id="${id}"]`);
+    const conteo = !conteoIn || conteoIn.value === '' ? null : Number(conteoIn.value);
     const final = conteo === null || Number.isNaN(conteo) ? disponible : conteo;
     const utilizada = Math.max(disponible - final, 0);
     const dif = conteo === null || Number.isNaN(conteo) ? 0 : final - f.stock_sistema;
@@ -3743,7 +3751,7 @@ function collectedInventario() {
 async function guardarInventario() {
     if (!INV_ID) return false;
     revisarHoraCorte();
-    const payload = { version: 3, lineas: collectedInventario() };
+    const payload = { version: 5, lineas: collectedInventario() };
     const observaciones = $('#inv-observaciones').value;
     if (observaciones !== INV_OBS_BASE) payload.observaciones = observaciones;
     const hora = $('#inv-hora') ? $('#inv-hora').value : '';

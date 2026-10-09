@@ -492,16 +492,6 @@ def inventario_detalle(inv_id):
         _sincronizar_detalle(conn, inv_id, inv["sucursal_id"],
                              _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
     filas = _detalle(conn, inv_id)
-    ultimos_aportes = {}
-    if filas:
-        ids_detalle = [f["id"] for f in filas]
-        marcadores = ",".join(["%s"] * len(ids_detalle))
-        aportes = conn.execute(
-            "SELECT detalle_id, cantidad FROM inventario_ingresos_manuales "
-            f"WHERE detalle_id IN ({marcadores}) ORDER BY id",
-            ids_detalle).fetchall()
-        for aporte in aportes:
-            ultimos_aportes[aporte["detalle_id"]] = aporte["cantidad"]
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
     stocks = _stocks_actuales(conn, ids_planilla)
     posteriores = _movimientos_posteriores(conn, ids_planilla, inv["fecha"], inv["hora_corte"])
@@ -545,9 +535,6 @@ def inventario_detalle(inv_id):
             "inicial": round(f["inicial"] or 0, 3),
             "ingreso_sistema": round(ing_sis, 3),
             "ingreso_manual": round(ing_man, 3),
-            "ultimo_ingreso_manual": (
-                round(ultimos_aportes[f["id"]], 3)
-                if f["id"] in ultimos_aportes else None),
             "ingreso_dia": round(ing_sis + ing_man, 3),
             "disponible": round(disponible, 3),
             "conteo_fisico": conteo,
@@ -614,7 +601,7 @@ def inventario_guardar(inv_id):
         return err("Solo puedes modificar la planilla de tu sucursal", 403)
 
     data = request.get_json() or {}
-    if data.get("version") != 3:
+    if data.get("version") != 5:
         conn.rollback()
         conn.close()
         return err(
@@ -661,7 +648,6 @@ def inventario_guardar(inv_id):
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
     stocks = _stocks_actuales(conn, ids_planilla)
-    ingresos = _ingresos_del_dia(conn, ids_planilla, inv["fecha"])
     usuario_actual = session.get("usuario", "") or ""
     # Si la columna `contado_por` todavia no esta en la base, `_detalle` (que
     # hace SELECT d.*) no la trae en las filas y se detecta solo, sin consulta
@@ -705,40 +691,40 @@ def inventario_guardar(inv_id):
             conteo = (_campo(item.get("conteo_fisico"), "El inventario final", nom)
                       if "conteo_fisico" in campos else fila["conteo_fisico"])
             inicial = fila["inicial"] or 0
-            ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, fila, True)
-            aporte_manual = 0.0
+            ingreso_manual_nuevo = fila["ingreso_manual"] or 0.0
+            reintento_manual = False
             if "ingreso_manual" in campos:
-                aporte_manual = _campo(
+                ingreso_manual_nuevo = _campo(
                     item.get("ingreso_manual"), "El ingreso manual", nom) or 0.0
-                if aporte_manual:
-                    request_id = str(item.get("ingreso_manual_id") or "").strip()
-                    if not request_id or len(request_id) > 80:
+                request_id = str(item.get("ingreso_manual_id") or "").strip()
+                if not request_id or len(request_id) > 80:
+                    raise _DatoInvalido(
+                        f"Falta el identificador del ingreso manual de '{nom}'. "
+                        "No se guardó nada; vuelve a intentar.")
+                existente = conn.execute(
+                    "SELECT detalle_id, usuario, cantidad "
+                    "FROM inventario_ingresos_manuales WHERE request_id = %s",
+                    (request_id,)).fetchone()
+                if existente:
+                    misma_entrada = (
+                        existente["detalle_id"] == lid
+                        and existente["usuario"] == usuario_actual
+                        and _misma_cantidad(existente["cantidad"], ingreso_manual_nuevo)
+                    )
+                    if not misma_entrada:
                         raise _DatoInvalido(
-                            f"Falta el identificador del ingreso manual de '{nom}'. "
-                            "No se guardó nada; vuelve a intentar.")
-                    existente = conn.execute(
-                        "SELECT detalle_id, usuario, cantidad "
-                        "FROM inventario_ingresos_manuales WHERE request_id = %s",
-                        (request_id,)).fetchone()
-                    if existente:
-                        misma_entrada = (
-                            existente["detalle_id"] == lid
-                            and existente["usuario"] == usuario_actual
-                            and _misma_cantidad(existente["cantidad"], aporte_manual)
-                        )
-                        if not misma_entrada:
-                            raise _DatoInvalido(
-                                "El ingreso manual ya fue registrado con otros datos. "
-                                "Actualiza la planilla antes de continuar.")
-                        aporte_manual = 0.0
-                    else:
-                        conn.execute(
-                            "INSERT INTO inventario_ingresos_manuales "
-                            "(detalle_id, request_id, usuario, cantidad, fecha_hora) "
-                            "VALUES (%s, %s, %s, %s, %s)",
-                            (lid, request_id, usuario_actual, aporte_manual,
-                             datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            ing_man = (fila["ingreso_manual"] or 0) + aporte_manual
+                            "El ingreso manual ya fue registrado con otros datos. "
+                            "Actualiza la planilla antes de continuar.")
+                    reintento_manual = True
+                else:
+                    conn.execute(
+                        "INSERT INTO inventario_ingresos_manuales "
+                        "(detalle_id, request_id, usuario, cantidad, fecha_hora) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (lid, request_id, usuario_actual, ingreso_manual_nuevo,
+                         datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            ing_man = ((fila["ingreso_manual"] or 0) if reintento_manual
+                       else ingreso_manual_nuevo)
             ingreso = ing_man
             disponible = inicial + ingreso
             final = conteo if conteo is not None else disponible

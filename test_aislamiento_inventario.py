@@ -250,10 +250,6 @@ def prueba_se_sabe_quien_conto():
            '"contado_por"' in detalle)
     _check("el detalle marca si la linea es de otro encargado",
            '"es_de_otro"' in detalle)
-    _check("el detalle devuelve el último aporte manual guardado",
-           "ultimo_ingreso_manual" in detalle
-           and "FROM inventario_ingresos_manuales" in detalle
-           and "ORDER BY id" in detalle)
 
     # Respaldo: si la migracion no corrio y la columna no existe, el conteo se
     # tiene que guardar igual. Perder el conteo de toda la planilla porque falte
@@ -291,16 +287,17 @@ def prueba_guardado_parcial_compartido():
            "INV_CAMPOS_EDITADOS.entries()" in recopilar)
     _check("el navegador identifica cuáles celdas fueron editadas",
            "campos_modificados: Array.from(campos)" in recopilar
-           and "version: 3" in js)
+           and "version: 5" in js)
     _check("el servidor serializa guardados y cierre",
            "_sucursal_de_planilla(conn, inv_id, bloquear=True)" in guardar)
     _check("el servidor rechaza pantallas antiguas antes de escribir",
            "La pantalla del inventario está desactualizada" in guardar
            and "campos_modificados" in guardar)
-    _check("el ingreso manual se registra como aporte con identificador idempotente",
+    _check("el ingreso manual guarda un total reemplazable con reintento idempotente",
            "inventario_ingresos_manuales" in guardar
            and "ingreso_manual_id" in guardar
-           and "aporte_manual = 0.0" in guardar)
+           and "reintento_manual" in guardar
+           and "ingreso_manual_nuevo" in guardar)
     _check("el servidor ignora las celdas que esta sesión no modificó",
            'if not campos:' in guardar and 'else fila["conteo_fisico"]' in guardar
            and 'if "ingreso_manual" in campos:' in guardar)
@@ -310,21 +307,22 @@ def prueba_guardado_parcial_compartido():
            and "editados.has('ingreso_manual')" in refrescar
            and "editados.has('observaciones')" in refrescar
            and "if (INV_CAMPOS_EDITADOS.has(f.id)) return" not in refrescar)
-    _check("la sincronización no añade mensajes de autor al conteo",
-           "f.contado_por" not in refrescar and "inv-count-author" not in refrescar)
+    _check("la sincronización conserva el autor bajo el conteo físico",
+           "data-inv-autor" in abrir and "f.contado_por" in refrescar)
     _check("el inicial es solo lectura y no se ofrece como campo editable",
            'class="inv-inicial"' in abrir
            and 'value="${esc(fmtInvQ(f.inicial))}" readonly ${bloq}' in abrir
            and ".inv-conteo, .inv-ingreso-man" in abrir
            and ".inv-inicial" not in recopilar)
-    _check("el ingreso manual muestra el último aporte en el mismo campo",
-           'value="${f.ultimo_ingreso_manual == null ? \'\' : esc(fmtInvQ(f.ultimo_ingreso_manual))}" placeholder="Cantidad a agregar"' in abrir
-           and "ingresoIn.value = f.ultimo_ingreso_manual == null" in refrescar
-           and "camposEditados.has('ingreso_manual')" in js
+    _check("el ingreso manual muestra y reemplaza el total en el mismo campo",
+           'value="${esc(fmtInvQ(f.ingreso_manual))}" placeholder="Total manual"' in abrir
+           and "ingresoIn.value = fmtInvQ(f.ingreso_manual)" in refrescar
+           and "const ingMan = manIn && manIn.value !== ''" in js
            and "Acumulado compartido:" not in abrir
            and "Conteo físico:" not in abrir
-           and "contado_por" not in abrir
+           and "Lo contó:" in abrir
            and "data-inv-ingresado" not in abrir
+           and "const conteo = !conteoIn || conteoIn.value === '' ? null : Number(conteoIn.value);" in js
            and "ingreso_manual_id: INV_INGRESO_IDS.get(id)" in recopilar)
     _check("la planilla comunica que muestra los datos compartidos al abrir",
            "al abrirla aparecen los datos guardados" in abrir)
@@ -437,7 +435,7 @@ def prueba_guardado_parcial_compartido():
     invmod.get_conn = lambda: SharedConn()
     utilmod.registrar_auditoria = lambda *a, **k: None
 
-    def guardar_como(usuario, lineas, version=3):
+    def guardar_como(usuario, lineas, version=5):
         cliente = app.test_client()
         with cliente.session_transaction() as sesion:
             sesion["user_id"] = f"u-{usuario}"
@@ -478,7 +476,20 @@ def prueba_guardado_parcial_compartido():
             "id": 12, "campos_modificados": ["ingreso_manual"],
             "ingreso_manual": "2", "ingreso_manual_id": "entry-dos",
         }])
+        ingreso_despues_segundo = otra_linea["ingreso_manual"]
+        disponible_despues_segundo = otra_linea["disponible"]
+        inicial_despues_segundo = otra_linea["inicial"]
         reintento_entrada_dos = guardar_como("encargado_america2", [{
+            "id": 12, "campos_modificados": ["ingreso_manual"],
+            "ingreso_manual": "2", "ingreso_manual_id": "entry-dos",
+        }])
+        ingreso_despues_reintento = otra_linea["ingreso_manual"]
+        otra_linea["inicial"] = 1
+        entrada_cero = guardar_como("encargado_america", [{
+            "id": 12, "campos_modificados": ["ingreso_manual"],
+            "ingreso_manual": "0", "ingreso_manual_id": "entry-cero",
+        }])
+        reintento_entrada_dos_despues_de_cero = guardar_como("encargado_america2", [{
             "id": 12, "campos_modificados": ["ingreso_manual"],
             "ingreso_manual": "2", "ingreso_manual_id": "entry-dos",
         }])
@@ -495,9 +506,9 @@ def prueba_guardado_parcial_compartido():
         _check("el guardado del segundo conserva el conteo previo del primero",
                primero.get_json().get("ok") and segundo_producto.get_json().get("ok")
                and estado_linea["inicial"] == 10
-               and otra_linea["inicial"] == 6
-               and otra_linea["ingreso_manual"] == 5
-               and otra_linea["disponible"] == 11
+               and inicial_despues_segundo == 6
+               and ingreso_despues_segundo == 2
+               and disponible_despues_segundo == 8
                and otra_linea["conteo_fisico"] == 5
                and segundo.get_json().get("ok")
                and conteo_despues_segundo == 8
@@ -514,17 +525,21 @@ def prueba_guardado_parcial_compartido():
         _check("si ambos corrigen la misma celda, se avisa quién había contado",
                bool(tercero.get_json().get("data", {}).get("avisos"))
                and "encargado_america" in tercero.get_json()["data"]["avisos"][0])
-        _check("el ingreso manual suma las cantidades nuevas de ambos encargados",
+        _check("el ingreso manual reemplaza el total anterior",
                entrada_uno.get_json().get("ok") and entrada_dos.get_json().get("ok")
-               and otra_linea["ingreso_manual"] == 5
-               and otra_linea["disponible"] == 11,
-               f"acumulado={otra_linea['ingreso_manual']}, "
-               f"disponible={otra_linea['disponible']}")
-        _check("reintentar el mismo guardado no duplica el ingreso manual",
+               and ingreso_despues_segundo == 2
+               and disponible_despues_segundo == 8,
+               f"total={ingreso_despues_segundo}, disponible={disponible_despues_segundo}")
+        _check("cero deja disponible igual al inventario inicial y el reintento no lo revierte",
                reintento_entrada_dos.get_json().get("ok")
-               and otra_linea["ingreso_manual"] == 5
-               and len(entradas_manuales) == 2,
-               f"acumulado={otra_linea['ingreso_manual']}, "
+               and ingreso_despues_reintento == 2
+               and entrada_cero.get_json().get("ok")
+               and reintento_entrada_dos_despues_de_cero.get_json().get("ok")
+               and otra_linea["ingreso_manual"] == 0
+               and otra_linea["disponible"] == 1
+               and len(entradas_manuales) == 3,
+               f"total={otra_linea['ingreso_manual']}, "
+               f"disponible={otra_linea['disponible']}, "
                f"entradas={len(entradas_manuales)}")
         _check("el guardado bloquea la planilla mientras actualiza",
                any("FOR UPDATE" in sql for sql in sqls))
