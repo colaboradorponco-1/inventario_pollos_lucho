@@ -306,8 +306,8 @@ def prueba_guardado_parcial_compartido():
            and "editados.has('ingreso_manual')" in refrescar
            and "editados.has('observaciones')" in refrescar
            and "if (INV_CAMPOS_EDITADOS.has(f.id)) return" not in refrescar)
-    _check("la sincronización muestra quién cargó el conteo",
-           'data-inv-autor="${f.id}"' in refrescar and "f.contado_por" in refrescar)
+    _check("la sincronización no añade mensajes de autor al conteo",
+           "f.contado_por" not in refrescar and "inv-count-author" not in refrescar)
     _check("el inicial es solo lectura y no se ofrece como campo editable",
            'class="inv-inicial"' in abrir
            and 'value="${esc(fmtInvQ(f.inicial))}" readonly ${bloq}' in abrir
@@ -316,8 +316,9 @@ def prueba_guardado_parcial_compartido():
     _check("el ingreso manual muestra el acumulado y acepta solo una cantidad nueva",
            'value="" placeholder="Cantidad a agregar"' in abrir
            and 'data-inv-ingresado="${f.id}"' in abrir
-           and "Acumulado compartido:" in abrir
-           and 'data-inv-autor="${f.id}"' in abrir
+           and "Acumulado compartido:" not in abrir
+           and "Conteo físico:" not in abrir
+           and "contado_por" not in abrir
            and "inv-count-author" not in abrir
            and "ingreso_manual_id: INV_INGRESO_IDS.get(id)" in recopilar)
     _check("la planilla comunica que muestra los datos compartidos al abrir",

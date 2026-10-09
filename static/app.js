@@ -3550,19 +3550,11 @@ async function abrirInventario(invId) {
             html += `<tr style="background:#F5F5F5"><td colspan="9"><strong>${esc(catActual)}</strong></td></tr>`;
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
-        // Quien conto esta linea. Los dos encargados cuentan sobre la MISMA
-        // planilla; se muestra junto al ingreso compartido para no confundirse
-        // con el nombre o las observaciones del producto.
-        const quien = (f.contado_por || '').trim();
-        const marcaQuien = quien
-            ? `<div data-inv-autor="${f.id}" style="font-size:10px;color:${f.es_de_otro ? '#B45309' : '#6B7280'};margin-top:3px">
-                   Conteo físico: ${f.es_de_otro ? 'lo contó' : 'lo contaste'} ${esc(quien)}</div>`
-            : `<div data-inv-autor="${f.id}" style="display:none"></div>`;
         // Planilla cerrada O de otra sucursal: los casilleros no se tocan.
         const bloq = (INV_CERRADA || INV_SOLO_LECTURA) ? 'disabled' : '';
         html += `
             <tr data-inv-fila="${f.id}">
-                <td class="inv-col-tit"><strong>${esc(f.producto)}</strong>${marcaQuien}</td>
+                <td class="inv-col-tit"><strong>${esc(f.producto)}</strong></td>
                 <td>${esc(f.unidad)}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-inicial" data-id="${f.id}"
@@ -3573,9 +3565,8 @@ async function abrirInventario(invId) {
                 <td>
                     <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:5px;padding:4px 6px;margin-bottom:5px">
                         <small data-inv-ingresado="${f.id}" style="display:block;color:#78350F;font-size:10px;font-weight:600">
-                            Acumulado compartido: ${esc(fmtInvQ(f.ingreso_manual))} ${esc(f.unidad || '')}
+                            ${esc(fmtInvQ(f.ingreso_manual))} ${esc(f.unidad || '')}
                         </small>
-                        ${marcaQuien}
                     </div>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
                            value="" placeholder="Cantidad a agregar" ${bloq}
@@ -3585,8 +3576,7 @@ async function abrirInventario(invId) {
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-conteo" data-id="${f.id}"
-                           value="${conteo}" placeholder="—" ${bloq} style="text-align:right"
-                           ${quien ? `title="${f.es_de_otro ? 'Lo contó' : 'Contaste'} ${esc(quien)}. Podés corregirlo si está mal: al guardar te va a avisar que ya estaba contado."` : ''}>
+                           value="${conteo}" placeholder="—" ${bloq} style="text-align:right">
                 </td>
                 <td class="num" data-inv-util="${f.id}">${esc(fmtInvQ(f.utilizada))}</td>
                 <td data-inv-dif="${f.id}">${diffInvBadge(f.diferencia, f)}</td>
@@ -3671,20 +3661,11 @@ async function refrescarStockInicial(silencioso) {
         if (conteoIn && !editados.has('conteo_fisico')) {
             conteoIn.value = f.conteo_fisico === null || f.conteo_fisico === undefined
                 ? '' : f.conteo_fisico;
-            const quien = (f.contado_por || '').trim();
-            const autor = tr.querySelector(`[data-inv-autor="${f.id}"]`);
-            if (autor) {
-                autor.style.display = quien ? '' : 'none';
-                autor.style.color = f.es_de_otro ? '#B45309' : '#6B7280';
-                autor.textContent = quien
-                    ? `Conteo físico: ${f.es_de_otro ? 'lo contó' : 'lo contaste'} ${quien}`
-                    : '';
-            }
         }
         if (ingresoIn && !editados.has('ingreso_manual')) {
             ingresoIn.value = '';
             if (acumuladoIn) {
-                acumuladoIn.textContent = `Acumulado compartido: ${fmtInvQ(f.ingreso_manual || 0)} ${f.unidad || ''}`;
+                acumuladoIn.textContent = `${fmtInvQ(f.ingreso_manual || 0)} ${f.unidad || ''}`;
             }
         }
         if (obsIn && !editados.has('observaciones')) {
@@ -3780,8 +3761,7 @@ async function guardarInventario() {
     toast(r.message || 'Conteo guardado', 'ok');
     // Avisos de "el otro encargado ya contó esto". El guardado YA se hizo (no se
     // bloquea a nadie), asi que esto es solo para que se entere y no cierre la
-    // planilla creyendo que conto el solo. Queda tambien la marca "Lo contó: X"
-    // en cada fila, que es lo que sobrevive al cerrar la pantalla.
+    // planilla creyendo que conto el solo.
     const avisos = (r.data && r.data.avisos) || [];
     if (avisos.length) {
         const lista = avisos.slice(0, 3).join(' | ');
