@@ -3551,13 +3551,13 @@ async function abrirInventario(invId) {
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
         // Quien conto esta linea. Los dos encargados cuentan sobre la MISMA
-        // planilla, asi que cada celda muestra su autor: si es el otro, se
-        // detalla en el title del casillero para saber que se puede corregir.
+        // planilla; se muestra junto al ingreso compartido para no confundirse
+        // con el nombre o las observaciones del producto.
         const quien = (f.contado_por || '').trim();
         const marcaQuien = quien
-            ? `<div class="inv-count-author" style="font-size:10px;color:${f.es_de_otro ? '#B45309' : '#6B7280'};margin-top:1px">
-                   ${f.es_de_otro ? 'Lo contó' : 'Contó'}: ${esc(quien)}</div>`
-            : '';
+            ? `<div data-inv-autor="${f.id}" style="font-size:10px;color:${f.es_de_otro ? '#B45309' : '#6B7280'};margin-top:3px">
+                   Conteo físico: ${f.es_de_otro ? 'lo contó' : 'lo contaste'} ${esc(quien)}</div>`
+            : `<div data-inv-autor="${f.id}" style="display:none"></div>`;
         // Planilla cerrada O de otra sucursal: los casilleros no se tocan.
         const bloq = (INV_CERRADA || INV_SOLO_LECTURA) ? 'disabled' : '';
         html += `
@@ -3571,13 +3571,16 @@ async function abrirInventario(invId) {
                            style="text-align:right;background:#F5F5F5">
                 </td>
                 <td>
+                    <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:5px;padding:4px 6px;margin-bottom:5px">
+                        <small data-inv-ingresado="${f.id}" style="display:block;color:#78350F;font-size:10px;font-weight:600">
+                            Acumulado compartido: ${esc(fmtInvQ(f.ingreso_manual))} ${esc(f.unidad || '')}
+                        </small>
+                        ${marcaQuien}
+                    </div>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
                            value="" placeholder="Cantidad a agregar" ${bloq}
                            title="Escribe solo la nueva cantidad recibida fuera del sistema. Se suma al ingreso manual acumulado."
                            style="text-align:right">
-                    <small data-inv-ingresado="${f.id}" style="display:block;color:var(--muted);font-size:10px">
-                        Acumulado: ${esc(fmtInvQ(f.ingreso_manual))} ${esc(f.unidad || '')}
-                    </small>
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
@@ -3669,28 +3672,19 @@ async function refrescarStockInicial(silencioso) {
             conteoIn.value = f.conteo_fisico === null || f.conteo_fisico === undefined
                 ? '' : f.conteo_fisico;
             const quien = (f.contado_por || '').trim();
-            conteoIn.title = quien
-                ? `${f.es_de_otro ? 'Lo contó' : 'Contaste'} ${quien}. Podés corregirlo si está mal: al guardar te va a avisar que ya estaba contado.`
-                : '';
-            let autor = tr.querySelector('.inv-count-author');
-            if (quien && !autor) {
-                autor = document.createElement('div');
-                autor.className = 'inv-count-author';
-                autor.style.cssText = 'font-size:10px;margin-top:1px';
-                tr.querySelector('.inv-col-tit').appendChild(autor);
-            }
+            const autor = tr.querySelector(`[data-inv-autor="${f.id}"]`);
             if (autor) {
-                if (!quien) autor.remove();
-                else {
-                    autor.style.color = f.es_de_otro ? '#B45309' : '#6B7280';
-                    autor.textContent = `${f.es_de_otro ? 'Lo contó' : 'Contó'}: ${quien}`;
-                }
+                autor.style.display = quien ? '' : 'none';
+                autor.style.color = f.es_de_otro ? '#B45309' : '#6B7280';
+                autor.textContent = quien
+                    ? `Conteo físico: ${f.es_de_otro ? 'lo contó' : 'lo contaste'} ${quien}`
+                    : '';
             }
         }
         if (ingresoIn && !editados.has('ingreso_manual')) {
             ingresoIn.value = '';
             if (acumuladoIn) {
-                acumuladoIn.textContent = `Acumulado: ${fmtInvQ(f.ingreso_manual || 0)} ${f.unidad || ''}`;
+                acumuladoIn.textContent = `Acumulado compartido: ${fmtInvQ(f.ingreso_manual || 0)} ${f.unidad || ''}`;
             }
         }
         if (obsIn && !editados.has('observaciones')) {
