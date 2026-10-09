@@ -334,8 +334,9 @@ def prueba_guardado_parcial_compartido():
     producto_put = re.search(
         r"def producto\(.*?\n(?=@|\Z)", productos, re.S)
     producto_put = producto_put.group(0) if producto_put else ""
-    _check("editar stock en Productos queda limitado a la sucursal del encargado",
-           'fila["sucursal_id"] != sucursal_actual()' in producto_put
+    _check("editar stock en Productos queda limitado al ámbito del encargado",
+           "ids_sucursal_consolidada(conn, sid_user)" in producto_put
+           and 'int(fila["sucursal_id"] or 0) not in cons' in producto_put
            and 'if (id) body.stock' in js
            and '"Ajuste de inventario"' in producto_put)
 
