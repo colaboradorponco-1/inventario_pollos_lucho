@@ -330,6 +330,14 @@ def init_db():
                     "FOREIGN KEY (inventario_id) REFERENCES inventario_diario(id) ON DELETE CASCADE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id),"
                     "UNIQUE KEY uq_inv_prod (inventario_id, producto_id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS inventario_ingresos_manuales ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "detalle_id INT NOT NULL,"
+                    "request_id VARCHAR(80) NOT NULL UNIQUE,"
+                    "usuario VARCHAR(255) NOT NULL,"
+                    "cantidad DOUBLE NOT NULL,"
+                    "fecha_hora DATETIME NOT NULL,"
+                    "FOREIGN KEY (detalle_id) REFERENCES inventario_detalle(id) ON DELETE CASCADE)")
         cur.execute("CREATE TABLE IF NOT EXISTS gastos ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "categoria VARCHAR(255) NOT NULL,"

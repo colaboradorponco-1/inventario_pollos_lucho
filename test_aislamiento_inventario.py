@@ -235,8 +235,9 @@ def prueba_se_sabe_quien_conto():
            'session.get("usuario"' in guardar)
     _check("detecta cuando la linea ya la conto OTRO encargado",
            "ya_contado_por_otro" in guardar)
-    _check("AVISA en vez de bloquear (no devuelve 409 ni 403)",
-           "409" not in guardar and "avisos" in guardar)
+    aviso = guardar.split("if ya_contado_por_otro:", 1)[-1].split("observaciones =", 1)[0]
+    _check("AVISA y permite corregir una línea ya contada por el otro",
+           "avisos.append" in aviso and "return err" not in aviso)
     _check("el aviso menciona al otro encargado y los dos numeros",
            'ya lo contó' in guardar and "fila['conteo_fisico']" in guardar)
     # No se pisa la firma previa cuando la linea se manda vacia para recounts.
@@ -263,6 +264,317 @@ def prueba_se_sabe_quien_conto():
     cola = cola.split("except _DatoInvalido")[0]
     _check("el UPDATE sin firma NO menciona contado_por",
            "contado_por = %s" not in cola)
+
+
+def prueba_guardado_parcial_compartido():
+    """Un encargado no debe pisar campos que otro cargó desde una pantalla vieja."""
+    raiz = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(raiz, "core", "inventario.py"), encoding="utf-8") as fh:
+        inv = fh.read()
+    with open(os.path.join(raiz, "static", "app.js"), encoding="utf-8") as fh:
+        js = fh.read()
+
+    m = re.search(r"def inventario_guardar\(.*?\n(?=@|\Z)", inv, re.S)
+    guardar = m.group(0) if m else ""
+    m = re.search(r"function collectedInventario\(\).*?\n\}", js, re.S)
+    recopilar = m.group(0) if m else ""
+    m = re.search(r"async function refrescarStockInicial\(.*?\n\}", js, re.S)
+    refrescar = m.group(0) if m else ""
+    m = re.search(r"async function abrirInventario\(.*?\n\}", js, re.S)
+    abrir = m.group(0) if m else ""
+
+    _check("el navegador manda solo las filas con cambios locales",
+           "INV_CAMPOS_EDITADOS.entries()" in recopilar)
+    _check("el navegador identifica cuáles celdas fueron editadas",
+           "campos_modificados: Array.from(campos)" in recopilar
+           and "version: 3" in js)
+    _check("el servidor serializa guardados y cierre",
+           "_sucursal_de_planilla(conn, inv_id, bloquear=True)" in guardar)
+    _check("el servidor rechaza pantallas antiguas antes de escribir",
+           "La pantalla del inventario está desactualizada" in guardar
+           and "campos_modificados" in guardar)
+    _check("el ingreso manual se registra como aporte con identificador idempotente",
+           "inventario_ingresos_manuales" in guardar
+           and "ingreso_manual_id" in guardar
+           and "aporte_manual = 0.0" in guardar)
+    _check("el servidor ignora las celdas que esta sesión no modificó",
+           'if not campos:' in guardar and 'else fila["conteo_fisico"]' in guardar
+           and 'if "ingreso_manual" in campos:' in guardar)
+    _check("la sincronización respeta los campos editados y actualiza los demás",
+           "INV_CAMPOS_EDITADOS.get(f.id) || new Set()" in refrescar
+           and "editados.has('conteo_fisico')" in refrescar
+           and "editados.has('ingreso_manual')" in refrescar
+           and "editados.has('observaciones')" in refrescar
+           and "if (INV_CAMPOS_EDITADOS.has(f.id)) return" not in refrescar)
+    _check("la sincronización muestra quién cargó el conteo",
+           "inv-count-author" in refrescar and "f.contado_por" in refrescar)
+    _check("el inicial es solo lectura y no se ofrece como campo editable",
+           'class="inv-inicial"' in abrir
+           and 'value="${esc(fmtInvQ(f.inicial))}" readonly ${bloq}' in abrir
+           and ".inv-conteo, .inv-ingreso-man" in abrir
+           and ".inv-inicial" not in recopilar)
+    _check("el ingreso manual muestra el acumulado y acepta solo una cantidad nueva",
+           'value="" placeholder="Cantidad a agregar"' in abrir
+           and 'data-inv-ingresado="${f.id}"' in abrir
+           and "ingreso_manual_id: INV_INGRESO_IDS.get(id)" in recopilar)
+    _check("la planilla comunica que muestra los datos compartidos al abrir",
+           "al abrirla aparecen los datos guardados" in abrir)
+    _check("la otra sesión sincroniza cambios en un máximo de 10 segundos",
+           "}, 10000);" in js)
+    _check("Actualizar stock llama al refresco inmediato de la planilla",
+           "$('#btn-inv-refrescar')?.addEventListener('click', invClick(() => refrescarStockInicial(false)))"
+           in js)
+    with open(os.path.join(raiz, "templates", "index.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    _check("la planilla explica editar el stock del producto y actualizar",
+           "edita el producto de esta sucursal en <strong>Productos</strong>" in html
+           and "pulsa <strong>Actualizar stock</strong>" in html)
+    with open(os.path.join(raiz, "core", "productos.py"), encoding="utf-8") as fh:
+        productos = fh.read()
+    producto_put = re.search(
+        r"def producto\(.*?\n(?=@|\Z)", productos, re.S)
+    producto_put = producto_put.group(0) if producto_put else ""
+    _check("editar stock en Productos queda limitado a la sucursal del encargado",
+           'fila["sucursal_id"] != sucursal_actual()' in producto_put
+           and 'if (id) body.stock' in js
+           and '"Ajuste de inventario"' in producto_put)
+
+    original_get_conn = invmod.get_conn
+    original_registrar_auditoria = utilmod.registrar_auditoria
+    estado_inv = Fila(id=7, sucursal_id=35, estado="abierto",
+                      fecha=date.today().isoformat(), hora_corte="08:00",
+                      observaciones=None)
+    estado_linea = Fila(
+        id=11, producto_id=3, producto_nombre="Pollo", categoria_nombre="Aves",
+        codigo="P1", unidad="kg", stock_sistema=10, inicial=10, ingreso_dia=0,
+        ingreso_manual=0, disponible=10, conteo_fisico=None, final=10,
+        utilizada=0, diferencia=0, costo_promedio=5, precio_venta=8,
+        observaciones=None, contado_por=None,
+    )
+    otra_linea = Fila(
+        id=12, producto_id=4, producto_nombre="Papas", categoria_nombre="Verduras",
+        codigo="P2", unidad="kg", stock_sistema=6, inicial=6, ingreso_dia=0,
+        ingreso_manual=0, disponible=6, conteo_fisico=None, final=6,
+        utilizada=0, diferencia=0, costo_promedio=2, precio_venta=4,
+        observaciones=None, contado_por=None,
+    )
+    estado_lineas = [estado_linea, otra_linea]
+    sqls = []
+    entradas_manuales = {}
+
+    class Cursor:
+        def __init__(self, one=None, rows=None):
+            self.one = one
+            self.rows = rows or []
+            self.rowcount = 1
+
+        def fetchone(self):
+            return self.one
+
+        def fetchall(self):
+            return self.rows
+
+    class SharedConn:
+        def execute(self, sql, params=None):
+            s = " ".join(str(sql).split())
+            p = list(params or [])
+            sqls.append(s)
+            if s.startswith("SELECT * FROM inventario_diario WHERE id"):
+                return Cursor(one=estado_inv)
+            if "SELECT principal, nombre FROM sucursales" in s:
+                return Cursor(one=Fila(principal=0, nombre="America"))
+            if "FROM inventario_detalle d" in s:
+                return Cursor(rows=[Fila(**fila) for fila in estado_lineas])
+            if "FROM lotes WHERE" in s:
+                return Cursor(rows=[Fila(producto_id=3, c=10),
+                                    Fila(producto_id=4, c=6)])
+            if "FROM inventario_ingresos_manuales WHERE request_id" in s:
+                entrada = entradas_manuales.get(p[0])
+                return Cursor(one=Fila(**entrada) if entrada else None)
+            if "AS i FROM movimientos" in s or "AS s FROM movimientos" in s:
+                return Cursor(rows=[])
+            if s.startswith("INSERT INTO inventario_ingresos_manuales"):
+                detalle_id, request_id, usuario, cantidad, _ = p
+                entradas_manuales[request_id] = {
+                    "detalle_id": detalle_id, "usuario": usuario, "cantidad": cantidad,
+                }
+                return Cursor()
+            if s.startswith("UPDATE inventario_detalle SET"):
+                nombres = (
+                    "inicial", "ingreso_dia", "ingreso_manual", "disponible",
+                    "conteo_fisico", "final", "utilizada", "diferencia",
+                    "stock_sistema", "observaciones", "contado_por",
+                )
+                fila = next(f for f in estado_lineas if f["id"] == p[-1])
+                for nombre, valor in zip(nombres, p[:-1]):
+                    fila[nombre] = valor
+                return Cursor()
+            if s.startswith("UPDATE inventario_diario SET"):
+                estado_inv["observaciones"], estado_inv["hora_corte"], _ = p
+                return Cursor()
+            raise AssertionError(f"Consulta inesperada: {s}")
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    app = _servidor()
+    invmod.get_conn = lambda: SharedConn()
+    utilmod.registrar_auditoria = lambda *a, **k: None
+
+    def guardar_como(usuario, lineas, version=3):
+        cliente = app.test_client()
+        with cliente.session_transaction() as sesion:
+            sesion["user_id"] = f"u-{usuario}"
+            sesion["usuario"] = usuario
+            sesion["rol"] = "encargado"
+            sesion["sucursal_id"] = 35
+        return cliente.put("/api/inventario-diario/7",
+                           json={"version": version, "lineas": lineas})
+
+    try:
+        primero = guardar_como("encargado_america", [{
+            "id": 11, "campos_modificados": ["conteo_fisico", "inicial"],
+            "conteo_fisico": "8", "ingreso_manual": "0",
+            "inicial": "12", "observaciones": "",
+        }])
+        segundo_producto = guardar_como("encargado_america2", [{
+            "id": 12, "campos_modificados": ["conteo_fisico"],
+            "conteo_fisico": "5", "ingreso_manual": None,
+            "inicial": "8", "observaciones": "",
+        }])
+        segundo = guardar_como("encargado_america2", [{
+            "id": 11, "campos_modificados": ["observaciones"],
+            "conteo_fisico": None, "ingreso_manual": "0",
+            "inicial": "10", "observaciones": "Revisado por el segundo encargado",
+        }])
+        conteo_despues_segundo = estado_linea["conteo_fisico"]
+        autor_despues_segundo = estado_linea["contado_por"]
+        tercero = guardar_como("encargado_america2", [{
+            "id": 11, "campos_modificados": ["conteo_fisico"],
+            "conteo_fisico": "7", "ingreso_manual": "0",
+            "inicial": "10", "observaciones": "",
+        }])
+        entrada_uno = guardar_como("encargado_america", [{
+            "id": 12, "campos_modificados": ["ingreso_manual"],
+            "ingreso_manual": "3", "ingreso_manual_id": "entry-uno",
+        }])
+        entrada_dos = guardar_como("encargado_america2", [{
+            "id": 12, "campos_modificados": ["ingreso_manual"],
+            "ingreso_manual": "2", "ingreso_manual_id": "entry-dos",
+        }])
+        reintento_entrada_dos = guardar_como("encargado_america2", [{
+            "id": 12, "campos_modificados": ["ingreso_manual"],
+            "ingreso_manual": "2", "ingreso_manual_id": "entry-dos",
+        }])
+        writes_antes = sum(sql.startswith("UPDATE inventario_detalle SET") for sql in sqls)
+        desactualizado = guardar_como("encargado_america", [{
+            "id": 11, "conteo_fisico": None, "ingreso_manual": "0",
+            "inicial": "10", "observaciones": "",
+        }], version=2)
+        linea_incompleta = guardar_como("encargado_america", [{
+            "id": 11, "conteo_fisico": None,
+        }])
+        writes_despues = sum(sql.startswith("UPDATE inventario_detalle SET") for sql in sqls)
+
+        _check("el guardado del segundo conserva el conteo previo del primero",
+               primero.get_json().get("ok") and segundo_producto.get_json().get("ok")
+               and estado_linea["inicial"] == 10
+               and otra_linea["inicial"] == 6
+               and otra_linea["ingreso_manual"] == 5
+               and otra_linea["disponible"] == 11
+               and otra_linea["conteo_fisico"] == 5
+               and segundo.get_json().get("ok")
+               and conteo_despues_segundo == 8
+               and autor_despues_segundo == "encargado_america"
+               and estado_linea["observaciones"] == "Revisado por el segundo encargado",
+               f"conteo tras segundo={conteo_despues_segundo}, "
+               f"autor tras segundo={autor_despues_segundo}, "
+               f"observaciones={estado_linea['observaciones']}, "
+               f"iniciales=({estado_linea['inicial']}, {otra_linea['inicial']}), "
+               f"otra_linea=({otra_linea['ingreso_manual']}, {otra_linea['disponible']}, "
+               f"{otra_linea['conteo_fisico']}), "
+               f"respuestas=({primero.status_code}, {segundo_producto.status_code}, "
+               f"{segundo.status_code})")
+        _check("si ambos corrigen la misma celda, se avisa quién había contado",
+               bool(tercero.get_json().get("data", {}).get("avisos"))
+               and "encargado_america" in tercero.get_json()["data"]["avisos"][0])
+        _check("el ingreso manual suma las cantidades nuevas de ambos encargados",
+               entrada_uno.get_json().get("ok") and entrada_dos.get_json().get("ok")
+               and otra_linea["ingreso_manual"] == 5
+               and otra_linea["disponible"] == 11,
+               f"acumulado={otra_linea['ingreso_manual']}, "
+               f"disponible={otra_linea['disponible']}")
+        _check("reintentar el mismo guardado no duplica el ingreso manual",
+               reintento_entrada_dos.get_json().get("ok")
+               and otra_linea["ingreso_manual"] == 5
+               and len(entradas_manuales) == 2,
+               f"acumulado={otra_linea['ingreso_manual']}, "
+               f"entradas={len(entradas_manuales)}")
+        _check("el guardado bloquea la planilla mientras actualiza",
+               any("FOR UPDATE" in sql for sql in sqls))
+        _check("una pantalla vieja no puede borrar cambios ya guardados",
+               desactualizado.status_code == 409
+               and writes_despues == writes_antes
+               and estado_linea["conteo_fisico"] == 7)
+        _check("una línea malformada devuelve error claro sin 500",
+               linea_incompleta.status_code == 400
+               and "incompleta" in linea_incompleta.get_json().get("message", ""))
+    finally:
+        invmod.get_conn = original_get_conn
+        utilmod.registrar_auditoria = original_registrar_auditoria
+
+
+def prueba_sincronizacion_actualiza_inicial_sistema():
+    """El inicial de solo lectura sigue el stock calculado por el sistema."""
+    filas_productos = [
+        Fila(id=3, categoria_id=1, categoria_nombre="Aves", nombre="Pollo",
+             codigo="P1", unidad="kg", costo_promedio=5, precio_venta=8,
+             stock=20, posterior=0),
+        Fila(id=4, categoria_id=1, categoria_nombre="Aves", nombre="Pavo",
+             codigo="P2", unidad="kg", costo_promedio=5, precio_venta=8,
+             stock=20, posterior=0),
+    ]
+    detalles = [
+        Fila(id=11, producto_id=3, inicial=12, stock_sistema=10,
+             disponible=12, conteo_fisico=None, observaciones="Revisar entrega",
+             categoria_nombre="Aves", producto_nombre="Pollo", codigo="P1",
+             unidad="kg"),
+        Fila(id=12, producto_id=4, inicial=10, stock_sistema=10,
+             disponible=10, conteo_fisico=None, observaciones=None,
+             categoria_nombre="Aves", producto_nombre="Pavo", codigo="P2",
+             unidad="kg"),
+    ]
+    updates = []
+
+    class SyncConn:
+        def execute(self, sql, params=None):
+            s = " ".join(str(sql).split())
+            if s.startswith("SELECT estado FROM inventario_diario"):
+                return CierreCursor([Fila(estado="abierto")])
+            if "FROM productos p" in s:
+                return CierreCursor(filas_productos)
+            if "FROM inventario_detalle d" in s:
+                return CierreCursor(detalles)
+            if s.startswith("UPDATE inventario_detalle SET"):
+                updates.append((s, list(params or [])))
+                return CierreCursor([])
+            raise AssertionError(f"Consulta inesperada: {s}")
+
+        def commit(self):
+            pass
+
+    cambios = invmod._sincronizar_detalle(SyncConn(), 7, 35, "2026-10-09", 0)
+    update_ids = [params[-1] for _, params in updates]
+    _check("la sincronización refresca el inicial aunque haya observaciones",
+           cambios == 2 and 11 in update_ids and 12 in update_ids
+           and next(p for _, p in updates if p[-1] == 11)[6] == 20,
+           f"cambios={cambios}, updates={update_ids}")
 
 
 def prueba_iniciar_planilla_no_falla_en_silencio():
@@ -544,6 +856,8 @@ def main():
     prueba_no_puede_abrir_otra_sucursal()
     prueba_mensaje_dice_quien_abrio()
     prueba_se_sabe_quien_conto()
+    prueba_guardado_parcial_compartido()
+    prueba_sincronizacion_actualiza_inicial_sistema()
     prueba_iniciar_planilla_no_falla_en_silencio()
     prueba_se_pueden_abrir_las_dos_tipos_de_planilla()
     prueba_columnas_inventario_diario()
@@ -565,4 +879,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

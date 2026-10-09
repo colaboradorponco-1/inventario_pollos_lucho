@@ -94,6 +94,19 @@ La tabla `usuarios` se crea con `admin/123456` como inicio de sesión inicial:
 - **Contingencia ante cortes de luz en sucursal**: el sistema NO guarda borradores offline.
   Define un cuaderno de respaldo en la sucursal para anotar ventas durante caídas del servidor.
 - **Cierre de caja diario**: compara el inventario teórico del sistema con el físico al cierre.
+- **Inventario con dos encargados por sucursal**: ambos deben abrir la misma planilla
+  existente y repartirse los productos; no creen planillas duplicadas para el mismo conteo.
+  Al abrir se cargan los datos ya guardados. El inicial lo calcula el sistema y es
+  solo de lectura. Para corregir el stock, edita el producto de la sucursal en
+  **Productos**, regresa a la planilla y pulsa **Actualizar stock**. El inicial se
+  actualiza hasta que se registra el conteo físico. En **Ingreso manual**, cada
+  encargado escribe solo la cantidad nueva que recibió; al guardar, se suma al
+  acumulado compartido (no se reemplaza). Los conteos y demás cambios también se
+  comparten, y la pantalla se sincroniza cada 10 segundos. Antes de cerrar, uno de los
+  dos revisa que todos los
+  productos estén contados; el sistema no permite cerrar con líneas pendientes. Si una
+  pestaña quedó desactualizada y avisa que no guardó, conserva los datos pendientes y
+  recarga antes de volver a guardar.
 - **Monitoreo**: revisa periódicamente memoria y disco del VPS (Windows: Administrador de tareas).
   Si `servidor.log` / `server.err.log` crecen demasiado, archívalos con la fecha.
 - **Limpieza de datos**: la tabla `auditoria` y los `movimientos` crecen; define una política

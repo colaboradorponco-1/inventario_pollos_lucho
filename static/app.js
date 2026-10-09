@@ -3033,11 +3033,8 @@ $('#btn-inv-print')?.addEventListener('click', () => {
     else toast('Abre una planilla del día primero', 'err');
 });
 $('#btn-inv-borrar')?.addEventListener('click', invClick(borrarInventario));
-// Refresco del stock del sistema. El Inicial de la planilla sale del stock real,
-// asi que si despues de abrirla se corrige el stock de un producto, la planilla
-// abierta tiene que enterarse. Ademas de este boton corre un chequeo cada 45s
-// mientras la planilla este abierta, para que el encargado no tenga que volver a
-// abrirla a mano. Nunca pisa conteos, ingresos ni observaciones.
+// Sincronización de la planilla compartida: ambos encargados ven los cambios
+// guardados por el otro sin tener que cerrar y volver a abrirla.
 $('#btn-inv-refrescar')?.addEventListener('click', invClick(() => refrescarStockInicial(false)));
 $('#btn-inv-cerrar-panel')?.addEventListener('click', invClick(async () => {
     detenerVigilaInventario();
@@ -3284,6 +3281,10 @@ let INV_ID = null;
 let INV_CERRADA = false;
 let INV_SOLO_LECTURA = false;
 let INV_FILAS = [];
+let INV_CAMPOS_EDITADOS = new Map();
+let INV_INGRESO_IDS = new Map();
+let INV_OBS_BASE = '';
+let INV_HORA_BASE = '';
 
 function fmtInvQ(v) {
     const n = Number(v || 0);
@@ -3298,7 +3299,7 @@ function fmtInvQ(v) {
 // La columna ya no muestra "Faltan 5" ni números fríos que confunden,
 // sino una alerta visual clara ("Todo en orden" o "Revisar / Faltan X").
 // Por debajo el número de diferencia sigue existiendo en la base para el
-// cierre y la regla de explicar, pero el usuario ve un estado amigable.
+// ajuste al cierre; las observaciones ayudan a explicar, pero no son requisito.
 function diffInvBadge(d, f) {
     f = f || {};
     const n = Number(d || 0);
@@ -3315,7 +3316,7 @@ function diffInvBadge(d, f) {
     if (n < 0) {
         return `<strong style="color:#dc2626;background:#FEF2F2;padding:2px 6px;border-radius:4px;display:inline-block" ` +
             `title="El sistema registra ${sys} y contaste ${fin}. Faltan ${q}. ` +
-            `Escribí en Observaciones qué pasó para poder cerrar.">` +
+            `Si hace falta, deja en Observaciones qué pasó.">` +
             `⚠️ Revisar (Falta${uno ? '' : 'n'} ${q})</strong>`;
     }
     return `<strong style="color:#0F3D2E;background:#ECFDF5;padding:2px 6px;border-radius:4px;display:inline-block" ` +
@@ -3504,14 +3505,17 @@ async function abrirInventario(invId) {
     // almacén principal ven todas, pero solo modifican la de su sucursal).
     INV_SOLO_LECTURA = d.puede_editar === false;
     INV_FILAS = d.lineas || [];
+    INV_CAMPOS_EDITADOS = new Map();
+    INV_INGRESO_IDS = new Map();
     $('#inv-panel-conteo').style.display = '';
     $('#inv-titulo').textContent = `Inventario ${d.sucursal_nombre} · ${d.categoria_nombre || 'Todas las categorías'} · ${fmtFechaES(d.fecha)} (${d.hora_corte || 'sin hora'})`;
     $('#inv-subtitulo').textContent = INV_CERRADA
         ? `Cerrada por ${d.cerrado_por || ''} el ${fmtFechaHoraES(d.fecha_hora_cierre) || '—'}.`
 : (INV_SOLO_LECTURA
             ? 'Solo lectura: esta planilla es de otra sucursal. Podés verla, pero solo el encargado de esa sucursal puede guardarla o cerrarla.'
-            : 'El inicial ya viene con el stock actual del sistema (ya incluye los pedidos entregados). Anota en ingreso manual SOLO lo que llegó sin pasar por el sistema (compra directa, devolución, de la casa), y el conteo final. Disponible = inicial + ingreso manual. Si tu conteo no da igual al sistema, la columna Diferencia te dice cuántas faltan o sobran.');
+            : 'La planilla es compartida por los dos encargados: al abrirla aparecen los datos guardados. El inventario inicial lo calcula el sistema y es de solo lectura. En ingreso manual escribe solo la cantidad nueva que recibiste fuera del sistema; cada guardado se suma al acumulado compartido que aparece debajo. Completa el conteo final y guarda para que el otro encargado continúe.');
     $('#inv-observaciones').value = d.observaciones || '';
+    INV_OBS_BASE = $('#inv-observaciones').value;
     $('#inv-observaciones').disabled = INV_CERRADA || INV_SOLO_LECTURA;
     const h = $('#inv-hora');
     if (h && !INV_CERRADA) {
@@ -3519,6 +3523,7 @@ async function abrirInventario(invId) {
         h.value = d.hora_corte ||
             String(dH.getHours()).padStart(2, '0') + ':' + String(dH.getMinutes()).padStart(2, '0');
     }
+    INV_HORA_BASE = h ? h.value : '';
     revisarHoraCorte();
 
     const r = d.resumen || {};
@@ -3550,7 +3555,7 @@ async function abrirInventario(invId) {
         // detalla en el title del casillero para saber que se puede corregir.
         const quien = (f.contado_por || '').trim();
         const marcaQuien = quien
-            ? `<div style="font-size:10px;color:${f.es_de_otro ? '#B45309' : '#6B7280'};margin-top:1px">
+            ? `<div class="inv-count-author" style="font-size:10px;color:${f.es_de_otro ? '#B45309' : '#6B7280'};margin-top:1px">
                    ${f.es_de_otro ? 'Lo contó' : 'Contó'}: ${esc(quien)}</div>`
             : '';
         // Planilla cerrada O de otra sucursal: los casilleros no se tocan.
@@ -3562,14 +3567,17 @@ async function abrirInventario(invId) {
                 <td>
                     <input type="number" step="any" min="0" class="inv-inicial" data-id="${f.id}"
                            value="${esc(fmtInvQ(f.inicial))}" readonly ${bloq}
-                           title="Viene del sistema (stock actual, ya incluye los pedidos entregados). No se edita."
+                           title="Calculado por el sistema según el stock; no se puede editar."
                            style="text-align:right;background:#F5F5F5">
                 </td>
                 <td>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
-                           value="${esc(fmtInvQ(f.ingreso_manual))}" placeholder="—" ${bloq}
-                           title="Anota acá solo lo que llegó sin pasar por el sistema: compra directa, devolución o mercadería traída de la casa."
+                           value="" placeholder="Cantidad a agregar" ${bloq}
+                           title="Escribe solo la nueva cantidad recibida fuera del sistema. Se suma al ingreso manual acumulado."
                            style="text-align:right">
+                    <small data-inv-ingresado="${f.id}" style="display:block;color:var(--muted);font-size:10px">
+                        Acumulado: ${esc(fmtInvQ(f.ingreso_manual))} ${esc(f.unidad || '')}
+                    </small>
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
@@ -3587,8 +3595,22 @@ async function abrirInventario(invId) {
     });
     tb.innerHTML = html;
 
-    $$('.inv-conteo, .inv-ingreso-man')
-        .forEach((inp) => inp.addEventListener('input', recalcFilaInv));
+    $$('.inv-conteo, .inv-ingreso-man').forEach((inp) => inp.addEventListener('input', (e) => {
+        const campo = e.currentTarget.classList.contains('inv-conteo')
+            ? 'conteo_fisico' : 'ingreso_manual';
+        marcarCampoInvEditado(e.currentTarget, campo);
+        if (campo === 'ingreso_manual' && !INV_INGRESO_IDS.has(Number(e.currentTarget.dataset.id))) {
+            const id = Number(e.currentTarget.dataset.id);
+            const token = (window.crypto && typeof window.crypto.randomUUID === 'function')
+                ? window.crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            INV_INGRESO_IDS.set(id, token);
+        }
+        recalcFilaInv(e);
+    }));
+    $$('.inv-obs').forEach((inp) => inp.addEventListener('input', (e) => {
+        marcarCampoInvEditado(e.currentTarget, 'observaciones');
+    }));
 
     $('#btn-inv-guardar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-cerrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
@@ -3606,19 +3628,8 @@ async function abrirInventario(invId) {
     else iniciarVigilaInventario();
 }
 
-// Vuelve a leer el stock del sistema y actualiza la columna 'Inicial' (y la
-// 'Disponible') de las filas que todavia NO se contaron.
-//
-// Por que existe: el 'Inicial' viene del stock real. Si despues de abrir la
-// planilla se corrige el stock de un producto en Productos (o llega mercaderia),
-// la planilla abierta seguia mostrando el numero viejo y el encargado contaba
-// contra un dato que ya no existia.
-//
-// Que NO rompe lo que el encargado esta escribiendo: solo se tocan el 'Inicial'
-// (que es readonly y lo pone el sistema) y la 'Disponible' derivada. Las
-// casillas de conteo, ingreso manual y observaciones nunca se tocan, y las
-// filas ya contadas se respetan: el servidor ya las congela para no moverles la
-// diferencia.
+// Sincroniza la planilla compartida mientras está abierta. Cada campo se
+// actualiza desde el servidor salvo los que el usuario está editando localmente.
 async function refrescarStockInicial(silencioso) {
     if (!INV_ID || INV_CERRADA) return;
     let d;
@@ -3634,14 +3645,16 @@ async function refrescarStockInicial(silencioso) {
     INV_FILAS = lineas;
     let cambiados = 0;
     lineas.forEach((f) => {
+        const editados = INV_CAMPOS_EDITADOS.get(f.id) || new Set();
+        const tr = $(`#inv-tbody tr[data-inv-fila="${f.id}"]`);
         const iniIn = $(`#inv-tbody .inv-inicial[data-id="${f.id}"]`);
-        if (!iniIn) return;
-        // Si el encargado ya escribio un conteo en esta fila, no se toca nada:
-        // la diferencia de esa linea ya esta congelada con el stock de antes.
         const conteoIn = $(`#inv-tbody .inv-conteo[data-id="${f.id}"]`);
-        if (conteoIn && conteoIn.value !== '') return;
+        const ingresoIn = $(`#inv-tbody .inv-ingreso-man[data-id="${f.id}"]`);
+        const obsIn = $(`#inv-tbody .inv-obs[data-id="${f.id}"]`);
+        const acumuladoIn = $(`[data-inv-ingresado="${f.id}"]`);
+        if (!iniIn || !tr) return;
         const nuevo = fmtInvQ(f.inicial || 0);
-        if (String(iniIn.value) !== String(nuevo)) {
+        if (!editados.has('inicial') && String(iniIn.value) !== String(nuevo)) {
             iniIn.value = nuevo;
             cambiados++;
             // Destacarlo un momento para que se note que se movio solo.
@@ -3651,6 +3664,37 @@ async function refrescarStockInicial(silencioso) {
                 iniIn.style.transition = '';
                 iniIn.style.background = '#F5F5F5';
             }, 1600);
+        }
+        if (conteoIn && !editados.has('conteo_fisico')) {
+            conteoIn.value = f.conteo_fisico === null || f.conteo_fisico === undefined
+                ? '' : f.conteo_fisico;
+            const quien = (f.contado_por || '').trim();
+            conteoIn.title = quien
+                ? `${f.es_de_otro ? 'Lo contó' : 'Contaste'} ${quien}. Podés corregirlo si está mal: al guardar te va a avisar que ya estaba contado.`
+                : '';
+            let autor = tr.querySelector('.inv-count-author');
+            if (quien && !autor) {
+                autor = document.createElement('div');
+                autor.className = 'inv-count-author';
+                autor.style.cssText = 'font-size:10px;margin-top:1px';
+                tr.querySelector('.inv-col-tit').appendChild(autor);
+            }
+            if (autor) {
+                if (!quien) autor.remove();
+                else {
+                    autor.style.color = f.es_de_otro ? '#B45309' : '#6B7280';
+                    autor.textContent = `${f.es_de_otro ? 'Lo contó' : 'Contó'}: ${quien}`;
+                }
+            }
+        }
+        if (ingresoIn && !editados.has('ingreso_manual')) {
+            ingresoIn.value = '';
+            if (acumuladoIn) {
+                acumuladoIn.textContent = `Acumulado: ${fmtInvQ(f.ingreso_manual || 0)} ${f.unidad || ''}`;
+            }
+        }
+        if (obsIn && !editados.has('observaciones')) {
+            obsIn.value = f.observaciones || '';
         }
         recalcFilaInv({ target: conteoIn || { dataset: { id: f.id } } });
     });
@@ -3670,7 +3714,7 @@ function iniciarVigilaInventario() {
     _vigilaInv = setInterval(() => {
         if (!INV_ID || INV_CERRADA || document.hidden) return;
         refrescarStockInicial(true);
-    }, 45000);
+    }, 10000);
 }
 function detenerVigilaInventario() {
     if (_vigilaInv) { clearInterval(_vigilaInv); _vigilaInv = null; }
@@ -3681,12 +3725,13 @@ function recalcFilaInv(e) {
     const id = Number(inp.dataset.id);
     const f = INV_FILAS.find((x) => x.id === id);
     if (!f) return;
-    // El encargado escribe a mano el inicial, el ingreso manual y el conteo final.
-    // Disponible = inicial + solo lo manual (el automático no cuenta en la planilla).
+    // El inicial lo propone el sistema; solo son manuales el ingreso y el conteo.
+    // Disponible = inicial + solo el ingreso manual.
     const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
     const manIn = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
     const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
-    const ingMan = manIn && manIn.value !== '' ? Number(manIn.value) : 0;
+    const ingMan = (Number(f.ingreso_manual) || 0) +
+        (manIn && manIn.value !== '' ? Number(manIn.value) : 0);
     const ingreso = ingMan;
     const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
     const conteo = inp.value === '' ? null : Number(inp.value);
@@ -3701,25 +3746,26 @@ function recalcFilaInv(e) {
     if (difEl) difEl.innerHTML = diffInvBadge(dif, f);
 }
 
+function marcarCampoInvEditado(inp, campo) {
+    const id = Number(inp.dataset.id);
+    if (!Number.isInteger(id) || id <= 0) return;
+    if (!INV_CAMPOS_EDITADOS.has(id)) INV_CAMPOS_EDITADOS.set(id, new Set());
+    INV_CAMPOS_EDITADOS.get(id).add(campo);
+}
+
 function collectedInventario() {
-    // $$(...) devuelve un NodeList: sin Array.from no tiene .map().
-    // Se manda el TEXTO CRUDO, no Number(...). Con Number, una casilla con
-    // "abc" o un guion a medio escribir daba NaN, y JSON.stringify(NaN) sale
-    // como null: el servidor lo tomaba como "no contado" y guardaba la fila en
-    // blanco sin avisar nada. El encargado perdia lo que habia tipeado y la
-    // pantalla no decia por que. Que valide el servidor, que ya responde con un
-    // mensaje que nombra el producto.
-    return Array.from($$('#inv-tbody .inv-conteo')).map((inp) => {
-        const id = Number(inp.dataset.id);
+    // Enviar solo celdas editadas evita que la pantalla vieja de un encargado
+    // borre o pise lo que el otro guardó desde su sesión.
+    return Array.from(INV_CAMPOS_EDITADOS.entries()).map(([id, campos]) => {
         const obs = $(`#inv-tbody .inv-obs[data-id="${id}"]`);
-        const ini = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
         const man = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
-        const enBlanco = (el) => !el || el.value === '' || el.value === null;
+        const conteo = $(`#inv-tbody .inv-conteo[data-id="${id}"]`);
         return {
             id,
-            inicial: enBlanco(ini) ? null : ini.value,
-            ingreso_manual: enBlanco(man) ? null : man.value,
-            conteo_fisico: enBlanco(inp) ? null : inp.value,
+            campos_modificados: Array.from(campos),
+            ingreso_manual: !man || man.value === '' ? null : man.value,
+            ingreso_manual_id: INV_INGRESO_IDS.get(id) || null,
+            conteo_fisico: !conteo || conteo.value === '' ? null : conteo.value,
             observaciones: obs ? obs.value : '',
         };
     });
@@ -3728,13 +3774,14 @@ function collectedInventario() {
 async function guardarInventario() {
     if (!INV_ID) return false;
     revisarHoraCorte();
+    const payload = { version: 3, lineas: collectedInventario() };
+    const observaciones = $('#inv-observaciones').value;
+    if (observaciones !== INV_OBS_BASE) payload.observaciones = observaciones;
+    const hora = $('#inv-hora') ? $('#inv-hora').value : '';
+    if (hora !== INV_HORA_BASE) payload.hora_corte = hora;
     const r = await request(API + '/inventario-diario/' + INV_ID, {
         method: 'PUT',
-        body: JSON.stringify({
-            lineas: collectedInventario(),
-            observaciones: $('#inv-observaciones').value,
-            hora_corte: $('#inv-hora').value,
-        }),
+        body: JSON.stringify(payload),
     });
     toast(r.message || 'Conteo guardado', 'ok');
     // Avisos de "el otro encargado ya contó esto". El guardado YA se hizo (no se
@@ -3816,6 +3863,7 @@ async function borrarInventario() {
     $('#inv-panel-conteo').style.display = 'none';
     INV_ID = null;
     INV_FILAS = [];
+    INV_CAMPOS_EDITADOS = new Map();
     await listarInventario();
 }
 

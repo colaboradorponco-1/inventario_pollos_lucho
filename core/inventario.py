@@ -208,17 +208,15 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
                   f["costo_promedio"] or 0, f["precio_venta"] or 0))
             cambios += 1
         else:
-            # Si todavía no hubo conteo se actualiza el inicial al stock actual:
-            # así, si un pedido se entregó después de crear la planilla, al abrirla
-            # ya figura (50 -> 60) y nadie lo anota dos veces. Si ya contaron (o
-            # escribieron observaciones) se respeta lo que hicieron.
+            # El inicial sigue el stock del sistema hasta que se registra el
+            # conteo físico. Una observación no debe impedir esta actualización.
             #
             # OJO: se escribe SOLO si el valor cambió de verdad. La planilla
-            # abierta se refresca sola cada 45s, y escribir las ~100 filas en
+            # abierta se refresca sola cada 10s, y escribir las ~100 filas en
             # cada chequeo churnaba la tabla y podía chocar con el guardado del
             # otro encargado en la misma planilla (los UPDATE toman el candado de
             # la fila). Si nada cambió, cero escrituras.
-            if d["conteo_fisico"] is None and not (d["observaciones"] or ""):
+            if d["conteo_fisico"] is None:
                 if not _misma_cantidad(d["inicial"], inicial) or \
                         not _misma_cantidad(d["disponible"], disponible) or \
                         not _misma_cantidad(d["stock_sistema"], stock_dia) or \
@@ -585,27 +583,45 @@ def inventario_detalle(inv_id):
 @inventario_bp.route("/api/inventario-diario/<int:inv_id>", methods=["PUT"])
 @login_requerido
 def inventario_guardar(inv_id):
-    """Guarda la planilla línea por línea. El encargado llena a mano el inventario
-    inicial, el ingreso del día y el inventario final; el sistema calcula
-    disponible (= inicial + ingreso), utilizada (= disponible - final) y la
-    diferencia, sin tocar el stock: el ajuste real se aplica al cerrar."""
+    """Guarda solo los campos modificados, sin pisar cambios del otro encargado."""
     conn = get_conn()
-    inv, permitido = _sucursal_de_planilla(conn, inv_id)
+    # Serializa los guardados de ambos encargados con el cierre y entre sí.
+    inv, permitido = _sucursal_de_planilla(conn, inv_id, bloquear=True)
     if not permitido:
+        conn.rollback()
         conn.close()
         return err("Planilla no encontrada", 404)
     if inv["estado"] == "cerrado":
+        conn.rollback()
         conn.close()
         return err("La planilla está cerrada y no se puede modificar", 400)
     if inv["sucursal_id"] != sucursal_operativa():
+        conn.rollback()
         conn.close()
         return err("Solo puedes modificar la planilla de tu sucursal", 403)
 
     data = request.get_json() or {}
+    if data.get("version") != 3:
+        conn.rollback()
+        conn.close()
+        return err(
+            "La pantalla del inventario está desactualizada. No se guardó nada; "
+            "recarga la página antes de guardar para proteger los cambios del otro encargado.",
+            409)
     lineas = data.get("lineas")
     if not isinstance(lineas, list):
+        conn.rollback()
         conn.close()
         return err("Envía las líneas a actualizar", 400)
+    if any(isinstance(item, dict)
+           and not isinstance(item.get("campos_modificados"), list)
+           for item in lineas):
+        conn.rollback()
+        conn.close()
+        return err(
+            "La línea enviada está incompleta. No se guardó nada; recarga la planilla "
+            "antes de volver a guardar.",
+            400)
 
     def _campo(bruto, etiqueta, producto=None):
         """Número >= 0 escrito por el encargado. None si lo dejó vacío.
@@ -643,15 +659,16 @@ def inventario_guardar(inv_id):
     # veces esta corrigiendo un numero que el primero cargo mal. Se guarda igual
     # y el aviso queda en la respuesta para que la pantalla lo muestre.
     avisos = []
-    # La hora de corte se resuelve ANTES de buscar los movimientos posteriores. Se
-    # usaba la que ya estaba guardada y la nueva se actualizaba al final, así que
-    # si el encargado corregía la hora y guardaba, la diferencia que se le mostraba
-    # se calculaba contra la hora vieja: le salían faltantes que no existían.
-    hora_nueva = _validar_hora(data.get("hora_corte"))
-    if hora_nueva is None:
-        conn.close()
-        return err("La hora de corte no tiene un formato válido (debe ser HH:MM)", 400)
-    hora_corte = hora_nueva or inv["hora_corte"] or None
+    # Solo se actualiza la hora si el usuario la modificó en esta sesión; así
+    # la pantalla desactualizada del otro encargado no pisa el cambio.
+    hora_corte = inv["hora_corte"] or None
+    if "hora_corte" in data:
+        hora_nueva = _validar_hora(data.get("hora_corte"))
+        if hora_nueva is None:
+            conn.rollback()
+            conn.close()
+            return err("La hora de corte no tiene un formato válido (debe ser HH:MM)", 400)
+        hora_corte = hora_nueva or inv["hora_corte"] or None
     posteriores = _movimientos_posteriores(conn, ids_planilla, inv["fecha"], hora_corte)
     try:
         for item in lineas:
@@ -661,42 +678,62 @@ def inventario_guardar(inv_id):
             fila = validas.get(lid)
             if not fila:
                 continue
+            campos = item.get("campos_modificados")
+            campos = {
+                campo for campo in campos
+                if isinstance(campo, str) and campo in {
+                    "ingreso_manual", "conteo_fisico", "observaciones"
+                }
+            }
+            if not campos:
+                continue
+
             nom = fila["producto_nombre"]
-            conteo = _campo(item.get("conteo_fisico"), "El inventario final", nom)
-            # El encargado puede corregir el INICIAL a mano (el stock con el que
-            # arrancó el día no siempre cuadra con el que tiene el sistema).
-            inicial = _campo(item.get("inicial"), "El inventario inicial", nom)
-            if inicial is None:
-                inicial = fila["inicial"] or 0
-            # El inicial ya viene con el stock actual del sistema (incluye los
-            # pedidos entregados) y no se edita. Solo anota el ingreso MANUAL:
-            # lo que llega por vías que no pasan por el sistema (compra directa,
-            # devolución, de la casa).
+            conteo = (_campo(item.get("conteo_fisico"), "El inventario final", nom)
+                      if "conteo_fisico" in campos else fila["conteo_fisico"])
+            inicial = fila["inicial"] or 0
             ing_sis, ing_man, _ = _ingresos_de_linea(ingresos, fila, True)
-            # Lo que venga en 'ingreso_sistema' se IGNORA a propósito. Este campo
-            # ya no existe en la pantalla, pero el navegador de quien lo tenía
-            # cacheado de una versión anterior todavía lo manda, y si se comparaba
-            # contra el valor recién deducido no coincidía: devolvía 400 y el
-            # encargado perdía TODO lo que había contado. Ese 400 fue lo que
-            # reportaron como "se les borra todo lo que hacen".
-            ing_man = _campo(item.get("ingreso_manual"), "El ingreso manual", nom)
-            if ing_man is None:
-                ing_man = fila["ingreso_manual"] or 0
-            # Disponible = inicial + SOLO lo manual. El automático no cuenta en la planilla.
+            aporte_manual = 0.0
+            if "ingreso_manual" in campos:
+                aporte_manual = _campo(
+                    item.get("ingreso_manual"), "El ingreso manual", nom) or 0.0
+                if aporte_manual:
+                    request_id = str(item.get("ingreso_manual_id") or "").strip()
+                    if not request_id or len(request_id) > 80:
+                        raise _DatoInvalido(
+                            f"Falta el identificador del ingreso manual de '{nom}'. "
+                            "No se guardó nada; vuelve a intentar.")
+                    existente = conn.execute(
+                        "SELECT detalle_id, usuario, cantidad "
+                        "FROM inventario_ingresos_manuales WHERE request_id = %s",
+                        (request_id,)).fetchone()
+                    if existente:
+                        misma_entrada = (
+                            existente["detalle_id"] == lid
+                            and existente["usuario"] == usuario_actual
+                            and _misma_cantidad(existente["cantidad"], aporte_manual)
+                        )
+                        if not misma_entrada:
+                            raise _DatoInvalido(
+                                "El ingreso manual ya fue registrado con otros datos. "
+                                "Actualiza la planilla antes de continuar.")
+                        aporte_manual = 0.0
+                    else:
+                        conn.execute(
+                            "INSERT INTO inventario_ingresos_manuales "
+                            "(detalle_id, request_id, usuario, cantidad, fecha_hora) "
+                            "VALUES (%s, %s, %s, %s, %s)",
+                            (lid, request_id, usuario_actual, aporte_manual,
+                             datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            ing_man = (fila["ingreso_manual"] or 0) + aporte_manual
             ingreso = ing_man
             disponible = inicial + ingreso
             final = conteo if conteo is not None else disponible
             utilizada = max(disponible - final, 0)
             if conteo is None:
-                # Sin conteo no hay diferencia: se calcula recién al cerrar.
                 diferencia = 0.0
                 stock_sis = fila["stock_sistema"] or 0.0
             else:
-                # Diferencia = lo que hay de menos (-) o de más (+) respecto al sistema.
-                # La referencia se CONGELA en el primer conteo de la línea: si el encargado
-                # contó antes de que llegue el pedido, el sistema guarda cuánto tenía en ESE
-                # momento. Un pedido entregado después NO marca faltante falso: ese +ya está
-                # registrado como movimiento y no debe duplicarse ni achacarse a la planilla.
                 ya_contado = fila["conteo_fisico"] is not None
                 if ya_contado:
                     stock_sis = fila["stock_sistema"] or 0.0
@@ -704,20 +741,22 @@ def inventario_guardar(inv_id):
                     stock_sis = (stocks.get(fila["producto_id"], 0.0)
                                  - posteriores.get(fila["producto_id"], 0.0))
                 diferencia = round(final - stock_sis, 3)
-            # Quien conto esta linea. Si la linea ya tenia conteo de OTRO
-            # encargado, se avisa (no se bloquea) para que ninguno cierre a ciegas
-            # lo que conto el otro. Si viene vacio, no se pisa el `contado_por`
-            # anterior: borrar el numero para volverse a contar es normal y no
-            # tiene que perder la firma de quien lo habia contado antes.
             previo = (fila.get("contado_por") or "").strip()
             contado_por = previo or None
-            if conteo is not None:
-                ya_contado_por_otro = (fila["conteo_fisico"] is not None
-                                       and previo and previo != usuario_actual)
+            if "conteo_fisico" in campos:
+                ya_contado_por_otro = (
+                    fila["conteo_fisico"] is not None and previo
+                    and previo != usuario_actual
+                )
                 if ya_contado_por_otro:
-                    avisos.append(f"{nom}: ya lo contó {previo} (anotó "
-                                  f"{fila['conteo_fisico']}) y vos pusiste {conteo}")
-                contado_por = usuario_actual or previo
+                    nuevo = "lo borraste para volver a contar" if conteo is None else f"pusiste {conteo}"
+                    avisos.append(f"{nom}: ya lo contó {previo} "
+                                  f"(anotó {fila['conteo_fisico']}) y vos {nuevo}")
+                if conteo is not None:
+                    contado_por = usuario_actual or previo
+            observaciones = fila["observaciones"]
+            if "observaciones" in campos:
+                observaciones = (item.get("observaciones") or "")[:500] or None
             if con_firma:
                 conn.execute("""
                     UPDATE inventario_detalle
@@ -727,12 +766,8 @@ def inventario_guardar(inv_id):
                     WHERE id = %s
                 """, (inicial, ingreso, ing_man, disponible,
                       conteo, final, utilizada, diferencia, stock_sis,
-                      (item.get("observaciones") or "")[:500] or None, contado_por, lid))
+                      observaciones, contado_por, lid))
             else:
-                # La columna todavia no esta en la base (la migracion no llego a
-                # correr). Se guarda el conteo igual, sin la firma. Que falte la
-                # autoria molesta; tumbar el guardado del inventario entero seria
-                # mucho peor: el encargado perderia el conteo de toda la planilla.
                 conn.execute("""
                     UPDATE inventario_detalle
                     SET inicial = %s, ingreso_dia = %s, ingreso_manual = %s, disponible = %s,
@@ -741,15 +776,18 @@ def inventario_guardar(inv_id):
                     WHERE id = %s
                 """, (inicial, ingreso, ing_man, disponible,
                       conteo, final, utilizada, diferencia, stock_sis,
-                      (item.get("observaciones") or "")[:500] or None, lid))
+                      observaciones, lid))
     except _DatoInvalido as e:
+        conn.rollback()
         conn.close()
         return err(str(e), 400)
 
-    # La hora ya se valido arriba, antes de buscar los movimientos posteriores.
+    observaciones = inv["observaciones"]
+    if "observaciones" in data:
+        observaciones = (data.get("observaciones") or "")[:2000] or None
     conn.execute("UPDATE inventario_diario SET observaciones = %s, hora_corte = %s WHERE id = %s",
-                 ((data.get("observaciones") or inv["observaciones"] or "")[:2000] or None,
-                  hora_nueva or inv["hora_corte"] or None, inv_id))
+                 (observaciones,
+                  hora_corte, inv_id))
     conn.commit()
     conn.close()
     if avisos:
