@@ -492,6 +492,16 @@ def inventario_detalle(inv_id):
         _sincronizar_detalle(conn, inv_id, inv["sucursal_id"],
                              _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
     filas = _detalle(conn, inv_id)
+    ultimos_aportes = {}
+    if filas:
+        ids_detalle = [f["id"] for f in filas]
+        marcadores = ",".join(["%s"] * len(ids_detalle))
+        aportes = conn.execute(
+            "SELECT detalle_id, cantidad FROM inventario_ingresos_manuales "
+            f"WHERE detalle_id IN ({marcadores}) ORDER BY id",
+            ids_detalle).fetchall()
+        for aporte in aportes:
+            ultimos_aportes[aporte["detalle_id"]] = aporte["cantidad"]
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
     stocks = _stocks_actuales(conn, ids_planilla)
     posteriores = _movimientos_posteriores(conn, ids_planilla, inv["fecha"], inv["hora_corte"])
@@ -535,6 +545,9 @@ def inventario_detalle(inv_id):
             "inicial": round(f["inicial"] or 0, 3),
             "ingreso_sistema": round(ing_sis, 3),
             "ingreso_manual": round(ing_man, 3),
+            "ultimo_ingreso_manual": (
+                round(ultimos_aportes[f["id"]], 3)
+                if f["id"] in ultimos_aportes else None),
             "ingreso_dia": round(ing_sis + ing_man, 3),
             "disponible": round(disponible, 3),
             "conteo_fisico": conteo,

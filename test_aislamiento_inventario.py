@@ -250,6 +250,10 @@ def prueba_se_sabe_quien_conto():
            '"contado_por"' in detalle)
     _check("el detalle marca si la linea es de otro encargado",
            '"es_de_otro"' in detalle)
+    _check("el detalle devuelve el último aporte manual guardado",
+           "ultimo_ingreso_manual" in detalle
+           and "FROM inventario_ingresos_manuales" in detalle
+           and "ORDER BY id" in detalle)
 
     # Respaldo: si la migracion no corrio y la columna no existe, el conteo se
     # tiene que guardar igual. Perder el conteo de toda la planilla porque falte
@@ -313,13 +317,14 @@ def prueba_guardado_parcial_compartido():
            and 'value="${esc(fmtInvQ(f.inicial))}" readonly ${bloq}' in abrir
            and ".inv-conteo, .inv-ingreso-man" in abrir
            and ".inv-inicial" not in recopilar)
-    _check("el ingreso manual muestra el acumulado y acepta solo una cantidad nueva",
-           'value="" placeholder="Cantidad a agregar"' in abrir
-           and 'data-inv-ingresado="${f.id}"' in abrir
+    _check("el ingreso manual muestra el último aporte en el mismo campo",
+           'value="${f.ultimo_ingreso_manual == null ? \'\' : esc(fmtInvQ(f.ultimo_ingreso_manual))}" placeholder="Cantidad a agregar"' in abrir
+           and "ingresoIn.value = f.ultimo_ingreso_manual == null" in refrescar
+           and "camposEditados.has('ingreso_manual')" in js
            and "Acumulado compartido:" not in abrir
            and "Conteo físico:" not in abrir
            and "contado_por" not in abrir
-           and "inv-count-author" not in abrir
+           and "data-inv-ingresado" not in abrir
            and "ingreso_manual_id: INV_INGRESO_IDS.get(id)" in recopilar)
     _check("la planilla comunica que muestra los datos compartidos al abrir",
            "al abrirla aparecen los datos guardados" in abrir)

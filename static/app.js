@@ -3563,14 +3563,9 @@ async function abrirInventario(invId) {
                            style="text-align:right;background:#F5F5F5">
                 </td>
                 <td>
-                    <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:5px;padding:4px 6px;margin-bottom:5px">
-                        <small data-inv-ingresado="${f.id}" style="display:block;color:#78350F;font-size:10px;font-weight:600">
-                            ${esc(fmtInvQ(f.ingreso_manual))} ${esc(f.unidad || '')}
-                        </small>
-                    </div>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
-                           value="" placeholder="Cantidad a agregar" ${bloq}
-                           title="Escribe solo la nueva cantidad recibida fuera del sistema. Se suma al ingreso manual acumulado."
+                           value="${f.ultimo_ingreso_manual == null ? '' : esc(fmtInvQ(f.ultimo_ingreso_manual))}" placeholder="Cantidad a agregar" ${bloq}
+                           title="Muestra el último ingreso guardado. Reemplázalo con la cantidad nueva que vas a agregar."
                            style="text-align:right">
                 </td>
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
@@ -3644,7 +3639,6 @@ async function refrescarStockInicial(silencioso) {
         const conteoIn = $(`#inv-tbody .inv-conteo[data-id="${f.id}"]`);
         const ingresoIn = $(`#inv-tbody .inv-ingreso-man[data-id="${f.id}"]`);
         const obsIn = $(`#inv-tbody .inv-obs[data-id="${f.id}"]`);
-        const acumuladoIn = $(`[data-inv-ingresado="${f.id}"]`);
         if (!iniIn || !tr) return;
         const nuevo = fmtInvQ(f.inicial || 0);
         if (!editados.has('inicial') && String(iniIn.value) !== String(nuevo)) {
@@ -3663,10 +3657,8 @@ async function refrescarStockInicial(silencioso) {
                 ? '' : f.conteo_fisico;
         }
         if (ingresoIn && !editados.has('ingreso_manual')) {
-            ingresoIn.value = '';
-            if (acumuladoIn) {
-                acumuladoIn.textContent = `${fmtInvQ(f.ingreso_manual || 0)} ${f.unidad || ''}`;
-            }
+            ingresoIn.value = f.ultimo_ingreso_manual == null
+                ? '' : fmtInvQ(f.ultimo_ingreso_manual);
         }
         if (obsIn && !editados.has('observaciones')) {
             obsIn.value = f.observaciones || '';
@@ -3705,8 +3697,10 @@ function recalcFilaInv(e) {
     const iniIn = $(`#inv-tbody .inv-inicial[data-id="${id}"]`);
     const manIn = $(`#inv-tbody .inv-ingreso-man[data-id="${id}"]`);
     const inicial = iniIn && iniIn.value !== '' ? Number(iniIn.value) : (f.inicial || 0);
-    const ingMan = (Number(f.ingreso_manual) || 0) +
-        (manIn && manIn.value !== '' ? Number(manIn.value) : 0);
+    const camposEditados = INV_CAMPOS_EDITADOS.get(id);
+    const aporteNuevo = camposEditados && camposEditados.has('ingreso_manual') &&
+        manIn && manIn.value !== '' ? Number(manIn.value) : 0;
+    const ingMan = (Number(f.ingreso_manual) || 0) + aporteNuevo;
     const ingreso = ingMan;
     const disponible = (Number.isFinite(inicial) ? inicial : 0) + (Number.isFinite(ingreso) ? ingreso : 0);
     const conteo = inp.value === '' ? null : Number(inp.value);
