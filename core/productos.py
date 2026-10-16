@@ -48,16 +48,20 @@ def _para_proveer(data):
 
 def _sucursal_puede_proveer(conn, sucursal_id):
     # Solo los Almacenes Principales y los almacenes AS reparten a las demás
-    # sucursales. Las tiendas normales (aunque tengan "provee" o un usuario
-    # receptor) ya no pueden ofrecer productos en pedidos.
+    # sucursales. Un almacén AS se reconoce por la marca `es_as`, por tener un
+    # almacén "AS ..." o por el propio nombre ("AS America"...). Las tiendas
+    # normales ya no pueden ofrecer productos aunque tengan "provee" o un
+    # usuario receptor.
     sucursal = conn.execute(
-        "SELECT s.principal, s.es_as, "
+        "SELECT s.principal, s.es_as, s.nombre, "
         "EXISTS (SELECT 1 FROM almacenes a "
         "WHERE a.sucursal_id = s.id AND a.nombre LIKE 'AS %') AS almacen_as "
         "FROM sucursales s WHERE s.id = ?", (sucursal_id,)).fetchone()
-    return bool(sucursal and (
-        sucursal.get("principal") or sucursal.get("es_as")
-        or sucursal.get("almacen_as")))
+    if not sucursal:
+        return False
+    nombre = (sucursal.get("nombre") or "").strip().upper()
+    return bool(sucursal.get("principal") or sucursal.get("es_as")
+                or sucursal.get("almacen_as") or nombre.startswith("AS "))
 
 
 def _stock_sucursal_permitido(conn, ver_todo, sid):

@@ -1238,10 +1238,12 @@ function sucursalPermiteOfrecerProductos(sucursalId, almacenId = $('#prod-almace
         String(a.id) === String(almacenId)
         && /^AS\s/i.test((a.nombre || '').trim()));
     // Solo los Almacenes Principales y los almacenes AS ofrecen productos en
-    // pedidos. Las tiendas normales (aunque tengan "provee" o un usuario
-    // receptor) ya no ven esta opción.
+    // pedidos. Un almacén AS se reconoce por la marca `es_as` o por el nombre
+    // ("AS America", "AS Simon Lopez"...). Las tiendas normales ya no ven esta
+    // opción aunque tengan "provee" o un usuario receptor.
     return almacenAS || (!!sucursal && (
-        Number(sucursal.principal) === 1 || !!sucursal.es_as));
+        Number(sucursal.principal) === 1 || !!sucursal.es_as
+        || /^AS\s/i.test((sucursal.nombre || '').trim())));
 }
 
 function actualizarControlProductoPedido(sucursalId, ofrecer = false) {

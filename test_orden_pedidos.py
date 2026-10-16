@@ -554,6 +554,10 @@ def prueba_control_oferta_productos():
     puede = ns.get("_sucursal_puede_proveer")
     _check("un almacén AS puede habilitar productos para pedidos",
            callable(puede) and puede(Conexion({"principal": 0, "provee": 0, "es_as": 1}), 5))
+    _check("un almacén AS se reconoce por el nombre aunque es_as venga en 0",
+           callable(puede) and puede(Conexion({
+               "principal": 0, "provee": 0, "es_as": 0, "nombre": "AS America"}), 5)
+           and "/^AS\\s/i.test((sucursal.nombre" in js)
     _check("una sucursal con usuario receptor ya NO ofrece productos",
            callable(puede) and not puede(Conexion({
                "principal": 0, "provee": 0, "es_as": 0, "receptor": 1}), 5))
