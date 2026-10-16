@@ -415,12 +415,44 @@ def dashboard_graficos():
     })
 
 
+def _asegurar_almacenes_por_sucursal(conn):
+    """Red de seguridad: cada sucursal tiene al menos un almacén propio.
+
+    El modelo es jerárquico (cada sucursal es su propio almacén). Si por una
+    importación o una migración previa una sucursal quedó sin ningún almacén
+    enlazado (`almacenes.sucursal_id`), el selector "Almacén" del formulario de
+    productos queda vacío. Esto lo repara de forma idempotente: solo toca las
+    sucursales que no tienen ninguno. No toca nada si la BD ya está correcta."""
+    faltan = conn.execute(
+        "SELECT s.id, s.nombre FROM sucursales s "
+        "WHERE NOT EXISTS (SELECT 1 FROM almacenes a WHERE a.sucursal_id = s.id)"
+    ).fetchall()
+    if not faltan:
+        return
+    for s in faltan:
+        nombre = (s["nombre"] or f"Sucursal {s['id']}").strip() or f"Sucursal {s['id']}"
+        try:
+            conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) "
+                         "VALUES (%s, %s, %s)", (nombre, "", s["id"]))
+        except Exception:
+            # Puede chocar con un UNIQUE global heredado sobre el nombre.
+            try:
+                conn.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) "
+                             "VALUES (%s, %s, %s)", (f"{nombre} ({s['id']})", "", s["id"]))
+            except Exception:
+                pass
+    conn.commit()
+
+
 @dashboard_bp.route("/api/catalogos")
 @login_requerido
 def catalogos():
     conn = get_conn()
     sid = sucursal_operativa()
     es_central = es_gestion() or es_encargado_almacen(conn)
+    # Antes de listar, garantizar que ninguna sucursal quede sin almacén (si una
+    # sucursal no tiene almacenes, el desplegable del formulario sale vacío).
+    _asegurar_almacenes_por_sucursal(conn)
     if es_central:
         # Central (admin/superadmin + encargados de Almacén Principal): todo el catálogo
         almacenes = [dict(r) for r in conn.execute("SELECT * FROM almacenes ORDER BY nombre").fetchall()]
@@ -428,8 +460,13 @@ def catalogos():
     else:
         # Encargado de filial: solo el almacén y los proveedores de SU sucursal
         sid_alm = sucursal_actual() or sid
-        almacenes = [dict(r) for r in conn.execute(
-            "SELECT * FROM almacenes WHERE sucursal_id = %s ORDER BY nombre", (sid_alm,)).fetchall()]
+        if sid_alm:
+            almacenes = [dict(r) for r in conn.execute(
+                "SELECT * FROM almacenes WHERE sucursal_id = %s ORDER BY nombre", (sid_alm,)).fetchall()]
+        else:
+            # Sin sucursal asignada (mal configurado): no dejar la pantalla vacía.
+            almacenes = [dict(r) for r in conn.execute(
+                "SELECT * FROM almacenes ORDER BY nombre").fetchall()]
         proveedores = [dict(r) for r in conn.execute(
             "SELECT * FROM proveedores WHERE sucursal_id = %s OR sucursal_id IS NULL ORDER BY nombre", (sid,)).fetchall()]
     # `provee` tiene que ser LA MISMA regla que usa el backend al validar el
