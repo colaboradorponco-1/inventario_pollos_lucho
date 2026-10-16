@@ -23,6 +23,29 @@ def norm_nombre(texto):
     return re.sub(r"[^a-z0-9]", "", s)
 
 
+def _producto_duplicado(conn, nombre, unidad, excluir_id=None):
+    """Busca una ficha activa del mismo producto y unidad en cualquier sucursal."""
+    unidad_norm = norm_nombre(unidad or "unidad")
+    productos = conn.execute(
+        "SELECT id, codigo, nombre, unidad, sucursal_id FROM productos WHERE activo = 1"
+        + (" AND id <> ?" if excluir_id is not None else ""),
+        (excluir_id,) if excluir_id is not None else ()).fetchall()
+    for producto in productos:
+        if (norm_nombre(producto["unidad"] or "unidad") == unidad_norm
+                and norm_nombre(producto["nombre"]) == norm_nombre(nombre)):
+            sucursal = conn.execute(
+                "SELECT nombre FROM sucursales WHERE id = ?",
+                (producto["sucursal_id"],)).fetchone() if producto["sucursal_id"] else None
+            return {
+                "id": producto["id"],
+                "codigo": producto["codigo"],
+                "nombre": producto["nombre"],
+                "unidad": producto["unidad"],
+                "sucursal_nombre": sucursal["nombre"] if sucursal else None,
+            }
+    return None
+
+
 def _tacho_unidad(data):
     """Cuánto entra en UN tacho del producto, en su unidad base (kg, unidades...).
     0 = no definido (el valor se escribe en el pedido)."""
@@ -147,6 +170,18 @@ def productos():
             conn.close()
             return err("Debes asignar una sucursal al producto", 400)
         sid = int(sid)
+        nombre = (data.get("nombre") or "").strip()
+        if not nombre:
+            conn.close()
+            return err("El nombre del producto es obligatorio", 400)
+        duplicado = _producto_duplicado(conn, nombre, data.get("unidad", "unidad"))
+        if duplicado:
+            sucursal_dup = duplicado["sucursal_nombre"] or "sin sucursal"
+            conn.close()
+            return err(
+                f"Ya existe '{duplicado['nombre']}' ({duplicado['codigo']}) en "
+                f"{sucursal_dup}. Usa la misma ficha para mantener un solo producto.",
+                409)
         para_proveer = _para_proveer(data)
         if para_proveer and not _sucursal_puede_proveer(conn, sid):
             conn.close()
@@ -603,6 +638,19 @@ def producto(prod_id):
         return ok(message="Producto eliminado")
 
     data = request.get_json()
+    nombre = (data.get("nombre") or "").strip()
+    unidad = data.get("unidad", "unidad")
+    if not nombre:
+        conn.close()
+        return err("El nombre del producto es obligatorio", 400)
+    duplicado = _producto_duplicado(conn, nombre, unidad, excluir_id=prod_id)
+    if duplicado:
+        sucursal_dup = duplicado["sucursal_nombre"] or "sin sucursal"
+        conn.close()
+        return err(
+            f"Ya existe '{duplicado['nombre']}' ({duplicado['codigo']}) en "
+            f"{sucursal_dup}. Usa la misma ficha para mantener un solo producto.",
+            409)
     codigo = (data.get("codigo") or "").strip() or None
     if codigo:
         dup = conn.execute(
@@ -690,6 +738,18 @@ def producto_restaurar(prod_id):
     if not es_gestion():
         return err("Solo administradores pueden restaurar productos", 403)
     conn = get_conn()
+    fila = conn.execute(
+        "SELECT id, nombre, unidad FROM productos WHERE id = ?", (prod_id,)).fetchone()
+    if not fila:
+        conn.close()
+        return err("Producto no encontrado", 404)
+    duplicado = _producto_duplicado(conn, fila["nombre"], fila["unidad"], excluir_id=prod_id)
+    if duplicado:
+        conn.close()
+        return err(
+            f"No se puede restaurar: ya existe '{duplicado['nombre']}' "
+            f"({duplicado['codigo']}) en {duplicado['sucursal_nombre'] or 'otra sucursal'}.",
+            409)
     conn.execute("UPDATE productos SET activo = 1 WHERE id = ?", (prod_id,))
     conn.commit()
     conn.close()
@@ -824,6 +884,11 @@ def importar_productos():
                     codigo = siguiente_codigo(conn)
                 marca = (str(rd.get(h_marca) or "").strip() if h_marca else "") or None
                 unidad = (str(rd.get(h_unidad) or "unidad").strip() if h_unidad else "unidad") or "unidad"
+                duplicado = _producto_duplicado(conn, nombre, unidad)
+                if duplicado:
+                    raise ValueError(
+                        f"ya existe '{duplicado['nombre']}' ({duplicado['codigo']}) "
+                        f"en {duplicado['sucursal_nombre'] or 'otra sucursal'}")
                 costo = parse_num(rd.get(h_costo)) if h_costo else 0.0
                 precio = parse_num(rd.get(h_precio)) if h_precio else 0.0
                 stock_min = parse_num(rd.get(h_stock_min)) if h_stock_min else 0.0
