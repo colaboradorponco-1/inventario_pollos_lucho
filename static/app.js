@@ -882,9 +882,11 @@ function esSucursalAS(s) {
 }
 function sucursalesFiltroPedidos(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
-    if (puedeVerTodasSucursales()) return base;
+    // Lista fija para todos (incluido admin): solo los Almacenes Principales y
+    // los almacenes AS reparten. Las tiendas normales no aparecen aunque tengan
+    // la bandera "provee" activada.
     return proveedoresAlcance(base).filter((s) =>
-        s.principal || s.provee || s.es_as || /^AS\s/i.test(s.nombre || ''));
+        s.principal || s.es_as || /^AS\s/i.test(s.nombre || ''));
 }
 // Nombre visible de una sucursal en el módulo de pedidos (ya sin "AS especial"):
 // cada almacén figura con su propio nombre.
@@ -914,7 +916,9 @@ function sucursalesFiltroBandeja(lista) {
         const esAlmacenAS = !!s.es_as || /^AS\s/i.test(s.nombre || '');
         if (ciudadSucursal(s) !== ciudadActual) return false;
         if (esReceptor) return !esAlmacenAS;
-        return s.principal || s.provee || s.es_as || esAlmacenAS;
+        // Solo reparten los Almacenes Principales y los almacenes AS. Una tienda
+        // normal NO aparece aunque tenga la bandera "provee" activada.
+        return !!(s.principal || esAlmacenAS);
     });
 }
 
