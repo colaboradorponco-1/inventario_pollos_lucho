@@ -3214,8 +3214,6 @@ $('#inv-hora')?.addEventListener('input', revisarHoraCorte);
 $('#inv-fecha')?.addEventListener('change', revisarHoraCorte);
 $('#btn-inv-guardar')?.addEventListener('click', invClick(guardarInventario));
 $('#btn-inv-cerrar')?.addEventListener('click', invClick(cerrarInventario));
-$('#btn-inv-quitar-duplicados')?.addEventListener(
-    'click', invClick(quitarLineasDuplicadasInventario));
 $('#btn-inv-excel')?.addEventListener('click', () => {
     if (INV_ID) window.open(API + '/inventario-diario/' + INV_ID + '/excel', '_blank');
 });
@@ -3696,7 +3694,6 @@ async function abrirInventario(invId) {
     // almacén principal ven todas, pero solo modifican la de su sucursal).
     INV_SOLO_LECTURA = d.puede_editar === false;
     INV_FILAS = d.lineas || [];
-    window.INV_LINEAS_DUPLICADAS_SEGURAS = d.lineas_duplicadas_seguras || [];
     INV_CAMPOS_EDITADOS = new Map();
     INV_INGRESO_IDS = new Map();
     $('#inv-panel-conteo').style.display = '';
@@ -3796,15 +3793,6 @@ async function abrirInventario(invId) {
     $('#btn-inv-guardar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-cerrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-borrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
-    const btnDuplicados = $('#btn-inv-quitar-duplicados');
-    if (btnDuplicados) {
-        btnDuplicados.style.display = esAdmin() && !INV_CERRADA
-            && window.INV_LINEAS_DUPLICADAS_SEGURAS.length ? '' : 'none';
-        btnDuplicados.textContent = `Quitar ${window.INV_LINEAS_DUPLICADAS_SEGURAS.length} filas duplicadas`;
-    }
-    if (esAdmin() && d.lineas_duplicadas_bloqueadas?.length) {
-        toast('Hay líneas repetidas con conteo o ingresos registrados; se conservaron para no perder datos.', 'err', 15000);
-    }
     $('#btn-inv-excel').style.display = '';
     $('#btn-inv-print').style.display = '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
@@ -3816,30 +3804,6 @@ async function abrirInventario(invId) {
     $('#inv-panel-conteo').scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (INV_CERRADA) detenerVigilaInventario();
     else iniciarVigilaInventario();
-}
-
-async function quitarLineasDuplicadasInventario() {
-    const candidatas = window.INV_LINEAS_DUPLICADAS_SEGURAS || [];
-    if (!INV_ID || !candidatas.length) return;
-    const detalle = candidatas.map((f) =>
-        `${f.nombre}: quitar ${fmtInvQ(f.cantidad_antigua)} ${f.unidad}; conservar ${fmtInvQ(f.cantidad_correcta)} ${f.unidad}`
-    ).join('\n');
-    if (!confirm(
-        `Se quitarán solo filas de fichas antiguas inactivas, sin conteo ni ingreso manual.\n` +
-        `Se conservará el stock de la ficha activa. No se modifica el inventario de productos ` +
-        `y se creará un respaldo completo antes del cambio.\n\n${detalle}\n\n¿Continuar?`
-    )) return;
-    const resultado = await request(
-        API + '/inventario-diario/' + INV_ID + '/quitar-lineas-duplicadas',
-        {
-            method: 'POST',
-            body: {
-                confirmar: true,
-                detalle_ids: candidatas.map((f) => f.detalle_id)
-            }
-        });
-    toast(resultado.message || 'Se quitaron las filas duplicadas', 'ok', 8000);
-    await abrirInventario(INV_ID);
 }
 
 // Sincroniza la planilla compartida mientras está abierta. Cada campo se
