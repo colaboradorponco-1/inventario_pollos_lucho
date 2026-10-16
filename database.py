@@ -875,14 +875,18 @@ def migrar_esquema():
                                      WHERE m.producto_id = lineas.producto_id
                                        AND m.sucursal_id = COALESCE(lineas.origen_id, p.destino_id)
                                        AND m.tipo = 'salida'
-                                       AND m.nota = CONCAT('Despacho pedido ', p.nro_ticket)
+                                       AND m.nota COLLATE utf8mb4_unicode_ci =
+                                           CONCAT('Despacho pedido ', p.nro_ticket)
+                                           COLLATE utf8mb4_unicode_ci
                                    ), 0) + 0.000000001 < lineas.cantidad
                                    OR COALESCE((
                                      SELECT SUM(m.cantidad) FROM movimientos m
                                      WHERE m.producto_id = lineas.producto_id
                                        AND m.sucursal_id = p.sucursal_id
                                        AND m.tipo = 'entrada'
-                                       AND m.nota = CONCAT('Recepción pedido ', p.nro_ticket)
+                                       AND m.nota COLLATE utf8mb4_unicode_ci =
+                                           CONCAT('Recepción pedido ', p.nro_ticket)
+                                           COLLATE utf8mb4_unicode_ci
                                    ), 0) + 0.000000001 < (
                                      SELECT SUM(d2.cantidad) FROM pedido_detalle d2
                                      WHERE d2.pedido_id = p.id

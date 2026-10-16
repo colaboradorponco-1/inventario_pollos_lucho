@@ -118,7 +118,8 @@ with open(os.path.join(base, "database.py"), encoding="utf-8") as archivo:
 check("la migración respeta entregas previas con reparto y detecta las no registradas",
       'pedidos", "stock_movido"' in database_py
       and "p.stock_movido = 1" in database_py
-      and "EXISTS (SELECT 1 FROM repartos r WHERE r.pedido_id = p.id)" in database_py)
+      and "EXISTS (SELECT 1 FROM repartos r WHERE r.pedido_id = p.id)" in database_py
+      and database_py.count("COLLATE utf8mb4_unicode_ci") >= 4)
 
 app_pruebas = Flask(__name__)
 app_pruebas.secret_key = "prueba"
