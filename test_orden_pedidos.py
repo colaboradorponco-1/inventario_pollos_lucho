@@ -506,12 +506,13 @@ def prueba_control_oferta_productos():
            ns["_para_proveer"]({"para_proveer": True}) == 1
            and ns["_para_proveer"]({"para_proveer": False}) == 0
            and ns["_para_proveer"]({}) == 0)
-    _check("una sucursal principal, proveedora o AS puede ofrecer un producto",
+    _check("una sucursal principal o AS puede ofrecer un producto",
            "_sucursal_puede_proveer" in prod
-           and "SELECT s.principal, s.provee, s.es_as" in prod
+           and "SELECT s.principal, s.es_as" in prod
            and "sucursal.get(\"es_as\")" in prod
-           and "sucursal.get(\"receptor\")" in prod
            and "sucursal.get(\"almacen_as\")" in prod
+           and "sucursal.get(\"provee\")" not in prod
+           and "sucursal.get(\"receptor\")" not in prod
            and "if para_proveer and not _sucursal_puede_proveer(conn, sid)" in prod)
     _check("el catálogo de pedidos incluye productos de almacenes AS",
            "IFNULL(p.para_proveer, 1) = 1" in prod
@@ -553,8 +554,8 @@ def prueba_control_oferta_productos():
     puede = ns.get("_sucursal_puede_proveer")
     _check("un almacén AS puede habilitar productos para pedidos",
            callable(puede) and puede(Conexion({"principal": 0, "provee": 0, "es_as": 1}), 5))
-    _check("una sucursal con usuario receptor puede ofrecer productos",
-           callable(puede) and puede(Conexion({
+    _check("una sucursal con usuario receptor ya NO ofrece productos",
+           callable(puede) and not puede(Conexion({
                "principal": 0, "provee": 0, "es_as": 0, "receptor": 1}), 5))
     _check("una sucursal con almacén AS puede ofrecer productos",
            callable(puede) and puede(Conexion({
@@ -567,16 +568,15 @@ def prueba_control_oferta_productos():
         ns["session"] = {"receptor": False}
     else:
         receptor_por_sesion = False
-    _check("la sesión receptora propia permite ofrecer aunque falte la marca del catálogo",
-           receptor_por_sesion
-           and "window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID)" in js)
-    _check("una sucursal normal aún requiere activar provee",
+    _check("la sesión receptora propia ya NO habilita ofrecer productos",
+           not receptor_por_sesion
+           and "window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID)" not in js)
+    _check("una tienda normal con solo provee ya NO puede ofrecer productos",
            callable(puede)
            and not puede(Conexion({
                "principal": 0, "provee": 0, "es_as": 0, "receptor": 0}), 5)
-           and puede(Conexion({
+           and not puede(Conexion({
                "principal": 0, "provee": 1, "es_as": 0, "receptor": 0}), 5))
-
     db = _leer("database.py")
     _check("el arranque ya no fusiona ni elimina sucursales AS",
            "_destruir_sucursales_as" not in db)

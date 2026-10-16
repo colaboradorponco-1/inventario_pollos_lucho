@@ -47,17 +47,17 @@ def _para_proveer(data):
 
 
 def _sucursal_puede_proveer(conn, sucursal_id):
+    # Solo los Almacenes Principales y los almacenes AS reparten a las demás
+    # sucursales. Las tiendas normales (aunque tengan "provee" o un usuario
+    # receptor) ya no pueden ofrecer productos en pedidos.
     sucursal = conn.execute(
-        "SELECT s.principal, s.provee, s.es_as, "
-        "EXISTS (SELECT 1 FROM usuarios u "
-        "WHERE u.sucursal_id = s.id AND IFNULL(u.receptor, 0) = 1) AS receptor, "
+        "SELECT s.principal, s.es_as, "
         "EXISTS (SELECT 1 FROM almacenes a "
         "WHERE a.sucursal_id = s.id AND a.nombre LIKE 'AS %') AS almacen_as "
         "FROM sucursales s WHERE s.id = ?", (sucursal_id,)).fetchone()
     return bool(sucursal and (
-        sucursal.get("principal") or sucursal.get("provee") or sucursal.get("es_as")
-        or sucursal.get("receptor") or sucursal.get("almacen_as")
-        or (session.get("receptor") and str(sucursal_actual()) == str(sucursal_id))))
+        sucursal.get("principal") or sucursal.get("es_as")
+        or sucursal.get("almacen_as")))
 
 
 def _stock_sucursal_permitido(conn, ver_todo, sid):

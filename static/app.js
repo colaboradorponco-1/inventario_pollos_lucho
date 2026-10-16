@@ -897,25 +897,23 @@ function nombreSucursalPedido(s) {
 // misma ciudad + los Principales (los almacenes con los que trabaja el que pide).
 function sucursalesFiltroBandeja(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
-    if (puedeVerTodasSucursales()) return base;
+    const sinTiendasConAS = base.filter((s) => {
+        const esAlmacenAS = !!s.es_as || /^AS\s/i.test(s.nombre || '');
+        if (esAlmacenAS || String(s.id) === String(window.SUCURSAL_ID)) return true;
+        const nombreAS = ('AS ' + (s.nombre || '')).trim().toLowerCase();
+        return !base.some((o) =>
+            (/^AS\s/i.test(o.nombre || '') || o.es_as) &&
+            (o.nombre || '').trim().toLowerCase() === nombreAS);
+    });
+    if (puedeVerTodasSucursales()) return sinTiendasConAS;
     const sucursalActual = base.find((s) =>
         String(s.id) === String(window.SUCURSAL_ID));
     const ciudadActual = ciudadSucursal(sucursalActual || window.SUCURSAL);
     const esReceptor = !!window.RECEPTOR;
-    return base.filter((s) => {
+    return sinTiendasConAS.filter((s) => {
         const esAlmacenAS = !!s.es_as || /^AS\s/i.test(s.nombre || '');
         if (ciudadSucursal(s) !== ciudadActual) return false;
         if (esReceptor) return !esAlmacenAS;
-        // La tienda que tiene su gemelo AS ("AS America" para "America") no se
-        // lista en el filtro: quien reparte es el almacén AS. La sucursal del
-        // usuario logueado siempre se mantiene visible.
-        if (!esAlmacenAS && String(s.id) !== String(window.SUCURSAL_ID)) {
-            const nombreAS = ('AS ' + (s.nombre || '')).trim().toLowerCase();
-            const hayGemeloAS = base.some((o) =>
-                /^AS\s/i.test(o.nombre || '') &&
-                (o.nombre || '').trim().toLowerCase() === nombreAS);
-            if (hayGemeloAS) return false;
-        }
         return s.principal || s.provee || s.es_as || esAlmacenAS;
     });
 }
@@ -1239,9 +1237,11 @@ function sucursalPermiteOfrecerProductos(sucursalId, almacenId = $('#prod-almace
     const almacenAS = (catalogos.almacenes || []).some((a) =>
         String(a.id) === String(almacenId)
         && /^AS\s/i.test((a.nombre || '').trim()));
+    // Solo los Almacenes Principales y los almacenes AS ofrecen productos en
+    // pedidos. Las tiendas normales (aunque tengan "provee" o un usuario
+    // receptor) ya no ven esta opción.
     return almacenAS || (!!sucursal && (
-        Number(sucursal.principal) === 1 || !!sucursal.provee || !!sucursal.es_as
-        || (window.RECEPTOR && String(sucursalId) === String(window.SUCURSAL_ID))));
+        Number(sucursal.principal) === 1 || !!sucursal.es_as));
 }
 
 function actualizarControlProductoPedido(sucursalId, ofrecer = false) {
