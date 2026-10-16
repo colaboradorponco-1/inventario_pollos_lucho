@@ -41,8 +41,7 @@ class QuitarDuplicadosPlanillaTest(unittest.TestCase):
             );
             CREATE TABLE inventario_detalle (
                 id INTEGER PRIMARY KEY, inventario_id INTEGER, producto_id INTEGER,
-                producto_nombre TEXT, unidad TEXT, inicial REAL,
-                ingreso_manual REAL, conteo_fisico REAL,
+                inicial REAL, ingreso_manual REAL, conteo_fisico REAL,
                 observaciones TEXT
             );
             CREATE TABLE inventario_ingresos_manuales (
@@ -53,16 +52,16 @@ class QuitarDuplicadosPlanillaTest(unittest.TestCase):
             );
             INSERT INTO productos VALUES
                 (1, 'PAPA HOLANDESA', 'kg', 1),
-                (2, 'Ficha antigua inactiva', 'UNIDAD', 0),
+                (2, 'Papa Holandesa', 'KG', 0),
                 (3, 'PLATANO DE FREIR', 'unidad', 1),
-                (4, 'Ficha antigua inactiva', 'UNIDAD', 0);
+                (4, 'Plátano de freír', 'UNIDAD', 0);
             INSERT INTO inventario_diario VALUES
                 (5, 20, '2026-10-16', 'abierto', 0, '23:59', 'encargado', 4);
             INSERT INTO inventario_detalle VALUES
-                (51, 5, 1, 'PAPA HOLANDESA', 'kg', 35, 0, NULL, 'nota vigente'),
-                (52, 5, 2, 'Papa Holandesa', 'KG', 72.4, 0, NULL, 'nota antigua'),
-                (53, 5, 3, 'PLATANO DE FREIR', 'unidad', 144, 0, NULL, NULL),
-                (54, 5, 4, 'Plátano de freír', 'UNIDAD', 200, 0, NULL, NULL);
+                (51, 5, 1, 35, 0, NULL, 'nota vigente'),
+                (52, 5, 2, 72.4, 0, NULL, 'nota antigua'),
+                (53, 5, 3, 144, 0, NULL, NULL),
+                (54, 5, 4, 200, 0, NULL, NULL);
             INSERT INTO stock VALUES (1, 20, 35), (3, 20, 144);
         """)
         self.conn = ConexionSQLite(self.db)

@@ -53,42 +53,34 @@ def _clave_nombre_unidad(nombre, unidad):
 
 
 def _lineas_duplicadas_seguidas(conn, filas_activas, detalles):
-    """Busca filas antiguas sin uso en esta planilla y con ficha activa equivalente."""
+    """Busca líneas no contadas de fichas inactivas con una fila activa equivalente."""
     activos_por_clave = {}
     for fila in filas_activas:
         activos_por_clave.setdefault(
             _clave_nombre_unidad(fila["nombre"], fila["unidad"]), []).append(fila)
     detalle_por_producto = {int(d["producto_id"]): d for d in detalles}
-    ids_activos = {int(f["id"]) for f in filas_activas}
-    ids_antiguos = sorted({
+    inactivos_ids = sorted({
         int(d["producto_id"]) for d in detalles
-        if int(d["producto_id"]) not in ids_activos
+        if int(d["producto_id"]) not in {
+            int(f["id"]) for f in filas_activas
+        }
     })
-    if not ids_antiguos:
+    if not inactivos_ids:
         return [], []
 
-    ph = ",".join(["?"] * len(ids_antiguos))
+    ph = ",".join(["?"] * len(inactivos_ids))
     productos = conn.execute(
         f"SELECT id, nombre, unidad, activo FROM productos WHERE id IN ({ph})",
-        ids_antiguos).fetchall()
-    productos_por_id = {int(p["id"]): p for p in productos}
+        inactivos_ids).fetchall()
+    inactivos = {int(p["id"]): p for p in productos if not p["activo"]}
     ids_candidatos, bloqueadas = [], []
     for detalle in detalles:
         antiguo_id = int(detalle["producto_id"])
-        if antiguo_id in ids_activos:
-            continue
-        antiguo = productos_por_id.get(antiguo_id)
-        if antiguo and antiguo["activo"]:
-            continue
-        nombre_antiguo = detalle["producto_nombre"] or (
-            antiguo["nombre"] if antiguo else "")
-        unidad_antigua = detalle["unidad"] or (
-            antiguo["unidad"] if antiguo else "unidad")
-        clave_antigua = _clave_nombre_unidad(nombre_antiguo, unidad_antigua)
-        if not clave_antigua[0]:
+        antiguo = inactivos.get(antiguo_id)
+        if not antiguo:
             continue
         equivalentes = activos_por_clave.get(
-            clave_antigua, [])
+            _clave_nombre_unidad(antiguo["nombre"], antiguo["unidad"]), [])
         if len(equivalentes) != 1:
             continue
         actual = equivalentes[0]
