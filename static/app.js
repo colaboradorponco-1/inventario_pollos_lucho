@@ -1350,7 +1350,10 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-proveedor').value = p.proveedor_id || '';
     
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
-        if (esGestionDlg) poblarAlmacenes(+$('#prod-sucursal').value || 0);
+        // Mostrar también el almacén actual del producto si no es el principal
+        // de la sucursal, para no perderlo en silencio al editarlo.
+        poblarAlmacenes(+$('#prod-sucursal').value || Number(window.SUCURSAL_ID) || 0,
+                        p.almacen_id);
         const almacenSel = $('#prod-almacen');
         if (p.almacen_id && Array.from(almacenSel.options).some(
             (o) => String(o.value) === String(p.almacen_id))) {
@@ -1422,21 +1425,52 @@ async function delProducto(id) {
     }
 }
 
-// Cargar en el selector "Almacén" solo los almacenes de una sucursal concreta
-function poblarAlmacenes(sid) {
+function _nombreNormalizado(txt) {
+    return (txt || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+}
+
+// El almacén "principal" de una sucursal: el que se llama como la sucursal. Es
+// el modelo actual (una sucursal = un almacén). Los almacenes extra que creó la
+// migración (Cocina, Limpieza) NO se muestran y NO se borran de la base.
+function _almacenPrincipalSucursal(lista, sid) {
+    if (!lista.length) return null;
+    const suc = (catalogos.sucursales || []).find((s) => +s.id === +sid);
+    if (suc) {
+        const n = _nombreNormalizado(suc.nombre);
+        const igual = lista.find((a) => _nombreNormalizado(a.nombre) === n);
+        if (igual) return igual;
+    }
+    const ppal = lista.find((a) => _nombreNormalizado(a.nombre) === 'almacen principal');
+    if (ppal) return ppal;
+    return lista.slice().sort((a, b) => +a.id - +b.id)[0];
+}
+
+// Cargar en el selector "Almacén" el almacén de una sucursal concreta.
+// `almacenActual` (solo al editar) se muestra además aunque no sea el principal,
+// para no perder en silencio el almacén en que ya está el producto.
+function poblarAlmacenes(sid, almacenActual = null) {
     const alm = $('#prod-almacen');
     if (!alm) return;
     const previo = alm.value;
-    // Cada sucursal es un almacén independiente: el selector muestra solo los
-    // almacenes de LA sucursal elegida.
-    const lista = sid ? (catalogos.almacenes || []).filter((a) => +a.sucursal_id === +sid)
-                      : (catalogos.almacenes || []);
+    // Cada sucursal es un almacén independiente: el selector muestra solo el
+    // almacén de LA sucursal elegida.
+    const todos = catalogos.almacenes || [];
+    const deSucursal = sid ? todos.filter((a) => +a.sucursal_id === +sid) : todos;
+    const principal = _almacenPrincipalSucursal(deSucursal, sid);
+    const lista = [];
+    if (principal) lista.push(principal);
+    if (almacenActual != null && almacenActual !== '') {
+        const actual = deSucursal.find((a) => +a.id === +almacenActual);
+        if (actual && (!principal || +actual.id !== +principal.id)) lista.push(actual);
+    }
     alm.innerHTML = lista.length
         ? '<option value="">— Seleccione almacén —</option>' +
           lista.map((a) => `<option value="${a.id}">${esc(a.nombre)}</option>`).join('')
         : '<option value="">— No hay almacenes para esta sucursal —</option>';
     if (lista.some((a) => +a.id === +previo)) alm.value = previo;
-    else if (lista.length) alm.value = String(lista[0].id);
+    else if (almacenActual != null && almacenActual !== ''
+             && lista.some((a) => +a.id === +almacenActual)) alm.value = String(almacenActual);
+    else if (principal) alm.value = String(principal.id);
 }
 
 // Al elegir sucursal en el modal de producto, cargar los almacenes de esa sucursal

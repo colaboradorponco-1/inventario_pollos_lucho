@@ -590,7 +590,12 @@ def prueba_selector_almacen_productos():
     js = _leer(os.path.join("static", "app.js"))
     db = _leer("database.py")
     _check("crear producto selecciona un almacén de la sucursal",
-           "else if (lista.length) alm.value = String(lista[0].id);" in js)
+           "else if (principal) alm.value = String(principal.id);" in js)
+    _check("el formulario muestra un solo almacén por sucursal",
+           "const principal = _almacenPrincipalSucursal(deSucursal, sid);" in js
+           and "if (principal) lista.push(principal);" in js
+           and "lista.map((a) => `<option value=\"${a.id}\">${esc(a.nombre)}</option>`).join('')"
+           in js)
     _check("editar producto conserva el almacén solo si pertenece a las opciones",
            "Array.from(almacenSel.options).some(" in js
            and "almacenSel.value = p.almacen_id;" in js
