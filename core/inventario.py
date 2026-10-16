@@ -20,7 +20,6 @@ Cada día se pueden hacer VARIAS planillas por sucursal: una por categoría
 propia sucursal; un admin/superadmin puede ver las de todas.
 """
 from datetime import date, datetime, timedelta
-import os
 
 from flask import (Blueprint, current_app, redirect, render_template, request,
                    session)
@@ -29,7 +28,7 @@ from database import get_conn
 from .lotes import stock_lotes
 from .util import (ok, err, login_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen,
-                   es_superadmin, registrar_auditoria, registrar_movimiento, flotante,
+                   registrar_auditoria, registrar_movimiento, flotante,
                    ids_sucursal_consolidada)
 
 inventario_bp = Blueprint("inventario", __name__)
@@ -582,97 +581,6 @@ def inventario_detalle(inv_id):
             "total_utilizada": round(sum(l["utilizada"] for l in lineas), 3),
         },
     })
-
-
-@inventario_bp.route("/api/inventario-diario/163/excluir-llajua-duplicada", methods=["POST"])
-@login_requerido
-def inventario_excluir_llajua_duplicada():
-    """Retira una única fila histórica de llajua sin tocar stock ni movimientos."""
-    if not es_superadmin():
-        return err("Solo el superadministrador puede realizar esta corrección", 403)
-    if request.get_json(silent=True) != {
-            "confirmacion": "EXCLUIR_FILA_8965_DE_PLANILLA_163"}:
-        return err("Falta la confirmación explícita para esta fila", 400)
-
-    conn = get_conn()
-    try:
-        inv = conn.execute(
-            "SELECT id, sucursal_id, categoria_id, fecha, estado "
-            "FROM inventario_diario WHERE id = %s FOR UPDATE",
-            (163,)).fetchone()
-        if not inv or (inv["sucursal_id"], inv["categoria_id"], str(inv["fecha"]),
-                       inv["estado"]) != (35, 13, "2026-10-16", "abierto"):
-            conn.close()
-            return err("La planilla ya no coincide con la validación; no se modificó", 409)
-
-        filas = conn.execute(
-            "SELECT id, producto_id, producto_nombre, unidad, inicial, "
-            "ingreso_manual, conteo_fisico FROM inventario_detalle "
-            "WHERE inventario_id = %s AND producto_id IN (%s, %s) "
-            "ORDER BY id FOR UPDATE",
-            (163, 661, 662)).fetchall()
-        esperadas = {(8931, 662), (8965, 661)}
-        if len(filas) != 2 or {(f["id"], f["producto_id"]) for f in filas} != esperadas:
-            conn.close()
-            return err("Las filas no coinciden con la validación; no se modificó", 409)
-
-        for fila in filas:
-            if ((fila["producto_nombre"] or "").strip().casefold() != "llajua"
-                    or (fila["unidad"] or "").strip().casefold() != "unidad"
-                    or not _misma_cantidad(fila["inicial"], 4)
-                    or not _misma_cantidad(fila["ingreso_manual"], 0)
-                    or fila["conteo_fisico"] is not None):
-                conn.close()
-                return err("Una fila tiene conteo o datos distintos; no se modificó", 409)
-
-        ingresos_manuales = conn.execute(
-            "SELECT COUNT(*) AS total FROM inventario_ingresos_manuales "
-            "WHERE detalle_id = %s",
-            (8965,)).fetchone()["total"]
-        if ingresos_manuales:
-            conn.close()
-            return err("La fila tiene ingresos manuales asociados; no se modificó", 409)
-
-        from .backup import carpeta_respaldos, nombre_respaldo, volcar_a_archivo
-
-        nombre_backup = nombre_respaldo("correccion_llajua_planilla_163")
-        ruta_backup = os.path.join(carpeta_respaldos(), nombre_backup)
-        bytes_backup, _ = volcar_a_archivo(conn, ruta_backup)
-
-        conn.execute(
-            "INSERT INTO inventario_detalle_exclusiones "
-            "(inventario_id, producto_id, motivo) VALUES (%s, %s, %s) "
-            "ON DUPLICATE KEY UPDATE motivo = VALUES(motivo)",
-            (163, 661, "Fila duplicada histórica de llajua; se conserva la ficha 662"))
-        borrado = conn.execute(
-            "DELETE FROM inventario_detalle "
-            "WHERE id = %s AND inventario_id = %s AND producto_id = %s",
-            (8965, 163, 661))
-        if borrado.rowcount != 1:
-            conn.rollback()
-            conn.close()
-            return err("No se pudo confirmar el borrado exacto; no se aplicó", 409)
-
-        total_items = conn.execute(
-            "SELECT COUNT(*) AS total FROM inventario_detalle WHERE inventario_id = %s",
-            (163,)).fetchone()["total"]
-        conn.execute("UPDATE inventario_diario SET total_items = %s WHERE id = %s",
-                     (total_items, 163))
-        conn.commit()
-        conn.close()
-        registrar_auditoria(
-            "Fila duplicada excluida de inventario",
-            "Planilla 163, ficha de producto 661, detalle 8965; "
-            "se conserva la ficha 662. Sin cambios en stock ni movimientos.")
-        return ok({"inventario_id": 163, "detalle_eliminado": 8965,
-                   "producto_id_excluido": 661, "total_items": total_items,
-                   "respaldo": nombre_backup, "respaldo_bytes": bytes_backup},
-                  message="Se quitó solo la fila duplicada; stock y movimientos intactos")
-    except Exception:
-        conn.rollback()
-        conn.close()
-        current_app.logger.exception("Error al excluir la fila duplicada de llajua")
-        return err("No se pudo excluir la fila duplicada; no se aplicó ningún cambio", 500)
 
 
 # --------------------------------------------------------------------------
