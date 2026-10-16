@@ -478,6 +478,7 @@
                         <p id="inv-subtitulo">El inventario inicial viene del stock del sistema. Si cambias el stock en Productos, vuelve aquí y pulsa “Actualizar stock”.</p>
                     </div>
                     <button class="btn btn-sm" id="btn-inv-refrescar" title="Vuelve a leer el stock actual de Productos y actualiza el inventario inicial de los productos que aún no contaste" style="white-space:nowrap">&#8635; Actualizar stock</button>
+                    <button class="btn btn-sm btn-danger" id="btn-inv-quitar-duplicados" style="display:none;white-space:nowrap">Quitar filas duplicadas</button>
                     <button class="btn btn-icon" id="btn-inv-cerrar-panel" title="Cerrar la planilla (guarda antes de cerrar)" aria-label="Cerrar panel de conteo">&#10005;</button>
                 </div>
 
@@ -1502,7 +1503,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=20261009-ingreso-manual-total"></script>
+    <script src="/static/app.js?v=20261016-quitar-duplicados-inventario"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

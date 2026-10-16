@@ -19,12 +19,17 @@ Cada día se pueden hacer VARIAS planillas por sucursal: una por categoría
 (UNIQUE sucursal_id + categoria_id + fecha). El encargado llena y cierra las de su
 propia sucursal; un admin/superadmin puede ver las de todas.
 """
+import logging
+import os
+import re
+import unicodedata
 from datetime import date, datetime, timedelta
 
 from flask import (Blueprint, current_app, redirect, render_template, request,
                    session)
 
 from database import get_conn
+from core.backup import carpeta_respaldos, nombre_respaldo, volcar_a_archivo
 from .lotes import stock_lotes
 from .util import (ok, err, login_requerido, responder_excel, sucursal_actual,
                    sucursal_operativa, es_gestion, es_encargado_almacen,
@@ -37,6 +42,83 @@ inventario_bp = Blueprint("inventario", __name__)
 # Ojo: replace(year=...) falla el 29 de febrero en año bisiesto; por eso se
 # construye desde timedelta en vez de replace.
 _MIN_FECHA = (date.today() - timedelta(days=731)).isoformat()
+
+
+def _clave_nombre_unidad(nombre, unidad):
+    def normalizar(valor):
+        texto = unicodedata.normalize("NFKD", str(valor or ""))
+        texto = "".join(c for c in texto if not unicodedata.combining(c)).lower()
+        return re.sub(r"[^a-z0-9]", "", texto)
+    return normalizar(nombre), normalizar(unidad or "unidad")
+
+
+def _lineas_duplicadas_seguidas(conn, filas_activas, detalles):
+    """Busca líneas no contadas de fichas inactivas con una fila activa equivalente."""
+    activos_por_clave = {}
+    for fila in filas_activas:
+        activos_por_clave.setdefault(
+            _clave_nombre_unidad(fila["nombre"], fila["unidad"]), []).append(fila)
+    detalle_por_producto = {int(d["producto_id"]): d for d in detalles}
+    inactivos_ids = sorted({
+        int(d["producto_id"]) for d in detalles
+        if int(d["producto_id"]) not in {
+            int(f["id"]) for f in filas_activas
+        }
+    })
+    if not inactivos_ids:
+        return [], []
+
+    ph = ",".join(["?"] * len(inactivos_ids))
+    productos = conn.execute(
+        f"SELECT id, nombre, unidad, activo FROM productos WHERE id IN ({ph})",
+        inactivos_ids).fetchall()
+    inactivos = {int(p["id"]): p for p in productos if not p["activo"]}
+    ids_candidatos, bloqueadas = [], []
+    for detalle in detalles:
+        antiguo_id = int(detalle["producto_id"])
+        antiguo = inactivos.get(antiguo_id)
+        if not antiguo:
+            continue
+        equivalentes = activos_por_clave.get(
+            _clave_nombre_unidad(antiguo["nombre"], antiguo["unidad"]), [])
+        if len(equivalentes) != 1:
+            continue
+        actual = equivalentes[0]
+        detalle_actual = detalle_por_producto.get(int(actual["id"]))
+        if not detalle_actual or detalle_actual["id"] == detalle["id"]:
+            continue
+
+        candidato = {
+            "detalle_id": int(detalle["id"]),
+            "producto_id": int(actual["id"]),
+            "nombre": actual["nombre"],
+            "unidad": actual["unidad"] or "unidad",
+            "detalle_actual_id": int(detalle_actual["id"]),
+            "cantidad_antigua": detalle["inicial"] or 0,
+            "cantidad_correcta": detalle_actual["inicial"] or 0,
+        }
+        if detalle["conteo_fisico"] is not None:
+            bloqueadas.append({
+                **candidato,
+                "motivo": "la línea antigua ya tiene conteo físico",
+            })
+        elif float(detalle["ingreso_manual"] or 0) != 0:
+            bloqueadas.append({
+                **candidato,
+                "motivo": "la línea antigua tiene ingreso manual registrado",
+            })
+        else:
+            manual = conn.execute(
+                "SELECT 1 FROM inventario_ingresos_manuales WHERE detalle_id = ? LIMIT 1",
+                (detalle["id"],)).fetchone()
+            if manual:
+                bloqueadas.append({
+                    **candidato,
+                    "motivo": "la línea antigua tiene registros de ingreso manual",
+                })
+            else:
+                ids_candidatos.append(candidato)
+    return ids_candidatos, bloqueadas
 
 
 class _DatoInvalido(Exception):
@@ -488,9 +570,18 @@ def inventario_detalle(inv_id):
     if not permitido:
         conn.close()
         return err("Planilla no encontrada", 404)
+    lineas_duplicadas_seguras = []
+    lineas_duplicadas_bloqueadas = []
     if inv["estado"] != "cerrado":
         _sincronizar_detalle(conn, inv_id, inv["sucursal_id"],
                              _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
+        if es_gestion():
+            filas_actuales = _productos_planilla(
+                conn, ids_sucursal_consolidada(conn, inv["sucursal_id"]),
+                _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
+            (lineas_duplicadas_seguras,
+             lineas_duplicadas_bloqueadas) = _lineas_duplicadas_seguidas(
+                conn, filas_actuales, _detalle(conn, inv_id))
     filas = _detalle(conn, inv_id)
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
     stocks = _stocks_actuales(conn, ids_planilla)
@@ -565,6 +656,8 @@ def inventario_detalle(inv_id):
         "puede_editar": inv["sucursal_id"] == sucursal_operativa(),
         "observaciones": inv["observaciones"] or "",
         "lineas": lineas,
+        "lineas_duplicadas_seguras": lineas_duplicadas_seguras,
+        "lineas_duplicadas_bloqueadas": lineas_duplicadas_bloqueadas,
         "resumen": {
             "total_items": len(lineas),
             "total_faltantes": len(faltantes),
@@ -575,6 +668,102 @@ def inventario_detalle(inv_id):
             "total_utilizada": round(sum(l["utilizada"] for l in lineas), 3),
         },
     })
+
+
+@inventario_bp.route(
+    "/api/inventario-diario/<int:inv_id>/quitar-lineas-duplicadas", methods=["POST"])
+@login_requerido
+def inventario_quitar_lineas_duplicadas(inv_id):
+    if not es_gestion():
+        return err("Solo administración puede quitar líneas duplicadas", 403)
+    data = request.get_json() or {}
+    if data.get("confirmar") is not True or not isinstance(data.get("detalle_ids"), list):
+        return err("Confirma cuáles líneas duplicadas deseas quitar", 400)
+    try:
+        seleccionados = {int(i) for i in data["detalle_ids"]}
+    except (TypeError, ValueError):
+        return err("La selección de líneas duplicadas no es válida", 400)
+    if not seleccionados:
+        return err("Selecciona al menos una línea duplicada", 400)
+
+    conn = get_conn()
+    inv, permitido = _sucursal_de_planilla(conn, inv_id, bloquear=True)
+    if not permitido:
+        conn.rollback()
+        conn.close()
+        return err("Planilla no encontrada", 404)
+    if inv["estado"] == "cerrado":
+        conn.rollback()
+        conn.close()
+        return err("No se puede cambiar una planilla cerrada", 409)
+
+    filas_actuales = _productos_planilla(
+        conn, ids_sucursal_consolidada(conn, inv["sucursal_id"]),
+        _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
+    detalles = _detalle(conn, inv_id)
+    candidatos, bloqueadas = _lineas_duplicadas_seguidas(
+        conn, filas_actuales, detalles)
+    por_id = {linea["detalle_id"]: linea for linea in candidatos}
+    if not seleccionados.issubset(por_id):
+        conn.rollback()
+        conn.close()
+        return err(
+            "La selección cambió o alguna línea ya tiene conteo/ingreso. "
+            "Actualiza la planilla y vuelve a revisar.",
+            409)
+
+    respaldo = nombre_respaldo("antes_quitar_duplicados_planilla")
+    try:
+        volcar_a_archivo(conn, os.path.join(carpeta_respaldos(), respaldo))
+        observaciones_por_destino = {}
+        for detalle_id in sorted(seleccionados):
+            detalle_antiguo = next(d for d in detalles if int(d["id"]) == detalle_id)
+            candidato = por_id[detalle_id]
+            detalle_actual = next(
+                d for d in detalles if int(d["id"]) == candidato["detalle_actual_id"])
+            observaciones = observaciones_por_destino.setdefault(
+                candidato["detalle_actual_id"],
+                [detalle_actual["observaciones"]] if detalle_actual["observaciones"] else [])
+            observaciones.extend(
+                texto.strip() for texto in (detalle_antiguo["observaciones"],)
+                if texto and texto.strip())
+            conn.execute(
+                "DELETE FROM inventario_detalle WHERE id = ? AND inventario_id = ?",
+                (detalle_id, inv_id))
+        for detalle_id, observaciones in observaciones_por_destino.items():
+            unicas = list(dict.fromkeys(observaciones))
+            conn.execute(
+                "UPDATE inventario_detalle SET observaciones = ? "
+                "WHERE id = ? AND inventario_id = ?",
+                (" · ".join(unicas) or None, detalle_id, inv_id))
+        conn.execute("""
+            UPDATE inventario_diario
+            SET total_items = (SELECT COUNT(*) FROM inventario_detalle WHERE inventario_id = ?)
+            WHERE id = ? AND estado = 'abierto'
+        """, (inv_id, inv_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.close()
+        logging.getLogger("app").exception(
+            "Error quitando líneas duplicadas de inventario: planilla=%s", inv_id)
+        return err("No se quitaron las líneas duplicadas; no se aplicó ningún cambio", 500)
+
+    resumen = ", ".join(
+        f"{por_id[i]['nombre']} ({por_id[i]['cantidad_antigua']} → "
+        f"{por_id[i]['cantidad_correcta']} {por_id[i]['unidad']})"
+        for i in sorted(seleccionados))
+    conn.close()
+    registrar_auditoria(
+        "Líneas duplicadas quitadas de inventario",
+        f"Planilla {inv_id}; {resumen}; respaldo {respaldo}")
+    return ok({
+        "eliminadas": len(seleccionados),
+        "bloqueadas": bloqueadas,
+        "respaldo": respaldo,
+    }, message=f"Se quitó/quitaron {len(seleccionados)} línea(s) duplicada(s). "
+               "Se conservó la cantidad de la ficha activa y el stock no cambió. "
+               f"Respaldo: {respaldo}.")
 
 
 # --------------------------------------------------------------------------
