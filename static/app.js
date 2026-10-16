@@ -1312,14 +1312,15 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         }
     selSuc.value = sid0 || '';
         actualizarControlProductoPedido(selSuc.value, false);
-    // Al editar, la sucursal se mantiene fija salvo para admin (evita registrar
-    // almacenes ajenos); al crear, siempre es editable.
+    // Al editar, la sucursal queda fija salvo para admin (evita registrar
+    // almacenes ajenos). El almacén SÍ se puede cambiar: se lista solo el de la
+    // propia sucursal y el servidor valida que pertenezca a ella.
     if (!id) {
         $('#prod-sucursal').disabled = false;
         $('#prod-almacen').disabled = false;
-    } else if (!esAdminDlg) {
-        $('#prod-sucursal').disabled = true;
-        $('#prod-almacen').disabled = true;
+    } else {
+        $('#prod-sucursal').disabled = !esAdminDlg;
+        $('#prod-almacen').disabled = false;
     }
     // Cargar en el selector "Almacén" solo los almacenes de la sucursal elegida.
     // Si el selector no contiene la sucursal del usuario (las AS no figuran en
@@ -1445,7 +1446,10 @@ $('#prod-sucursal').addEventListener('change', () => {
 });
 
 $('#prod-almacen').addEventListener('change', () => {
-    actualizarControlProductoPedido($('#prod-sucursal').value, false);
+    // Cambiar solo el almacén no debe desmarcar «para proveer»: se conserva el
+    // estado actual del checkbox y la función lo oculta si ya no está permitido.
+    const cb = $('#prod-para-proveer');
+    actualizarControlProductoPedido($('#prod-sucursal').value, !!(cb && cb.checked));
 });
 
 // ---------------- Movimientos ----------------
