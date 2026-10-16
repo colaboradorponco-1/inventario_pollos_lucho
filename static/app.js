@@ -1313,7 +1313,6 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-nombre').value = p.nombre;
         $('#prod-marca').value = p.marca || '';
         $('#prod-categoria-form').value = p.categoria_id || '';
-        $('#prod-almacen').value = p.almacen_id || '';
         const uSel = $('#prod-unidad');
         if (p.unidad && !Array.from(uSel.options).some((o) => o.value === p.unidad)) {
             const o = document.createElement('option');
@@ -1329,9 +1328,10 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
     
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
         if (esGestionDlg) poblarAlmacenes(+$('#prod-sucursal').value || 0);
-        if (esGestionDlg && p.sucursal_id && !p.almacen_id) {
-            const match = (catalogos.almacenes || []).find((a) => a.sucursal_id === p.sucursal_id);
-            if (match) $('#prod-almacen').value = match.id;
+        const almacenSel = $('#prod-almacen');
+        if (p.almacen_id && Array.from(almacenSel.options).some(
+            (o) => String(o.value) === String(p.almacen_id))) {
+            almacenSel.value = p.almacen_id;
         }
         actualizarControlProductoPedido($('#prod-sucursal').value, !!p.para_proveer);
         $('#campo-stock-inicial').style.display = 'none';
@@ -1408,8 +1408,10 @@ function poblarAlmacenes(sid) {
     // almacenes de LA sucursal elegida.
     const lista = sid ? (catalogos.almacenes || []).filter((a) => +a.sucursal_id === +sid)
                       : (catalogos.almacenes || []);
-    alm.innerHTML = '<option value="">— Sin almacén —</option>' +
-        lista.map((a) => `<option value="${a.id}">${esc(a.nombre)}</option>`).join('');
+    alm.innerHTML = lista.length
+        ? '<option value="">— Seleccione almacén —</option>' +
+          lista.map((a) => `<option value="${a.id}">${esc(a.nombre)}</option>`).join('')
+        : '<option value="">— No hay almacenes para esta sucursal —</option>';
     if (lista.some((a) => +a.id === +previo)) alm.value = previo;
     else if (lista.length) alm.value = String(lista[0].id);
 }
@@ -4147,7 +4149,11 @@ const ETAPA_LAB = ESTADO_LAB;
 
 window.avanzarEtapa = async (id, etapa) => {
     if (etapa === 'rechazado' && !confirm('¿Rechazar este pedido?\n\nEl pedido quedará como rechazado y no se moverá stock.')) return;
-    if (etapa === 'entregado' && !confirm('¿Confirmar que el pedido fue entregado?\n\nAl confirmar, el stock sale del almacén que despachó y suma a la sucursal que recibe.')) return;
+    const recuperarStock = etapa === 'entregado' && window._pedidoActual
+        && Number(window._pedidoActual.stock_movido) === 0;
+    if (etapa === 'entregado' && !confirm(recuperarStock
+        ? 'Este pedido figura entregado, pero no tiene registrado el movimiento de inventario. ¿Reintentar el traslado?'
+        : '¿Confirmar que el pedido fue entregado?\n\nAl confirmar, el stock sale del almacén que despachó y suma a la sucursal que recibe.')) return;
     try {
         const r = await request(API + '/pedidos/' + id + '/etapa', {
             method: 'PUT',
@@ -5252,6 +5258,9 @@ function pintarEtapaEnModal(p, puedeGestionar) {
         box.innerHTML = rol === 'preparador'
             ? '<span class="respaldo-txt">El repartidor debe confirmar la entrega.</span>'
             : b('Entregado', 'entregado', true);
+    } else if (etapa === 'entregado' && Number(p.stock_movido) === 0
+            && rol !== 'preparador') {
+        box.innerHTML = b('Reintentar movimiento de inventario', 'entregado', true);
     } else {
         box.innerHTML = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
     }
@@ -5300,7 +5309,7 @@ window.verPedido = async (id, accionables = true) => {
                 <td>${tachoEtiqueta(d) || '—'}</td>
                 <td>${esc(sucMap[d.destino_id] || '—')}</td></tr>`).join('');
         openModal('modal-pedido');
-        window._pedidoActual = { id, estado: p.estado };
+        window._pedidoActual = { id, estado: p.estado, stock_movido: p.stock_movido };
         const esDestinoMio = destIds.some((sid) => String(sid) === String(window.SUCURSAL_ID));
         const misLineas = data.detalle.filter((d) =>
             String(d.destino_id || p.destino_id) === String(window.SUCURSAL_ID));

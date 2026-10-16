@@ -722,7 +722,7 @@ def pedido_estado(pedido_id):
     # El stock se mueve SOLO al marcar 'entregado' (baja del almacén que
     # despacha y suma a la sucursal que lo pidió). 'en_camino' y 'rechazado'
     # no tocan el inventario.
-    if estado == "entregado" and actual != "entregado":
+    if estado == "entregado" and not pedido["stock_movido"]:
         # El movimiento de stock solo puede hacerlo el almacén destino del
         # pedido, igual que al entregar. Una filial no puede descontar
         # mercadería del almacén desde el desplegable de estado.
@@ -738,7 +738,8 @@ def pedido_estado(pedido_id):
         if movido[0] == "error":
             conn.close()
             return err(movido[1])
-        conn.execute("UPDATE pedidos SET estado = ?, etapa = ?, total = ? WHERE id = ?",
+        conn.execute("UPDATE pedidos SET estado = ?, etapa = ?, total = ?, "
+                     "stock_movido = 1 WHERE id = ?",
                      (estado, estado, movido[0], pedido_id))
         conn.commit()
         conn.close()
@@ -922,7 +923,8 @@ def pedido_despachar(pedido_id):
     # guardaba un total si lo despachaba el almacen con el desplegable de estado
     # y otro distinto si lo entregaba la logistica con las etapas. Con costo
     # 3,333 x 3 uno guardaba 10.0 y el otro 9.999, y las cuentas no cuadraban.
-    conn.execute("UPDATE pedidos SET estado = 'entregado', etapa = 'entregado', total = ? WHERE id = ?",
+    conn.execute("UPDATE pedidos SET estado = 'entregado', etapa = 'entregado', total = ?, "
+                 "stock_movido = 1 WHERE id = ?",
                  (total, pedido_id))
     conn.commit()
     conn.close()
@@ -1216,9 +1218,17 @@ def pedido_etapa(pedido_id):
         return ok(message="Tu parte quedó lista. El pedido pasará a «En camino» "
                           "cuando los demás proveedores terminen.")
 
-    if destino_etapa == actual_etapa:
+    reparar_stock_entregado = (
+        destino_etapa == "entregado"
+        and actual_etapa == "entregado"
+        and not pedido["stock_movido"]
+    )
+    if destino_etapa == actual_etapa and not reparar_stock_entregado:
         conn.close()
         return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
+    if reparar_stock_entregado and rol == "preparador":
+        conn.close()
+        return err("Solo el repartidor o el almacén responsable puede recuperar el movimiento")
 
     # Cada rol solo puede avanzar SU paso, y hacia adelante. El rechazo es un
     # caso aparte: solo el ordenante/coordinador puede rechazar, y solo desde
@@ -1234,7 +1244,7 @@ def pedido_etapa(pedido_id):
         else:
             permitido = _AVANCE_ORDENANTE.get(actual_etapa)
 
-    if permitido != destino_etapa:
+    if permitido != destino_etapa and not reparar_stock_entregado:
         conn.close()
         if rol == "preparador":
             esperado = _AVANCE_PREPARADOR.get(actual_etapa)
@@ -1246,7 +1256,7 @@ def pedido_etapa(pedido_id):
 
     # El stock se mueve UNA sola vez, al llegar a 'entregado'. Un pedido ya
     # entregado no vuelve a mover stock.
-    stock_ya_movido = pedido["estado"] == "entregado"
+    stock_ya_movido = bool(pedido["stock_movido"])
 
     if destino_etapa == "entregado" and not stock_ya_movido:
         movido = _despachar_stock(conn, pedido, origen_propio=False)
@@ -1257,14 +1267,17 @@ def pedido_etapa(pedido_id):
         # Sin round(): las columnas son DOUBLE y el movimiento ya viene
         # valuado con la precision del lote. Redondear a 2 decimales alteraba el
         # total real del pedido (3 x 3.333 = 9.999 se guardaba como 10.0).
-        conn.execute("UPDATE pedidos SET etapa = ?, estado = ?, total = ? WHERE id = ?",
+        conn.execute("UPDATE pedidos SET etapa = ?, estado = ?, total = ?, "
+                     "stock_movido = 1 WHERE id = ?",
                      (destino_etapa, "entregado", movido[0], pedido_id))
         conn.commit()
         conn.close()
         registrar_auditoria("Pedido entregado",
-                            f"{pedido['nro_ticket']} etapa {actual_etapa} -> entregado")
-        return ok(message=f"Pedido {pedido['nro_ticket']} entregado. "
-                          f"Se movio el stock a tu sucursal.")
+                            f"{pedido['nro_ticket']} etapa {actual_etapa} -> entregado; "
+                            "movimiento de stock registrado")
+        mensaje = ("Se recuperó el movimiento de inventario" if reparar_stock_entregado
+                   else "Se movió el stock a tu sucursal")
+        return ok(message=f"Pedido {pedido['nro_ticket']} entregado. {mensaje}.")
 
     # Rechazo: desde pendiente, sin tocar stock.
     if destino_etapa == "rechazado":

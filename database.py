@@ -387,6 +387,7 @@ def init_db():
                     "fecha VARCHAR(50) NOT NULL,"
                     "sucursal_id INT NOT NULL,"
                     "estado VARCHAR(20) DEFAULT 'pendiente',"
+                    "stock_movido TINYINT NOT NULL DEFAULT 0,"
                     "total DOUBLE DEFAULT 0,"
                     "usuario VARCHAR(255) DEFAULT '',"
                     "nota TEXT,"
@@ -739,6 +740,8 @@ def migrar_esquema():
         # en_camino -> entregado. Al llegar a 'entregado' se mueve el stock.
         if not _col_existe(cur, "pedidos", "etapa"):
             _add_columna(cur, "pedidos", "etapa VARCHAR(20) NOT NULL DEFAULT 'pendiente'")
+        if not _col_existe(cur, "pedidos", "stock_movido"):
+            _add_columna(cur, "pedidos", "stock_movido TINYINT NOT NULL DEFAULT 0")
         # Unificación de estados (2026): estado y etapa comparten el MISMO flujo
         # pendiente -> en_camino -> entregado (+ rechazado desde pendiente).
         # Solo se mapean los valores VIEJOS (despachado/cumplido/en_preparacion):
@@ -851,6 +854,43 @@ def migrar_esquema():
                                  GROUP BY r.pedido_id) t ON t.pid = p.id
                            SET p.total = t.s
                            WHERE p.total IS NULL OR p.total = 0""")
+            cur.execute("""UPDATE pedidos p
+                           SET p.stock_movido = 1
+                           WHERE p.estado = 'entregado'
+                             AND EXISTS (SELECT 1 FROM repartos r WHERE r.pedido_id = p.id)
+                             AND NOT EXISTS (
+                               SELECT 1
+                               FROM (
+                                 SELECT d.pedido_id,
+                                        d.destino_id AS origen_id,
+                                        d.producto_id, SUM(d.cantidad) AS cantidad
+                                 FROM pedido_detalle d
+                                 GROUP BY d.pedido_id, d.destino_id, d.producto_id
+                               ) lineas
+                               WHERE lineas.pedido_id = p.id
+                                 AND COALESCE(lineas.origen_id, p.destino_id) <> p.sucursal_id
+                                 AND (
+                                   COALESCE((
+                                     SELECT SUM(m.cantidad) FROM movimientos m
+                                     WHERE m.producto_id = lineas.producto_id
+                                       AND m.sucursal_id = COALESCE(lineas.origen_id, p.destino_id)
+                                       AND m.tipo = 'salida'
+                                       AND m.nota = CONCAT('Despacho pedido ', p.nro_ticket)
+                                   ), 0) + 0.000000001 < lineas.cantidad
+                                   OR COALESCE((
+                                     SELECT SUM(m.cantidad) FROM movimientos m
+                                     WHERE m.producto_id = lineas.producto_id
+                                       AND m.sucursal_id = p.sucursal_id
+                                       AND m.tipo = 'entrada'
+                                       AND m.nota = CONCAT('Recepción pedido ', p.nro_ticket)
+                                   ), 0) + 0.000000001 < (
+                                     SELECT SUM(d2.cantidad) FROM pedido_detalle d2
+                                     WHERE d2.pedido_id = p.id
+                                       AND d2.producto_id = lineas.producto_id
+                                       AND COALESCE(d2.destino_id, p.destino_id) <> p.sucursal_id
+                                   )
+                                 )
+                             )""")
             db.commit()
         if _col_existe(cur, "pedido_detalle", "unidad"):
             cur.execute("""UPDATE pedido_detalle d JOIN productos p ON p.id = d.producto_id
@@ -1042,20 +1082,32 @@ def migrar_esquema():
         # reciben así "sus almacenes", no los del almacén principal.
         # El INSERT va envuelto porque un UNIQUE por sucursal choca si la sucursal
         # ya tiene uno con ese nombre, y eso tampoco puede impedir el arranque.
-        cur.execute("SELECT id FROM sucursales ORDER BY id")
-        _ids_suc = [f["id"] for f in cur.fetchall()]
+        cur.execute("SELECT id, nombre FROM sucursales ORDER BY id")
+        _sucursales = cur.fetchall()
         cur.execute("SELECT DISTINCT sucursal_id FROM almacenes WHERE sucursal_id IS NOT NULL")
         _con_alm = {r["sucursal_id"] for r in cur.fetchall()}
         _BASE_ALMACENES = ["Almacén Principal", "Cocina", "Limpieza"]
-        for sid in _ids_suc:
+        for sucursal in _sucursales:
+            sid = sucursal["id"]
             if sid in _con_alm:
                 continue
             for nm in _BASE_ALMACENES:
                 try:
                     cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) "
                                 "VALUES (%s, %s, %s)", (nm, "", sid))
-                except Exception:
-                    pass
+                except Exception as _e:
+                    # Algunas bases antiguas todavía pueden conservar un UNIQUE
+                    # global sobre nombre. Si no se pudo quitar durante la
+                    # migración, los nombres genéricos ya usados en otra sucursal
+                    # no se insertan; usa un nombre único para esta sucursal.
+                    if not getattr(_e, "args", ()) or _e.args[0] != 1062:
+                        raise
+                    nombre_sucursal = (sucursal["nombre"] or f"Sucursal {sid}").strip()
+                    nombre_unico = f"{nm} - {nombre_sucursal}"
+                    cur.execute("INSERT INTO almacenes (nombre, ubicacion, sucursal_id) "
+                                "VALUES (%s, %s, %s)", (nombre_unico, "", sid))
+                    print(f"[migrar] Almacén '{nombre_unico}' creado para sucursal {sid} "
+                          "por restricción global heredada")
         db.commit()
 
         # 8) Normalizar marcas de tiempo: 'AAAA-MM-DDTHH:MM:SS' -> 'AAAA-MM-DD HH:MM:SS'.

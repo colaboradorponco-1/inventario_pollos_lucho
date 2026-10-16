@@ -582,6 +582,22 @@ def prueba_control_oferta_productos():
            "_destruir_sucursales_as" not in db)
 
 
+def prueba_selector_almacen_productos():
+    js = _leer(os.path.join("static", "app.js"))
+    db = _leer("database.py")
+    _check("crear producto selecciona un almacén de la sucursal",
+           "else if (lista.length) alm.value = String(lista[0].id);" in js)
+    _check("editar producto conserva el almacén solo si pertenece a las opciones",
+           "Array.from(almacenSel.options).some(" in js
+           and "almacenSel.value = p.almacen_id;" in js
+           and "$('#prod-almacen').value = p.almacen_id || '';" not in js)
+    _check("el selector informa si la sucursal no tiene almacenes",
+           "— No hay almacenes para esta sucursal —" in js)
+    _check("la migración crea nombres únicos si persiste el índice global antiguo",
+           'nombre_unico = f"{nm} - {nombre_sucursal}"' in db
+           and "_e.args[0] != 1062" in db)
+
+
 def main():
     print("=" * 72)
     print("ORDEN DE LOS PRODUCTOS EN LOS PEDIDOS")
@@ -601,6 +617,7 @@ def main():
     prueba_scroll_de_la_lista()
     prueba_orden_real_en_node()
     prueba_columnas_de_los_joins()
+    prueba_selector_almacen_productos()
     print("=" * 72)
     print("FALLOS:", len(FALLOS))
     for f in FALLOS:

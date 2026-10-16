@@ -4,6 +4,7 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
+from .lotes import _ids_proveedores_misma_ciudad
 from .util import (ok, err, login_requerido, rol_requerido, registrar_auditoria,
                    registrar_movimiento, stock_actual, ok_paginado, paginar_params,
                    sucursal_actual, sucursal_operativa, clausula_sucursal,
@@ -154,10 +155,21 @@ def repartos():
         rol = session.get("rol")
         data = request.get_json() or {}
         fecha = data.get("fecha") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        sucursal_id = data.get("sucursal_id")
+        try:
+            sucursal_id = int(data.get("sucursal_id") or 0)
+        except (TypeError, ValueError):
+            conn.close()
+            return err("La sucursal de destino no es válida")
         # El origen SIEMPRE es la sucursal del usuario; superadmin -> su Almacén Principal 1
         origen_id = sucursal_operativa() if rol != "superadmin" else (
             data.get("origen_sucursal_id") or sucursal_operativa())
+        if es_receptor():
+            origen_id = sucursal_actual()
+            destinos_permitidos = _ids_proveedores_misma_ciudad(conn, origen_id)
+            if not destinos_permitidos or sucursal_id not in destinos_permitidos:
+                conn.close()
+                return err("El receptor solo puede repartir a sucursales permitidas "
+                           "de su ciudad o a un almacén principal")
         nota = data.get("nota", "")
         detalle = data.get("detalle", [])
         if not sucursal_id:

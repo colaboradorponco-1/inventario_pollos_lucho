@@ -103,6 +103,22 @@ check("preparador limitado a su sucursal proveedora",
       'rol == "preparador" and not es_proveedor' in fuente_etapa)
 check("repartidor limitado a su sucursal solicitante",
       'rol == "repartidor" and pedido["sucursal_id"] != sid' in fuente_etapa)
+check("el sistema registra por separado si el stock de un pedido ya se movió",
+      'pedido["stock_movido"]' in fuente_etapa
+      and "stock_movido = 1" in fuente_etapa
+      and "stock_movido = 1" in inspect.getsource(ped.pedido_estado)
+      and "stock_movido = 1" in inspect.getsource(ped.pedido_despachar))
+check("un pedido entregado sin movimiento permite una recuperación protegida",
+      "reparar_stock_entregado" in fuente_etapa
+      and "Solo el repartidor o el almacén responsable" in fuente_etapa)
+
+base = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(base, "database.py"), encoding="utf-8") as archivo:
+    database_py = archivo.read()
+check("la migración respeta entregas previas con reparto y detecta las no registradas",
+      'pedidos", "stock_movido"' in database_py
+      and "p.stock_movido = 1" in database_py
+      and "EXISTS (SELECT 1 FROM repartos r WHERE r.pedido_id = p.id)" in database_py)
 
 app_pruebas = Flask(__name__)
 app_pruebas.secret_key = "prueba"
@@ -270,8 +286,75 @@ finally:
     ped.get_conn = get_conn_original
     ped.registrar_auditoria = auditoria_original
 
+
+class _RetryEntregaConn:
+    def __init__(self):
+        self.pedido = {
+            "id": 12, "nro_ticket": "TKT-00012", "sucursal_id": 30,
+            "destino_id": 20, "estado": "entregado", "etapa": "entregado",
+            "stock_movido": 0,
+        }
+        self.detalle = [{"destino_id": 20, "preparado": 1}]
+
+    def execute(self, sql, params=None):
+        query = " ".join(str(sql).split())
+        if query.startswith("UPDATE pedidos SET etapa = ?, estado = ?, total = ?, stock_movido = 1"):
+            self.pedido["etapa"] = params[0]
+            self.pedido["estado"] = params[1]
+            self.pedido["stock_movido"] = 1
+        return self
+
+    def fetchone(self):
+        return self.pedido
+
+    def fetchall(self):
+        return self.detalle
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+conn_retry = _RetryEntregaConn()
+despachar_original = ped._despachar_stock
+puede_ver_original = ped._puede_ver_pedido
+llamadas_despacho = []
+ped.get_conn = lambda: conn_retry
+ped.registrar_auditoria = lambda *args, **kwargs: None
+ped._puede_ver_pedido = lambda *args, **kwargs: True
+ped._despachar_stock = lambda *args, **kwargs: (
+    llamadas_despacho.append(1) or (0.0, [91]))
+try:
+    with app_pruebas.test_request_context(
+            "/api/pedidos/12/etapa", method="PUT", json={"etapa": "entregado"}):
+        session["user_id"] = 1
+        session["rol"] = "repartidor"
+        session["sucursal_id"] = 30
+        respuesta_recuperacion = ped.pedido_etapa(12).get_json()
+    with app_pruebas.test_request_context(
+            "/api/pedidos/12/etapa", method="PUT", json={"etapa": "entregado"}):
+        session["user_id"] = 1
+        session["rol"] = "repartidor"
+        session["sucursal_id"] = 30
+        respuesta_repetida = ped.pedido_etapa(12).get_json()
+    check("se recupera una entrega antigua sin duplicar movimientos",
+          respuesta_recuperacion["ok"]
+          and "recuperó" in respuesta_recuperacion["message"]
+          and respuesta_repetida["ok"]
+          and len(llamadas_despacho) == 1
+          and conn_retry.pedido["stock_movido"] == 1)
+finally:
+    ped.get_conn = get_conn_original
+    ped.registrar_auditoria = auditoria_original
+    ped._despachar_stock = despachar_original
+    ped._puede_ver_pedido = puede_ver_original
+
 # La interfaz debe conservar una sola ubicación para gestionar los estados.
-base = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(base, "static", "app.js"), encoding="utf-8") as archivo:
     app_js = archivo.read()
 with open(os.path.join(base, "templates", "index.html"), encoding="utf-8") as archivo:
