@@ -99,6 +99,72 @@ print("=" * 72)
 print("AISLAMIENTO POR SUCURSAL EN GET /api/pedidos")
 print("=" * 72)
 
+detalle_mixto = [
+    {"id": 1, "destino_id": 30},
+    {"id": 2, "destino_id": 36},
+    {"id": 3, "destino_id": None},
+]
+pedido_ajeno = {"sucursal_id": 42, "destino_id": 30}
+pedido_propio = {"sucursal_id": 30, "destino_id": 30}
+with srv.test_request_context("/api/pedidos/1"):
+    session["rol"] = "admin"
+    session["sucursal_id"] = 30
+    lineas_proveedor = ped._detalle_visible_pedido(pedido_ajeno, detalle_mixto)
+    session["rol"] = "encargado"
+    lineas_solicitante = ped._detalle_visible_pedido(pedido_propio, detalle_mixto)
+    session["rol"] = "superadmin"
+    session.pop("sucursal_id", None)
+    lineas_superadmin = ped._detalle_visible_pedido(pedido_ajeno, detalle_mixto)
+
+ok_proveedor = [d["id"] for d in lineas_proveedor] == [1, 3]
+ok_solicitante = [d["id"] for d in lineas_solicitante] == [1, 2, 3]
+ok_superadmin = [d["id"] for d in lineas_superadmin] == [1, 2, 3]
+for nombre, resultado in (
+        ("el proveedor solo ve las líneas de su almacén", ok_proveedor),
+        ("la sucursal solicitante ve todo su pedido", ok_solicitante),
+        ("solo superadmin ve todas las líneas del pedido mixto", ok_superadmin)):
+    if not resultado:
+        fallos += 1
+    print(f"{'OK' if resultado else 'FALLA':6s} {nombre}")
+
+
+class FakeBandejaConn(FakeConn):
+    def fetchall(self):
+        sql = CAPTURADO[-1][0] if CAPTURADO else ""
+        if "SELECT p.id, p.nro_ticket" in sql:
+            return [{
+                "id": 1, "nro_ticket": "TKT-00001", "fecha": "",
+                "estado": "pendiente", "etapa": "pendiente", "nota": "",
+                "usuario": "origen", "sucursal_id": 42, "destino_id": 30,
+                "sucursal_nombre": "Sucursal solicitante",
+            }]
+        return []
+
+
+original_get_conn = ped.get_conn
+ped.get_conn = FakeBandejaConn
+try:
+    CAPTURADO.clear()
+    with srv.test_request_context("/api/pedidos/bandeja?alcance=mi-almacen"):
+        session["user_id"] = 1
+        session["rol"] = "admin"
+        session["sucursal_id"] = 30
+        session["usuario"] = "prueba"
+        ped.pedidos_bandeja()
+    consulta_detalle = next(
+        (sql, params) for sql, params in CAPTURADO
+        if "FROM pedido_detalle d" in sql and "JOIN pedidos p" in sql)
+    bandeja_filtrada = (
+        "(p.sucursal_id = ? OR COALESCE(d.destino_id, p.destino_id) = ?)"
+        in consulta_detalle[0]
+        and consulta_detalle[1][-2:] == [30, 30])
+finally:
+    ped.get_conn = original_get_conn
+if not bandeja_filtrada:
+    fallos += 1
+print(f"{'OK' if bandeja_filtrada else 'FALLA':6s} "
+      "la bandeja limita las líneas a las propias o las que despacha el almacén")
+
 for etiqueta, rol, sid, nombre, filtro_esperado in CASOS:
     sql, params = sql_de_listado(rol, sid)
     lleva_destino = "destino_id = ?" in sql

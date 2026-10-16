@@ -145,6 +145,21 @@ def _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=False):
     return any((d.get("destino_id") or pedido.get("destino_id")) == sid for d in detalle)
 
 
+def _detalle_visible_pedido(pedido, detalle):
+    """Devuelve el pedido completo al solicitante y solo las líneas propias al proveedor."""
+    if es_superadmin():
+        return list(detalle)
+    sid = sucursal_actual()
+    if sid is None:
+        return []
+    if pedido["sucursal_id"] == sid:
+        return list(detalle)
+    return [
+        d for d in detalle
+        if (d.get("destino_id") or pedido.get("destino_id")) == sid
+    ]
+
+
 @pedidos_bp.route("/api/pedidos", methods=["GET", "POST"])
 @login_requerido
 def pedidos():
@@ -519,19 +534,17 @@ def pedido_detalle(pedido_id):
     if not _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=True):
         conn.close()
         return err("No tienes permisos para ver este pedido", 403)
-    es_receptor_proveedor = es_receptor() and pedido["sucursal_id"] != sucursal_actual()
-    if es_receptor_proveedor:
-        sid = sucursal_actual()
-        detalle = [d for d in detalle
-                   if (d.get("destino_id") or pedido.get("destino_id")) == sid]
+    detalle = _detalle_visible_pedido(pedido, detalle)
+    es_proveedor_ajeno = (
+        not es_superadmin() and pedido["sucursal_id"] != sucursal_actual())
     repartos = conn.execute(
         "SELECT r.id, r.fecha, r.total, r.origen_sucursal_id AS origen_id, "
         "   o.nombre AS origen_nombre "
         "FROM repartos r LEFT JOIN sucursales o ON o.id = r.origen_sucursal_id "
         "WHERE r.pedido_id = ?"
-        + (" AND r.origen_sucursal_id = ?" if es_receptor_proveedor else "")
+        + (" AND r.origen_sucursal_id = ?" if es_proveedor_ajeno else "")
         + " ORDER BY r.id",
-        (pedido_id, sucursal_actual()) if es_receptor_proveedor else (pedido_id,)).fetchall()
+        (pedido_id, sucursal_actual()) if es_proveedor_ajeno else (pedido_id,)).fetchall()
     conn.close()
     return ok({"pedido": dict(pedido), "detalle": [dict(r) for r in detalle],
                "repartos": [dict(r) for r in repartos]})
@@ -646,6 +659,7 @@ def _ticket_data(conn, pedido_id):
     """, (pedido_id,)).fetchall()
     if not _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=True):
         return None
+    detalle = _detalle_visible_pedido(pedido, detalle)
     suc_nombres = {r["id"]: dict(id=r["id"], nombre=r["nombre"], principal=bool(r["principal"]))
                    for r in conn.execute("SELECT id, nombre, principal FROM sucursales").fetchall()}
     proveedores = OrderedDict()
@@ -963,10 +977,16 @@ def pedidos_bandeja():
     det = []
     if pedido_ids:
         marks = ",".join("?" * len(pedido_ids))
-        filtro_proveedor = (
-            " AND COALESCE(d.destino_id, p.destino_id) = ?"
-            if es_receptor() else "")
-        parametros_detalle = pedido_ids + ([sid] if es_receptor() else [])
+        filtro_proveedor = ""
+        parametros_detalle = list(pedido_ids)
+        if es_receptor():
+            filtro_proveedor = " AND COALESCE(d.destino_id, p.destino_id) = ?"
+            parametros_detalle.append(sid)
+        elif sid is not None and not (
+                es_superadmin() and alcance == "todas"):
+            filtro_proveedor = (
+                " AND (p.sucursal_id = ? OR COALESCE(d.destino_id, p.destino_id) = ?)")
+            parametros_detalle.extend((sid, sid))
         det = conn.execute(f"""
             SELECT d.pedido_id, d.producto_nombre, d.cantidad, d.unidad,
                    d.tacho_texto, d.tacho_unidad, d.destino_id, s.nombre AS destino_nombre,
