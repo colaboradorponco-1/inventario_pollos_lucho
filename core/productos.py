@@ -73,6 +73,16 @@ def _producto_duplicado(conn, nombre, unidad, excluir_id=None):
     return None
 
 
+def _producto_duplicado_edicion(conn, nombre, unidad, producto_actual):
+    """Solo valida colisiones si al editar se cambia el nombre o la unidad."""
+    nombre_actual = producto_actual["nombre"] or ""
+    unidad_actual = producto_actual["unidad"] or "unidad"
+    if (norm_nombre(nombre) == norm_nombre(nombre_actual)
+            and norm_nombre(unidad or "unidad") == norm_nombre(unidad_actual)):
+        return None
+    return _producto_duplicado(conn, nombre, unidad, excluir_id=producto_actual["id"])
+
+
 def _tacho_unidad(data):
     """Cuánto entra en UN tacho del producto, en su unidad base (kg, unidades...).
     0 = no definido (el valor se escribe en el pedido)."""
@@ -670,7 +680,7 @@ def producto(prod_id):
     if not nombre:
         conn.close()
         return err("El nombre del producto es obligatorio", 400)
-    duplicado = _producto_duplicado(conn, nombre, unidad, excluir_id=prod_id)
+    duplicado = _producto_duplicado_edicion(conn, nombre, unidad, fila)
     if duplicado:
         sucursal_dup = duplicado["sucursal_nombre"] or "sin sucursal"
         conn.close()

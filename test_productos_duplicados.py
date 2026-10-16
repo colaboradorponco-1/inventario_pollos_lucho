@@ -2,7 +2,7 @@
 import sqlite3
 import unittest
 
-from core.productos import _producto_duplicado
+from core.productos import _producto_duplicado, _producto_duplicado_edicion
 
 
 class ProductosDuplicadosTest(unittest.TestCase):
@@ -35,6 +35,18 @@ class ProductosDuplicadosTest(unittest.TestCase):
             self.conn, "PAPA HOLANDESA", "kg", excluir_id=1))
         self.assertIsNone(_producto_duplicado(
             self.conn, "PAPA HOLANDESA", "caja"))
+
+    def test_editar_otros_campos_no_bloquea_ficha_que_ya_tiene_duplicado(self):
+        actual = {"id": 2, "nombre": "Papa Holandesa", "unidad": "KG"}
+        self.assertIsNone(_producto_duplicado_edicion(
+            self.conn, "PAPA HOLANDESA", "kg", actual))
+
+    def test_cambiar_nombre_o_unidad_sigue_validando_duplicados(self):
+        actual = {"id": 2, "nombre": "Papa Holandesa especial", "unidad": "KG"}
+        self.assertEqual(_producto_duplicado_edicion(
+            self.conn, "PAPA HOLANDESA", "kg", actual)["id"], 1)
+        self.assertIsNone(_producto_duplicado_edicion(
+            self.conn, "Papa Holandesa especial", "caja", actual))
 
 
 if __name__ == "__main__":
