@@ -157,7 +157,8 @@ check("el reparto manual registra salida en origen y entrada en destino",
       and 'registrar_movimiento(conn, prod_id, "entrada"' in reparto_manual)
 check("la entrega automática del pedido registra salida y entrada de stock",
       'conn, d["producto_id"], "salida"' in reparto_pedido
-      and 'd["producto_id"], "entrada"' in reparto_pedido)
+      and "productos_recepcion[(origen_id, d[\"producto_id\"])]" in reparto_pedido
+      and 'registrar_movimiento(conn, producto_receptor_id, "entrada"' in reparto_pedido)
 check("el historial incluye entradas y salidas si no se selecciona un tipo",
       'if tipo:' in historial_movimientos
       and 'q += " AND m.tipo = ?"' in historial_movimientos)

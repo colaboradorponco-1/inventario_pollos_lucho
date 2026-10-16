@@ -32,6 +32,8 @@ const fmtDate = (d) => {
 };
 
 let catalogos = { almacenes: [], categorias: [], proveedores: [] };
+let equivalenciasCargadas = false;
+let reparacionStockSimulada = null;
 
 function nowLocal() {
     const d = new Date();
@@ -1013,6 +1015,17 @@ async function loadProductos() {
     try {
         const btnRevisarDuplicados = $('#btn-revisar-duplicados');
         if (btnRevisarDuplicados) btnRevisarDuplicados.style.display = esAdmin() ? '' : 'none';
+        const panelEquivalencias = $('#panel-equivalencias');
+        if (panelEquivalencias) panelEquivalencias.style.display =
+            window.ROL === 'superadmin' ? '' : 'none';
+        if (window.ROL === 'superadmin' && !equivalenciasCargadas) {
+            try {
+                await loadEquivalencias();
+                equivalenciasCargadas = true;
+            } catch (e) {
+                toast(e.message, 'err');
+            }
+        }
         const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
         const categoria = ($('#prod-categoria') || {}).value || '';
         const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
@@ -1147,6 +1160,122 @@ async function loadProductos() {
         toast(e.message, 'err');
     }
 }
+
+async function loadEquivalencias() {
+    const data = await request(API + '/equivalencias-productos');
+    const productos = data.productos || [];
+    const sucursales = data.sucursales || [];
+    const origen = $('#equiv-origen');
+    const sucursal = $('#equiv-sucursal');
+    const destino = $('#equiv-destino');
+    if (!origen || !sucursal || !destino) return;
+
+    const labelProducto = (p) =>
+        `${p.nombre} (${p.unidad || 'unidad'}) — ${p.sucursal_nombre}`;
+    origen.innerHTML = '<option value="">Producto del proveedor...</option>' +
+        productos.map((p) => `<option value="${p.id}">${esc(labelProducto(p))}</option>`).join('');
+    sucursal.innerHTML = '<option value="">Sucursal receptora...</option>' +
+        sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join('');
+    const llenarDestino = () => {
+        const productosDestino = productos.filter((p) =>
+            String(p.sucursal_id) === String(sucursal.value));
+        destino.innerHTML = '<option value="">Ficha de la sucursal...</option>' +
+            productosDestino.map((p) =>
+                `<option value="${p.id}">${esc(p.nombre)} (${esc(p.unidad || 'unidad')})</option>`
+            ).join('');
+    };
+    llenarDestino();
+    sucursal.onchange = llenarDestino;
+
+    $('#equivalencias-tbody').innerHTML = (data.equivalencias || []).map((e) => `
+        <tr>
+            <td>${esc(e.origen_nombre)} (${esc(e.origen_unidad || 'unidad')}) — ${esc(e.origen_sucursal_nombre)}</td>
+            <td>${esc(e.destino_nombre)} (${esc(e.destino_unidad || 'unidad')}) — ${esc(e.destino_sucursal_nombre)}</td>
+            <td><button class="btn btn-icon btn-danger" data-eliminar-equivalencia="${e.id}">Eliminar</button></td>
+        </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin equivalencias configuradas</td></tr>';
+    $$('[data-eliminar-equivalencia]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            if (!confirm('¿Eliminar esta equivalencia? Las próximas entregas requerirán configurarla de nuevo.')) return;
+            try {
+                await request(API + '/equivalencias-productos/' + button.dataset.eliminarEquivalencia,
+                    { method: 'DELETE' });
+                toast('Equivalencia eliminada');
+                await loadEquivalencias();
+            } catch (e) {
+                toast(e.message, 'err');
+            }
+        });
+    });
+}
+
+function renderSimulacionReparacion(data) {
+    reparacionStockSimulada = data;
+    const resultado = $('#reparar-stock-resultado');
+    resultado.innerHTML = `<p>${esc(data.message || 'Simulación lista; no se modificó inventario.')}</p>` +
+        `<ul>${(data.cambios || []).map((c) =>
+            `<li>${esc(c.nombre)}: ficha ${c.producto_origen_id} → ` +
+            `${esc(c.nombre_destino)} (ficha ${c.producto_destino_id}), ` +
+            `${fmtNum(c.cantidad)} unidades. Stock equivocado actual: ` +
+            `${fmtNum(c.stock_incorrecto_actual)}.</li>`).join('')}</ul>` +
+        '<button class="btn btn-danger" id="btn-aplicar-reparacion-stock" type="button">' +
+        'Aplicar corrección simulada</button>';
+    $('#btn-aplicar-reparacion-stock').addEventListener('click', aplicarReparacionStock);
+}
+
+async function aplicarReparacionStock() {
+    if (!reparacionStockSimulada) return;
+    const resumen = (reparacionStockSimulada.cambios || []).map((c) =>
+        `${c.nombre}: ${c.producto_origen_id} → ${c.producto_destino_id} × ${fmtNum(c.cantidad)}`
+    ).join('\n');
+    if (!confirm(`Se registrarán una salida y una entrada de corrección para ${reparacionStockSimulada.ticket}. No se repetirá el pedido.\n\n${resumen}\n\n¿Aplicar?`)) return;
+    try {
+        const data = await request(API + '/pedidos/reparar-stock-equivalencias', {
+            method: 'POST',
+            body: { ticket: reparacionStockSimulada.ticket, confirmar: true },
+        });
+        reparacionStockSimulada = null;
+        $('#reparar-stock-resultado').innerHTML = `<p>${esc(data.message || 'Corrección aplicada.')}</p>`;
+        toast(data.message || 'Corrección aplicada');
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+}
+
+$('#form-equivalencia')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+        await request(API + '/equivalencias-productos', {
+            method: 'POST',
+            body: {
+                producto_origen_id: Number($('#equiv-origen').value),
+                sucursal_destino_id: Number($('#equiv-sucursal').value),
+                producto_destino_id: Number($('#equiv-destino').value),
+            },
+        });
+        toast('Equivalencia guardada');
+        equivalenciasCargadas = false;
+        await loadEquivalencias();
+        equivalenciasCargadas = true;
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+});
+
+$('#form-reparar-stock')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    reparacionStockSimulada = null;
+    try {
+        const data = await request(API + '/pedidos/reparar-stock-equivalencias', {
+            method: 'POST',
+            body: { ticket: $('#reparar-stock-ticket').value.trim() },
+        });
+        if (!data.simulacion) throw new Error('El servidor no devolvió una simulación segura.');
+        renderSimulacionReparacion(data);
+    } catch (e) {
+        $('#reparar-stock-resultado').textContent = '';
+        toast(e.message, 'err');
+    }
+});
 
 $('#prod-filtro').addEventListener('input', debounce(loadProductos, 300));
 $('#prod-categoria').addEventListener('change', loadProductos);

@@ -94,6 +94,11 @@ La tabla `usuarios` se crea con `admin/123456` como inicio de sesión inicial:
 - **Contingencia ante cortes de luz en sucursal**: el sistema NO guarda borradores offline.
   Define un cuaderno de respaldo en la sucursal para anotar ventas durante caídas del servidor.
 - **Cierre de caja diario**: compara el inventario teórico del sistema con el físico al cierre.
+- **Recepción de pedidos entre sucursales**: el superadministrador configura en
+  **Productos → Equivalencias para recibir pedidos** qué ficha local corresponde al
+  producto del almacén proveedor. Las unidades deben coincidir; sin equivalencia válida,
+  la entrega no mueve stock. Para un ticket histórico, simula primero la corrección y
+  confirma solo si los productos, sucursal y cantidades mostrados son los esperados.
 - **Inventario con dos encargados por sucursal**: ambos deben abrir la misma planilla
   existente y repartirse los productos; no creen planillas duplicadas para el mismo conteo.
   Al abrir se cargan los datos ya guardados. El inicial lo calcula el sistema y es

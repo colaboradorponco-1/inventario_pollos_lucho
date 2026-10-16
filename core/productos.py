@@ -13,7 +13,7 @@ from .lotes import (destinos_validos, elegir_destino, stock_por_destino,
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    ok_paginado, paginar_params, sucursal_actual, sucursal_operativa,
                    clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen,
-                   ids_sucursal_consolidada)
+                   ids_sucursal_consolidada, es_superadmin)
 
 productos_bp = Blueprint("productos", __name__)
 
@@ -1116,6 +1116,113 @@ def producto_historial(prod_id):
         "stock": stock_val,
         "movimientos": [dict(r) for r in movimientos],
     })
+
+
+@productos_bp.route("/api/equivalencias-productos", methods=["GET", "POST"])
+@login_requerido
+def equivalencias_productos():
+    if not es_superadmin():
+        return err("Solo el superadministrador puede gestionar equivalencias", 403)
+
+    conn = get_conn()
+    if request.method == "GET":
+        equivalencias = conn.execute("""
+            SELECT e.id, e.producto_origen_id, e.sucursal_destino_id,
+                   e.producto_destino_id, origen.nombre AS origen_nombre,
+                   origen.unidad AS origen_unidad,
+                   origen_sucursal.nombre AS origen_sucursal_nombre,
+                   destino.nombre AS destino_nombre,
+                   destino.unidad AS destino_unidad,
+                   destino_sucursal.nombre AS destino_sucursal_nombre
+            FROM equivalencias_productos e
+            JOIN productos origen ON origen.id = e.producto_origen_id
+            LEFT JOIN sucursales origen_sucursal ON origen_sucursal.id = origen.sucursal_id
+            JOIN productos destino ON destino.id = e.producto_destino_id
+            JOIN sucursales destino_sucursal ON destino_sucursal.id = e.sucursal_destino_id
+            ORDER BY origen_sucursal.nombre, origen.nombre, destino_sucursal.nombre
+        """).fetchall()
+        productos = conn.execute("""
+            SELECT p.id, p.nombre, p.unidad, p.sucursal_id,
+                   COALESCE(s.nombre, 'Sin sucursal') AS sucursal_nombre
+            FROM productos p
+            LEFT JOIN sucursales s ON s.id = p.sucursal_id
+            WHERE p.activo = 1
+            ORDER BY s.nombre, p.nombre
+        """).fetchall()
+        sucursales = conn.execute(
+            "SELECT id, nombre FROM sucursales ORDER BY nombre").fetchall()
+        conn.close()
+        return ok({
+            "equivalencias": [dict(fila) for fila in equivalencias],
+            "productos": [dict(fila) for fila in productos],
+            "sucursales": [dict(fila) for fila in sucursales],
+        })
+
+    data = request.get_json() or {}
+    try:
+        producto_origen_id = int(data.get("producto_origen_id"))
+        sucursal_destino_id = int(data.get("sucursal_destino_id"))
+        producto_destino_id = int(data.get("producto_destino_id"))
+    except (TypeError, ValueError):
+        conn.close()
+        return err("Selecciona los productos y la sucursal receptora", 400)
+
+    origen = conn.execute(
+        "SELECT id, unidad FROM productos WHERE id = ? AND activo = 1",
+        (producto_origen_id,)).fetchone()
+    destino = conn.execute(
+        "SELECT id, sucursal_id, unidad FROM productos WHERE id = ? AND activo = 1",
+        (producto_destino_id,)).fetchone()
+    sucursal = conn.execute(
+        "SELECT id FROM sucursales WHERE id = ?", (sucursal_destino_id,)).fetchone()
+    if not origen or not destino or not sucursal:
+        conn.close()
+        return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
+    if destino["sucursal_id"] != sucursal_destino_id:
+        conn.close()
+        return err("El producto receptor debe pertenecer a la sucursal seleccionada", 400)
+    unidad_origen = (origen["unidad"] or "unidad").strip().casefold()
+    unidad_destino = (destino["unidad"] or "unidad").strip().casefold()
+    if unidad_origen != unidad_destino:
+        conn.close()
+        return err("Las unidades de los productos equivalentes no coinciden", 400)
+
+    conn.execute("""
+        INSERT INTO equivalencias_productos
+            (producto_origen_id, sucursal_destino_id, producto_destino_id, creado_por, creado_en)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE producto_destino_id = VALUES(producto_destino_id),
+                                creado_por = VALUES(creado_por), creado_en = VALUES(creado_en)
+    """, (producto_origen_id, sucursal_destino_id, producto_destino_id,
+          session.get("usuario", ""), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    registrar_auditoria(
+        "Equivalencia de producto configurada",
+        f"{producto_origen_id} -> {producto_destino_id} en sucursal {sucursal_destino_id}")
+    return ok(message="Equivalencia guardada")
+
+
+@productos_bp.route("/api/equivalencias-productos/<int:equivalencia_id>", methods=["DELETE"])
+@login_requerido
+def equivalencia_producto_eliminar(equivalencia_id):
+    if not es_superadmin():
+        return err("Solo el superadministrador puede gestionar equivalencias", 403)
+    conn = get_conn()
+    equivalencia = conn.execute(
+        "SELECT producto_origen_id, sucursal_destino_id, producto_destino_id "
+        "FROM equivalencias_productos WHERE id = ?", (equivalencia_id,)).fetchone()
+    if not equivalencia:
+        conn.close()
+        return err("Equivalencia no encontrada", 404)
+    conn.execute("DELETE FROM equivalencias_productos WHERE id = ?", (equivalencia_id,))
+    conn.commit()
+    conn.close()
+    registrar_auditoria(
+        "Equivalencia de producto eliminada",
+        f"{equivalencia['producto_origen_id']} -> {equivalencia['producto_destino_id']} "
+        f"en sucursal {equivalencia['sucursal_destino_id']}")
+    return ok(message="Equivalencia eliminada")
 
 
 @productos_bp.route("/api/productos/importar", methods=["POST"])

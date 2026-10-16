@@ -101,6 +101,44 @@ def _proveedores_preparados(detalle, pedido):
     return bool(preparados) and all(preparados.values())
 
 
+def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
+    """Resuelve la ficha equivalente explícita de la sucursal receptora."""
+    equivalente = conn.execute("""
+        SELECT origen.sucursal_id AS sucursal_origen_id,
+               origen.unidad AS unidad_origen,
+               e.producto_destino_id AS equivalencia_destino_id,
+               destino.id AS producto_destino_id,
+               destino.sucursal_id AS sucursal_producto_destino,
+               destino.unidad AS unidad_destino,
+               destino.activo AS destino_activo
+        FROM productos origen
+        LEFT JOIN equivalencias_productos e
+          ON e.producto_origen_id = origen.id
+         AND e.sucursal_destino_id = ?
+        LEFT JOIN productos destino ON destino.id = e.producto_destino_id
+        WHERE origen.id = ? AND origen.activo = 1
+    """, (sucursal_destino_id, producto_origen_id)).fetchone()
+    if not equivalente:
+        return None, "El producto del proveedor no existe o está inactivo"
+    if equivalente["producto_destino_id"] is None:
+        if equivalente["equivalencia_destino_id"] is not None:
+            return None, "El producto equivalente de la sucursal receptora no existe"
+        if equivalente["sucursal_origen_id"] == sucursal_destino_id:
+            return producto_origen_id, None
+        return None, (
+            "No hay equivalencia configurada para este producto en la sucursal receptora. "
+            "Pide al superadministrador que la configure antes de entregar.")
+    if equivalente["sucursal_producto_destino"] != sucursal_destino_id:
+        return None, "El producto equivalente no pertenece a la sucursal receptora"
+    if not equivalente["destino_activo"]:
+        return None, "El producto equivalente de la sucursal receptora está inactivo"
+    unidad_origen = (equivalente["unidad_origen"] or "unidad").strip().casefold()
+    unidad_destino = (equivalente["unidad_destino"] or "unidad").strip().casefold()
+    if unidad_origen != unidad_destino:
+        return None, "Las unidades de los productos equivalentes no coinciden"
+    return equivalente["producto_destino_id"], None
+
+
 def _texto_tacho(fraccion):
     """'1 tacho entero', '1/2 tacho', '1/4 tacho'... a partir de la fracción."""
     try:
@@ -752,7 +790,8 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
 
     Un auto-pedido (origen == sucursal solicitante) deja reparto y reparto_detalle
     pero no desplaza stock ni valida stock de salida: es solo la constancia de
-    que la sucursal se surtió de su propio almacén."""
+    que la sucursal se surtió     de su propio almacén. Las recepciones entre sucursales acreditan la ficha
+    receptora configurada para cada producto antes de mover ningún stock."""
     if detalle is None:
         detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ?",
                                (pedido["id"],)).fetchall()
@@ -798,6 +837,20 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
             if stock < producto["cantidad"]:
                 return "error", (f"Stock insuficiente de {producto['nombre']} en "
                                  f"{org['nombre']}. Disponible: {stock}")
+
+    productos_recepcion = {}
+    for origen_id, items in grupos.items():
+        if origen_id == pedido["sucursal_id"]:
+            continue
+        for d in items:
+            clave = (origen_id, d["producto_id"])
+            if clave in productos_recepcion:
+                continue
+            producto_destino_id, error_equivalencia = _producto_receptor(
+                conn, d["producto_id"], pedido["sucursal_id"])
+            if error_equivalencia:
+                return "error", error_equivalencia
+            productos_recepcion[clave] = producto_destino_id
 
     # La mercadería se mueve HOY, no el día en que se hizo el pedido.
     # Si se usara `pedido["fecha"]`, un pedido del 30-sep entregado el 01-oct
@@ -845,7 +898,8 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
                         session.get("usuario", ""), origen_id)
                 except ValueError as exc:
                     return "error", str(exc)
-                registrar_movimiento(conn, d["producto_id"], "entrada", d["cantidad"], costo, fecha_mov,
+                producto_receptor_id = productos_recepcion[(origen_id, d["producto_id"])]
+                registrar_movimiento(conn, producto_receptor_id, "entrada", d["cantidad"], costo, fecha_mov,
                                       f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
                                       pedido["sucursal_id"])
         conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (subtotal_reparto, reparto_id))
@@ -1238,3 +1292,168 @@ def pedido_etapa(pedido_id):
                         f"{pedido['nro_ticket']} etapa {actual_etapa} -> {destino_etapa}")
     return ok(message=f"Pedido {pedido['nro_ticket']}: "
                       f"{_ETIQUETA_ETAPA[actual_etapa]} -> {_ETIQUETA_ETAPA[destino_etapa]}")
+
+
+@pedidos_bp.route("/api/pedidos/reparar-stock-equivalencias", methods=["POST"])
+@login_requerido
+def pedido_reparar_stock_equivalencias():
+    if not es_superadmin():
+        return err("Solo el superadministrador puede reparar movimientos históricos", 403)
+    data = request.get_json() or {}
+    ticket = (data.get("ticket") or "").strip()
+    if not ticket:
+        return err("Indica el número exacto del ticket")
+
+    conn = get_conn()
+    pedido = conn.execute(
+        "SELECT * FROM pedidos WHERE nro_ticket = ? FOR UPDATE", (ticket,)).fetchone()
+    if not pedido:
+        conn.close()
+        return err(f"No se encontró el pedido {ticket}", 404)
+    if (pedido["estado"] or pedido["etapa"]) != "entregado" or not pedido["stock_movido"]:
+        conn.close()
+        return err("El pedido no está entregado con el movimiento de stock registrado", 409)
+    if conn.execute(
+            "SELECT pedido_id FROM pedido_stock_reparaciones WHERE pedido_id = ?",
+            (pedido["id"],)).fetchone():
+        conn.close()
+        return err("Este pedido ya tuvo una reparación de equivalencias", 409)
+
+    lineas = conn.execute(
+        "SELECT producto_id, producto_nombre, cantidad, "
+        "COALESCE(destino_id, ?) AS origen_id "
+        "FROM pedido_detalle WHERE pedido_id = ?",
+        (pedido["destino_id"], pedido["id"])).fetchall()
+    grupos = {}
+    for linea in lineas:
+        clave = (linea["origen_id"], linea["producto_id"])
+        grupo = grupos.setdefault(clave, {
+            "origen_id": linea["origen_id"],
+            "producto_id": linea["producto_id"],
+            "nombre": linea["producto_nombre"],
+            "cantidad": 0.0,
+        })
+        grupo["cantidad"] += float(linea["cantidad"] or 0)
+    if not grupos:
+        conn.close()
+        return err("El pedido no tiene líneas para revisar", 409)
+
+    por_producto = {}
+    for grupo in grupos.values():
+        salida = conn.execute(
+            "SELECT COALESCE(SUM(cantidad), 0) AS cantidad FROM movimientos "
+            "WHERE producto_id = ? AND sucursal_id = ? AND tipo = 'salida' "
+            "AND nota = ?",
+            (grupo["producto_id"], grupo["origen_id"],
+             f"Despacho pedido {ticket}")).fetchone()["cantidad"]
+        if abs(float(salida or 0) - grupo["cantidad"]) > 1e-9:
+            conn.close()
+            return err(
+                f"No coincide la salida registrada de {grupo['nombre']} "
+                f"en la sucursal proveedora; no se modificó stock.", 409)
+
+        destino_id, error_equivalencia = _producto_receptor(
+            conn, grupo["producto_id"], pedido["sucursal_id"])
+        if error_equivalencia:
+            conn.close()
+            return err(error_equivalencia, 409)
+        if destino_id == grupo["producto_id"]:
+            continue
+        plan = por_producto.setdefault(grupo["producto_id"], {
+            "producto_origen_id": grupo["producto_id"],
+            "producto_destino_id": destino_id,
+            "nombre": grupo["nombre"],
+            "cantidad": 0.0,
+        })
+        if plan["producto_destino_id"] != destino_id:
+            conn.close()
+            return err("El pedido tiene equivalencias de recepción incompatibles", 409)
+        plan["cantidad"] += grupo["cantidad"]
+
+    if not por_producto:
+        conn.close()
+        return err("No hay equivalencias distintas que reparar para este pedido", 409)
+
+    planes = []
+    for plan in por_producto.values():
+        entrada_anterior = conn.execute(
+            "SELECT COALESCE(SUM(cantidad), 0) AS cantidad FROM movimientos "
+            "WHERE producto_id = ? AND sucursal_id = ? AND tipo = 'entrada' "
+            "AND nota = ?",
+            (plan["producto_origen_id"], pedido["sucursal_id"],
+             f"Recepción pedido {ticket}")).fetchone()["cantidad"]
+        if abs(float(entrada_anterior or 0) - plan["cantidad"]) > 1e-9:
+            conn.close()
+            return err(
+                f"No coincide la entrada histórica de {plan['nombre']} "
+                "en la sucursal receptora; no se modificó stock.", 409)
+
+        entrada_correcta = conn.execute(
+            "SELECT COALESCE(SUM(cantidad), 0) AS cantidad FROM movimientos "
+            "WHERE producto_id = ? AND sucursal_id = ? AND tipo = 'entrada' "
+            "AND nota IN (?, ?)",
+            (plan["producto_destino_id"], pedido["sucursal_id"],
+             f"Recepción pedido {ticket}",
+             f"Corrección recepción pedido {ticket}")).fetchone()["cantidad"]
+        if float(entrada_correcta or 0) > 1e-9:
+            conn.close()
+            return err(
+                f"Ya existe entrada del producto equivalente {plan['producto_destino_id']}; "
+                "no se aplicó una segunda recepción.", 409)
+
+        stock_incorrecto = stock_actual(
+            conn, plan["producto_origen_id"], pedido["sucursal_id"])
+        if stock_incorrecto + 1e-9 < plan["cantidad"]:
+            conn.close()
+            return err(
+                f"No se puede revertir la entrada incorrecta de {plan['nombre']}: "
+                f"quedan {stock_incorrecto} y se deben trasladar {plan['cantidad']}. "
+                "No se modificó stock.", 409)
+        producto_destino = conn.execute(
+            "SELECT codigo, nombre FROM productos WHERE id = ?",
+            (plan["producto_destino_id"],)).fetchone()
+        planes.append({
+            **plan,
+            "stock_incorrecto_actual": stock_incorrecto,
+            "codigo_destino": producto_destino["codigo"],
+            "nombre_destino": producto_destino["nombre"],
+        })
+
+    if not data.get("confirmar"):
+        conn.close()
+        return ok({
+            "simulacion": True,
+            "ticket": ticket,
+            "sucursal_receptora_id": pedido["sucursal_id"],
+            "cambios": planes,
+        }, message="Simulación solamente; no se modificó el inventario.")
+
+    fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        for plan in planes:
+            registrar_movimiento(
+                conn, plan["producto_origen_id"], "salida", plan["cantidad"], 0,
+                fecha, f"Reversión recepción errónea pedido {ticket}",
+                session.get("usuario", ""), pedido["sucursal_id"])
+            registrar_movimiento(
+                conn, plan["producto_destino_id"], "entrada", plan["cantidad"], 0,
+                fecha, f"Corrección recepción pedido {ticket}",
+                session.get("usuario", ""), pedido["sucursal_id"])
+        detalle_auditoria = "; ".join(
+            f"{p['producto_origen_id']}->{p['producto_destino_id']} x {p['cantidad']}"
+            for p in planes)
+        conn.execute(
+            "INSERT INTO pedido_stock_reparaciones (pedido_id, fecha, usuario, detalle) "
+            "VALUES (?, ?, ?, ?)",
+            (pedido["id"], fecha, session.get("usuario", ""), detalle_auditoria))
+        conn.commit()
+    except ValueError as exc:
+        conn.rollback()
+        conn.close()
+        return err(f"No se pudo reparar el inventario: {exc}", 409)
+    conn.close()
+    registrar_auditoria(
+        "Stock de pedido corregido por equivalencia",
+        f"{ticket}: {detalle_auditoria}")
+    return ok({"simulacion": False, "ticket": ticket, "cambios": planes},
+              message=f"Se corrigió el inventario de {ticket}.")

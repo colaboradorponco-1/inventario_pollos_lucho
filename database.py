@@ -399,6 +399,23 @@ def init_db():
                     "nota TEXT,"
                     "destino_id INT,"
                     "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS equivalencias_productos ("
+                    "id INT AUTO_INCREMENT PRIMARY KEY,"
+                    "producto_origen_id INT NOT NULL,"
+                    "sucursal_destino_id INT NOT NULL,"
+                    "producto_destino_id INT NOT NULL,"
+                    "creado_por VARCHAR(255) DEFAULT '',"
+                    "creado_en VARCHAR(50) NOT NULL,"
+                    "UNIQUE KEY uq_equiv_origen_destino (producto_origen_id, sucursal_destino_id),"
+                    "FOREIGN KEY (producto_origen_id) REFERENCES productos(id),"
+                    "FOREIGN KEY (sucursal_destino_id) REFERENCES sucursales(id),"
+                    "FOREIGN KEY (producto_destino_id) REFERENCES productos(id))")
+        cur.execute("CREATE TABLE IF NOT EXISTS pedido_stock_reparaciones ("
+                    "pedido_id INT NOT NULL PRIMARY KEY,"
+                    "fecha VARCHAR(50) NOT NULL,"
+                    "usuario VARCHAR(255) DEFAULT '',"
+                    "detalle TEXT NOT NULL,"
+                    "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE)")
         cur.execute("CREATE TABLE IF NOT EXISTS pedido_ticket_secuencia ("
                     "id TINYINT NOT NULL PRIMARY KEY,"
                     "ultimo_id BIGINT NOT NULL)")

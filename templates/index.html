@@ -331,6 +331,29 @@
             <div class="panel">
                 <div id="productos-por-categoria"></div>
             </div>
+            <div class="panel" id="panel-equivalencias" style="display:none">
+                <h2>Equivalencias para recibir pedidos</h2>
+                <p class="scan-hint">Relaciona la ficha del almacén proveedor con la ficha equivalente de la sucursal receptora. Solo se aceptan unidades iguales.</p>
+                <form id="form-equivalencia" class="toolbar">
+                    <select id="equiv-origen" required aria-label="Producto del proveedor"></select>
+                    <select id="equiv-sucursal" required aria-label="Sucursal receptora"></select>
+                    <select id="equiv-destino" required aria-label="Producto de la sucursal receptora"></select>
+                    <button class="btn btn-primary" type="submit">Guardar equivalencia</button>
+                </form>
+                <div class="table-scroll">
+                    <table class="data-table">
+                        <thead><tr><th>Producto proveedor</th><th>Producto receptor</th><th></th></tr></thead>
+                        <tbody id="equivalencias-tbody"></tbody>
+                    </table>
+                </div>
+                <h3 style="margin-top:18px">Reparar recepción histórica</h3>
+                <p class="scan-hint">Simula primero por número de ticket. La aplicación verifica los movimientos y el stock disponible antes de permitir la corrección.</p>
+                <form id="form-reparar-stock" class="toolbar">
+                    <input type="text" id="reparar-stock-ticket" placeholder="Ej.: TKT-00046" required>
+                    <button class="btn" type="submit">Simular corrección</button>
+                </form>
+                <div id="reparar-stock-resultado" aria-live="polite"></div>
+            </div>
         </section>
 
         <!-- MOVIMIENTOS -->
