@@ -19,7 +19,8 @@ import core.util as util  # noqa: E402
 # Matriz de avance declarada en el backend (flujo unificado).
 AVANCE = {
     "preparador": {"pendiente": "en_camino"},
-    "AS": {"pendiente": "en_camino", "rechazado": "rechazado"},
+    "AS": {"pendiente": "en_camino", "en_camino": "entregado",
+           "rechazado": "rechazado"},
     "repartidor": {"en_camino": "entregado"},
 }
 ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
@@ -71,7 +72,7 @@ print("=" * 70)
 reglas = [
     ("AS: pendiente -> en_camino", permitido("AS", "pendiente", "en_camino"), True),
     ("AS puede rechazar solo desde pendiente", permitido("AS", "pendiente", "rechazado"), True),
-    ("AS: NO puede marcar entregado", permitido("AS", "en_camino", "entregado"), False),
+    ("AS: en_camino -> entregado", permitido("AS", "en_camino", "entregado"), True),
     ("preparador: pendiente -> en_camino", permitido("preparador", "pendiente", "en_camino"), True),
     ("preparador: NO puede -> entregado", permitido("preparador", "pendiente", "entregado"), False),
     ("preparador: NO puede rechazar", permitido("preparador", "pendiente", "rechazado"), False),
@@ -111,18 +112,20 @@ for nombre in ("pedido_despachar", "pedido_estado"):
 # Los roles actúan en el lado que les corresponde: preparar desde el proveedor
 # y confirmar entrega desde la sucursal que solicitó.
 check("preparador limitado a su sucursal proveedora",
-      "if es_preparador and not es_proveedor" in fuente_etapa)
-check("AS se trata como preparador de sus propias líneas",
-      "es_preparador = rol == \"preparador\" or es_as" in fuente_etapa
+      'rol == "preparador"' in fuente_etapa and "not es_proveedor" in fuente_etapa)
+check("AS y administración del almacén se limitan a sus proveedores",
+      "es_as or es_preparador or puede_gestionar_todos" in fuente_etapa
       and "UPDATE pedido_detalle SET preparado = 1" in fuente_etapa)
 check("repartidor limitado a su sucursal solicitante",
       'rol == "repartidor" and pedido["sucursal_id"] != sid' in fuente_etapa)
+check("AS puede confirmar estados del pedido de su sucursal",
+      "elif es_as or puede_gestionar_todos:" in fuente_etapa)
 check("el sistema registra por separado si el stock de un pedido ya se movió",
       'pedido["stock_movido"]' in fuente_etapa
       and "stock_movido = 1" in fuente_etapa)
 check("un pedido entregado sin movimiento permite una recuperación protegida",
       "reparar_stock_entregado" in fuente_etapa
-      and "Solo el repartidor o administración" in fuente_etapa)
+      and "if reparar_stock_entregado and es_preparador" in fuente_etapa)
 
 base = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(base, "database.py"), encoding="utf-8") as archivo:
@@ -268,6 +271,10 @@ class _MultiProveedorConn:
             self.pedido["etapa"] = self.pedido["estado"] = "en_camino"
         elif self.sql_actual.startswith("UPDATE pedidos SET etapa = ?, estado = ?"):
             self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
+        elif self.sql_actual.startswith(
+                "UPDATE pedidos SET etapa = ?, estado = ?, total = ?, stock_movido = 1"):
+            self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
+            self.pedido["stock_movido"] = 1
         return self
 
     def fetchone(self):
@@ -313,9 +320,12 @@ try:
 
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
     conn_multi.detalle = [
-        {"destino_id": 20, "preparado": 0},
-        {"destino_id": 21, "preparado": 0},
+        {"destino_id": 20, "preparado": 1},
+        {"destino_id": 21, "preparado": 1},
     ]
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "en_camino"
+    despacho_original = ped._despachar_stock
+    ped._despachar_stock = lambda *args, **kwargs: (10.0, [91])
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
         session["user_id"] = 1
@@ -323,9 +333,27 @@ try:
         session["sucursal_id"] = 20
         session["receptor"] = True
         entrega_as = cuerpo_respuesta(ped.pedido_etapa(11))
-    check("el AS no puede confirmar Entregado",
-          not entrega_as["ok"] and conn_multi.pedido["etapa"] == "pendiente")
+    check("el AS puede confirmar Entregado dentro de su sucursal",
+          entrega_as["ok"] and conn_multi.pedido["etapa"] == "entregado")
 
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.detalle = [
+        {"destino_id": 21, "preparado": 0},
+    ]
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
+        session["user_id"] = 1
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = True
+        cambio_as_ajeno = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("un AS no puede cambiar pedidos que corresponden a otro AS",
+          not cambio_as_ajeno["ok"] and conn_multi.pedido["etapa"] == "pendiente")
+
+    conn_multi.detalle = [
+        {"destino_id": 20, "preparado": 0},
+        {"destino_id": 21, "preparado": 1},
+    ]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
         session["user_id"] = 1
@@ -335,9 +363,66 @@ try:
         rechazo_as = cuerpo_respuesta(ped.pedido_etapa(11))
     check("el AS puede rechazar antes de que salga el pedido",
           rechazo_as["ok"] and conn_multi.pedido["etapa"] == "rechazado")
+
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "en_camino"
+    conn_multi.pedido["stock_movido"] = 0
+    conn_multi.detalle = [
+        {"destino_id": 20, "preparado": 1},
+        {"destino_id": 21, "preparado": 1},
+    ]
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
+        session["user_id"] = 1
+        session["rol"] = "preparador"
+        session["sucursal_id"] = 21
+        session["receptor"] = False
+        entrega_preparador = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el preparador no puede confirmar la entrega",
+          not entrega_preparador["ok"])
+
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
+        session["user_id"] = 1
+        session["rol"] = "repartidor"
+        session["sucursal_id"] = 30
+        session["receptor"] = False
+        entrega_repartidor = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el repartidor solicitante puede confirmar la entrega",
+          entrega_repartidor["ok"])
+
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.detalle = [{"destino_id": 20, "preparado": 0}]
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
+        session["user_id"] = 1
+        session["rol"] = "admin"
+        session["sucursal_id"] = 20
+        session["receptor"] = False
+        rechazo_admin = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el administrador del almacén puede gestionar el pedido que abastece",
+          rechazo_admin["ok"] and conn_multi.pedido["etapa"] == "rechazado")
+
+    encargado_almacen_original = ped.es_encargado_almacen
+    ped.es_encargado_almacen = lambda _conn: True
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.detalle = [{"destino_id": 20, "preparado": 0}]
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
+        session["user_id"] = 1
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = False
+        rechazo_encargado = cuerpo_respuesta(ped.pedido_etapa(11))
+    ped.es_encargado_almacen = encargado_almacen_original
+    check("el encargado de almacén principal puede gestionar su proveedor",
+          rechazo_encargado["ok"] and conn_multi.pedido["etapa"] == "rechazado")
 finally:
     ped.get_conn = get_conn_original
     ped.registrar_auditoria = auditoria_original
+    if "despacho_original" in locals():
+        ped._despachar_stock = despacho_original
+    if "encargado_almacen_original" in locals():
+        ped.es_encargado_almacen = encargado_almacen_original
 
 
 class _RetryEntregaConn:

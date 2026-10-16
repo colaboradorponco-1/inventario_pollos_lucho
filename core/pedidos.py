@@ -5,10 +5,10 @@ producto se pide al almacén/sucursal que lo provee (puede haber varios
 proveedores en un mismo pedido). Se genera UN ticket imprimible agrupado
 por proveedor y por categoría.
 
-Estados unificados para todos los roles: pendiente -> en_camino -> entregado,
-más rechazado (solo desde pendiente). El stock se mueve una sola vez, al
-marcar 'entregado'. Cambiar el estado o despachar puede hacerlo un
-admin/superadmin o un encargado de almacén principal.
+Estados unificados: pendiente -> en_camino -> entregado, más rechazado desde
+pendiente. Los AS y la administración del almacén solo gestionan pedidos que
+abastece su sucursal; preparador y repartidor tienen pasos limitados. El stock
+se mueve una sola vez al marcar 'entregado'.
 """
 from collections import OrderedDict
 from datetime import datetime
@@ -1045,6 +1045,7 @@ _ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
 
 _AVANCE_PREPARADOR = {"pendiente": "en_camino"}
 _AVANCE_REPARTIDOR = {"en_camino": "entregado"}
+_AVANCE_AS_GESTION = {"pendiente": "en_camino", "en_camino": "entregado"}
 
 _ETIQUETA_ETAPA = {
     "pendiente": "Pendiente",
@@ -1081,33 +1082,37 @@ def pedido_etapa(pedido_id):
     rol = session.get("rol")
     sid = sucursal_actual()
     es_as = es_receptor()
-    es_preparador = rol == "preparador" or es_as
+    es_preparador = rol == "preparador"
+    es_encargado_almacen_actual = not es_as and es_encargado_almacen(conn)
+    puede_gestionar_todos = rol == "admin" or es_encargado_almacen_actual
     actual_etapa = pedido["etapa"] or "pendiente"
     reparar_stock_entregado = (
         destino_etapa == "entregado"
         and actual_etapa == "entregado"
         and not pedido["stock_movido"]
     )
-    if not es_preparador and rol != "repartidor" \
-            and not (es_gestion() and reparar_stock_entregado):
+    if not (es_preparador or es_as or rol == "repartidor" or puede_gestionar_todos
+            or (es_superadmin() and reparar_stock_entregado)):
         conn.close()
-        return err("Solo el AS prepara el pedido y el repartidor confirma la entrega.", 403)
+        return err("No tienes permisos para cambiar el estado de este pedido.", 403)
     if not sid and not es_superadmin():
         conn.close()
         return err("No tenes sucursal asignada", 403)
 
-    # El AS/preparador prepara desde el proveedor; el repartidor confirma
-    # desde la sucursal que solicitó. Administración solo puede recuperar un
-    # traslado histórico incompleto, nunca avanzar el flujo normal.
+    # AS, preparadores y administración de almacén actúan desde el proveedor;
+    # el repartidor confirma desde la sucursal que solicitó. El superadmin
+    # conserva su alcance global.
     es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in detalle)
-    if es_preparador and not es_proveedor:
+    if not es_superadmin() and (es_as or es_preparador or puede_gestionar_todos) \
+            and not es_proveedor:
         conn.close()
-        return err("Ese pedido no lo despacha tu sucursal", 403)
+        return err("Ese pedido no corresponde al almacén de tu sucursal", 403)
     if rol == "repartidor" and pedido["sucursal_id"] != sid:
         conn.close()
         return err("Ese pedido no lo recibe tu sucursal", 403)
 
-    if es_preparador and destino_etapa == "en_camino" \
+    if (es_preparador or es_as or puede_gestionar_todos) \
+            and destino_etapa == "en_camino" \
             and actual_etapa == "pendiente":
         conn.execute(
             "UPDATE pedido_detalle SET preparado = 1 "
@@ -1145,22 +1150,24 @@ def pedido_etapa(pedido_id):
         return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
     if reparar_stock_entregado and es_preparador:
         conn.close()
-        return err("Solo el repartidor o administración puede recuperar el movimiento")
-
-    # El AS puede rechazar mientras sigue pendiente. El preparador solo marca
-    # su parte lista; únicamente el repartidor confirma la entrega.
-    if es_preparador and destino_etapa == "rechazado" and es_as:
+        return err("El preparador solo puede marcar en camino.", 403)
+    # El preparador solo marca en camino. AS y administración del almacén
+    # pueden además rechazar desde pendiente y confirmar pedidos en camino.
+    if destino_etapa == "rechazado" and (es_as or puede_gestionar_todos):
         permitido = "rechazado" if actual_etapa == "pendiente" else None
     elif es_preparador:
         permitido = _AVANCE_PREPARADOR.get(actual_etapa)
     elif rol == "repartidor":
         permitido = _AVANCE_REPARTIDOR.get(actual_etapa)
+    elif es_as or puede_gestionar_todos:
+        permitido = _AVANCE_AS_GESTION.get(actual_etapa)
     else:
         permitido = "entregado" if reparar_stock_entregado else None
 
     if permitido != destino_etapa and not reparar_stock_entregado:
         conn.close()
-        if es_preparador and actual_etapa != "pendiente":
+        if (es_preparador or es_as or puede_gestionar_todos) \
+                and actual_etapa != "pendiente":
             esperado = _AVANCE_PREPARADOR.get(actual_etapa)
             if esperado is None:
                 return err(f"El pedido ya esta en {_ETIQUETA_ETAPA[actual_etapa]}; "

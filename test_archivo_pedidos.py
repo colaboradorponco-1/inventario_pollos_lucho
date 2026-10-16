@@ -177,9 +177,9 @@ check("encargado de almacén no puede crear solicitudes",
 check("superadmin no puede crear solicitudes",
       isinstance(ejecutar_creacion("superadmin"), tuple))
 fuente_etapa = inspect.getsource(ped.pedido_etapa)
-check("solo AS/preparador y repartidor avanzan el flujo normal",
-      "es_preparador = rol == \"preparador\" or es_as" in fuente_etapa
-      and "rol != \"repartidor\"" in fuente_etapa
+check("AS, administración de almacén, preparador y repartidor tienen permisos separados",
+      "es_as or es_preparador or puede_gestionar_todos" in fuente_etapa
+      and "rol == \"repartidor\" and pedido[\"sucursal_id\"] != sid" in fuente_etapa
       and "_AVANCE_ORDENANTE" not in fuente_etapa)
 with open(os.path.join(os.path.dirname(__file__), "static", "app.js"),
           encoding="utf-8") as archivo:
@@ -242,8 +242,10 @@ check("los perfiles receptores conservan accesible la pestaña Mis pedidos",
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()
-check("se explica que el superadmin y el encargado no crean solicitudes",
-      "incluido el superadmin" in texto and "El encargado puede cambiar estados" in texto)
+check("se explican los permisos de estado y que administración no crea solicitudes",
+      "El AS puede avanzar todos los estados" in texto
+      and "el repartidor de la sucursal solicitante solo confirma" in texto
+      and "Ninguno crea solicitudes" in texto)
 check("mis solicitudes ofrece una vista para restaurar pedidos archivados",
       "pedido-propios-vista" in texto and "Archivados" in texto)
 check("Mis pedidos no se limita por defecto a las solicitudes de hoy",
