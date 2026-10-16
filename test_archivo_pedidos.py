@@ -194,6 +194,10 @@ check("mis solicitudes también permiten archivar estados terminales",
       and "await listarPedidos()" in interfaz)
 check("Mis pedidos solicita explícitamente los pedidos de la sucursal actual",
       "qs.set('vista', 'mis-pedidos')" in interfaz)
+check("después de crear, abre Mis pedidos sin filtros que oculten la solicitud",
+      "pestanaPedidos = 'mis-pedidos'" in interfaz
+      and "pedido-realizados-desde" in interfaz
+      and "pagState['#pedidos-paginacion'] = 1" in interfaz)
 listado_activo, conteo_activo, params_activo, params_conteo_activo = ejecutar_listado()
 check("el listado normal oculta pedidos archivados de la sucursal",
       "NOT EXISTS (SELECT 1 FROM pedidos_archivados" in listado_activo
@@ -242,6 +246,9 @@ check("se explica que el superadmin y el encargado no crean solicitudes",
       "incluido el superadmin" in texto and "El encargado puede cambiar estados" in texto)
 check("mis solicitudes ofrece una vista para restaurar pedidos archivados",
       "pedido-propios-vista" in texto and "Archivados" in texto)
+check("Mis pedidos no se limita por defecto a las solicitudes de hoy",
+      'id="pedido-realizados-desde" data-sin-fecha-defecto' in texto
+      and 'id="pedido-realizados-hasta" data-sin-fecha-defecto' in texto)
 
 respuesta = ejecutar_archivo("entregado", True)
 inserciones = [(sql, params) for sql, params in CAPTURADO

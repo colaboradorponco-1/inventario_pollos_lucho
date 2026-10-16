@@ -4930,7 +4930,15 @@ $('#form-pedido').addEventListener('submit', async (e) => {
         $('#pedido-buscar').value = '';
         renderTarjetasPedido();
         irPaso(esEncargadoPed() ? 2 : 1);
-        cargarPestanaActiva();
+        ['pedido-filtro', 'pedido-estado', 'pedido-realizados-desde',
+            'pedido-realizados-hasta', 'pedido-sucursal-realizados']
+            .forEach((id) => { const el = $('#' + id); if (el) el.value = ''; });
+        const vistaPropios = $('#pedido-propios-vista');
+        if (vistaPropios) vistaPropios.value = 'activos';
+        pagState['#pedidos-paginacion'] = 1;
+        pestanaPedidos = 'mis-pedidos';
+        inicializarPestanasPedidos();
+        listarPedidos();
         syncPedidosNuevos();
     } catch (err) {
         toast(err.message, 'err');
