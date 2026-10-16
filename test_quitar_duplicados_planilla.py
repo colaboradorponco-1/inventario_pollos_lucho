@@ -113,6 +113,29 @@ class QuitarDuplicadosPlanillaTest(unittest.TestCase):
             [(52, "PAPA HOLANDESA", 72.4, 35), (54, "PLATANO DE FREIR", 200, 144)])
         self.assertEqual(bloqueadas, [])
 
+    def test_detecta_fila_historica_aunque_la_ficha_antigua_siga_activa(self):
+        self.db.execute("UPDATE productos SET activo = 1 WHERE id IN (2, 4)")
+        candidatas, _ = inventario._lineas_duplicadas_seguidas(
+            self.conn, self.filas, self.detalles)
+        self.assertEqual([c["detalle_id"] for c in candidatas], [52, 54])
+
+    def test_limpieza_automatica_conserva_stock_y_respalda(self):
+        candidatas, _ = inventario._lineas_duplicadas_seguidas(
+            self.conn, self.filas, self.detalles)
+        por_id = {c["detalle_id"]: c for c in candidatas}
+        respaldo = inventario._eliminar_lineas_duplicadas(
+            self.conn, 5, self.detalles, por_id, set(por_id))
+        lineas = self.db.execute(
+            "SELECT producto_id, inicial FROM inventario_detalle "
+            "WHERE inventario_id = 5 ORDER BY id").fetchall()
+        self.assertEqual([(f["producto_id"], f["inicial"]) for f in lineas],
+                         [(1, 35), (3, 144)])
+        self.assertEqual(
+            [tuple(f) for f in self.db.execute(
+                "SELECT producto_id, cantidad FROM stock ORDER BY producto_id"
+            ).fetchall()], [(1, 35), (3, 144)])
+        self.assertTrue(respaldo)
+
     def test_quita_solo_las_dos_lineas_antiguas_y_no_toca_stock(self):
         respuesta = self.client.post(
             "/api/inventario-diario/5/quitar-lineas-duplicadas",

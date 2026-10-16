@@ -53,7 +53,7 @@ def _clave_nombre_unidad(nombre, unidad):
 
 
 def _lineas_duplicadas_seguidas(conn, filas_activas, detalles):
-    """Busca filas antiguas sin uso en esta planilla y con ficha activa equivalente."""
+    """Busca filas históricas sin uso que duplican un producto activo de la planilla."""
     activos_por_clave = {}
     for fila in filas_activas:
         activos_por_clave.setdefault(
@@ -78,8 +78,6 @@ def _lineas_duplicadas_seguidas(conn, filas_activas, detalles):
         if antiguo_id in ids_activos:
             continue
         antiguo = productos_por_id.get(antiguo_id)
-        if antiguo and antiguo["activo"]:
-            continue
         nombre_antiguo = detalle["producto_nombre"] or (
             antiguo["nombre"] if antiguo else "")
         unidad_antigua = detalle["unidad"] or (
@@ -127,6 +125,45 @@ def _lineas_duplicadas_seguidas(conn, filas_activas, detalles):
             else:
                 ids_candidatos.append(candidato)
     return ids_candidatos, bloqueadas
+
+
+def _eliminar_lineas_duplicadas(conn, inv_id, detalles, por_id, seleccionados):
+    respaldo = nombre_respaldo("antes_quitar_duplicados_planilla")
+    volcar_a_archivo(conn, os.path.join(carpeta_respaldos(), respaldo))
+    observaciones_por_destino = {}
+    for detalle_id in sorted(seleccionados):
+        detalle_antiguo = next(d for d in detalles if int(d["id"]) == detalle_id)
+        candidato = por_id[detalle_id]
+        detalle_actual = next(
+            d for d in detalles if int(d["id"]) == candidato["detalle_actual_id"])
+        observaciones = observaciones_por_destino.setdefault(
+            candidato["detalle_actual_id"],
+            [detalle_actual["observaciones"]] if detalle_actual["observaciones"] else [])
+        observaciones.extend(
+            texto.strip() for texto in (detalle_antiguo["observaciones"],)
+            if texto and texto.strip())
+        conn.execute(
+            "DELETE FROM inventario_detalle WHERE id = ? AND inventario_id = ?",
+            (detalle_id, inv_id))
+    for detalle_id, observaciones in observaciones_por_destino.items():
+        conn.execute(
+            "UPDATE inventario_detalle SET observaciones = ? "
+            "WHERE id = ? AND inventario_id = ?",
+            (" · ".join(dict.fromkeys(observaciones)) or None, detalle_id, inv_id))
+    conn.execute("""
+        UPDATE inventario_diario
+        SET total_items = (SELECT COUNT(*) FROM inventario_detalle WHERE inventario_id = ?)
+        WHERE id = ? AND estado = 'abierto'
+    """, (inv_id, inv_id))
+    conn.commit()
+    resumen = ", ".join(
+        f"{por_id[i]['nombre']} ({por_id[i]['cantidad_antigua']} → "
+        f"{por_id[i]['cantidad_correcta']} {por_id[i]['unidad']})"
+        for i in sorted(seleccionados))
+    registrar_auditoria(
+        "Líneas duplicadas quitadas de inventario",
+        f"Planilla {inv_id}; {resumen}; respaldo {respaldo}")
+    return respaldo
 
 
 class _DatoInvalido(Exception):
@@ -580,16 +617,41 @@ def inventario_detalle(inv_id):
         return err("Planilla no encontrada", 404)
     lineas_duplicadas_seguras = []
     lineas_duplicadas_bloqueadas = []
+    lineas_duplicadas_eliminadas = 0
+    error_limpieza_duplicados = ""
     if inv["estado"] != "cerrado":
         _sincronizar_detalle(conn, inv_id, inv["sucursal_id"],
                              _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
         if es_gestion():
-            filas_actuales = _productos_planilla(
-                conn, ids_sucursal_consolidada(conn, inv["sucursal_id"]),
-                _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
-            (lineas_duplicadas_seguras,
-             lineas_duplicadas_bloqueadas) = _lineas_duplicadas_seguidas(
-                conn, filas_actuales, _detalle(conn, inv_id))
+            inv_bloqueado, permitido = _sucursal_de_planilla(
+                conn, inv_id, bloquear=True)
+            try:
+                if permitido and inv_bloqueado["estado"] != "cerrado":
+                    filas_actuales = _productos_planilla(
+                        conn, ids_sucursal_consolidada(conn, inv["sucursal_id"]),
+                        _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
+                    detalles_actuales = _detalle(conn, inv_id)
+                    (lineas_duplicadas_seguras,
+                     lineas_duplicadas_bloqueadas) = _lineas_duplicadas_seguidas(
+                        conn, filas_actuales, detalles_actuales)
+                    if lineas_duplicadas_seguras:
+                        por_id = {
+                            linea["detalle_id"]: linea
+                            for linea in lineas_duplicadas_seguras
+                        }
+                        respaldo = _eliminar_lineas_duplicadas(
+                            conn, inv_id, detalles_actuales, por_id, set(por_id))
+                        lineas_duplicadas_eliminadas = len(por_id)
+                        lineas_duplicadas_seguras = []
+                    else:
+                        conn.rollback()
+            except Exception:
+                conn.rollback()
+                logging.getLogger("app").exception(
+                    "Error limpiando líneas duplicadas al abrir inventario: planilla=%s",
+                    inv_id)
+                error_limpieza_duplicados = (
+                    "No se pudieron quitar las filas duplicadas; no se modificó el stock.")
     filas = _detalle(conn, inv_id)
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
     stocks = _stocks_actuales(conn, ids_planilla)
@@ -663,6 +725,8 @@ def inventario_detalle(inv_id):
         "estado": inv["estado"],
         "puede_editar": inv["sucursal_id"] == sucursal_operativa(),
         "observaciones": inv["observaciones"] or "",
+        "lineas_duplicadas_eliminadas": lineas_duplicadas_eliminadas,
+        "error_limpieza_duplicados": error_limpieza_duplicados,
         "lineas": lineas,
         "lineas_duplicadas_seguras": lineas_duplicadas_seguras,
         "lineas_duplicadas_bloqueadas": lineas_duplicadas_bloqueadas,

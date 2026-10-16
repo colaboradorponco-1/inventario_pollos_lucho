@@ -3690,6 +3690,12 @@ async function abrirInventario(invId) {
     const resp = await request(API + '/inventario-diario/' + invId);
     const d = resp.data || resp;
     if (!d || !d.id) { toast('No se pudo abrir la planilla', 'err'); return; }
+    if (d.lineas_duplicadas_eliminadas) {
+        toast(`Se quitaron ${d.lineas_duplicadas_eliminadas} filas antiguas duplicadas. El stock no cambió.`, 'ok', 8000);
+    }
+    if (d.error_limpieza_duplicados) {
+        toast(d.error_limpieza_duplicados, 'err', 12000);
+    }
     INV_ID = d.id;
     INV_CERRADA = d.estado === 'cerrado';
     // Planilla de otra sucursal: se puede ver pero no tocar (admin y encargados de
