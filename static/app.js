@@ -883,17 +883,8 @@ function esSucursalAS(s) {
 function sucursalesFiltroPedidos(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (puedeVerTodasSucursales()) return base;
-    const nombreSuc = (window.SUCURSAL || '').toLowerCase();
-    const esLaPaz = nombreSuc.includes('la paz') || nombreSuc.includes('miraflores') || nombreSuc.includes('sopocachi');
-    // Para hacer un pedido, las filiales ven los Almacenes Principales y su propio AS
-    return base.filter((s) => {
-        const n = (s.nombre || '').toLowerCase();
-        if (n.startsWith('as ') || n.includes('as ')) {
-            if (esLaPaz) return n.includes('6 de agosto');
-            return n.includes('as america') || n.includes('as simón') || n.includes('as simon');
-        }
-        return s.principal;
-    });
+    return proveedoresAlcance(base).filter((s) =>
+        s.principal || s.provee || s.es_as || /^AS\s/i.test(s.nombre || ''));
 }
 // Nombre visible de una sucursal en el módulo de pedidos (ya sin "AS especial"):
 // cada almacén figura con su propio nombre.
@@ -907,29 +898,15 @@ function nombreSucursalPedido(s) {
 function sucursalesFiltroBandeja(lista) {
     const base = lista || (catalogos && catalogos.sucursales) || [];
     if (puedeVerTodasSucursales()) return base;
-    const nombreSuc = (window.SUCURSAL || '').toLowerCase();
-    const esReceptor = !!window.RECEPTOR || nombreSuc.includes('as ') || nombreSuc.startsWith('as');
-    const esLaPaz = nombreSuc.includes('la paz') || nombreSuc.includes('miraflores') || nombreSuc.includes('sopocachi');
-
+    const sucursalActual = base.find((s) =>
+        String(s.id) === String(window.SUCURSAL_ID));
+    const ciudadActual = ciudadSucursal(sucursalActual || window.SUCURSAL);
+    const esReceptor = !!window.RECEPTOR;
     return base.filter((s) => {
-        const n = (s.nombre || '').toLowerCase();
-        if (n.startsWith('as ') || n.includes('as ')) return false;
-
-        if (esReceptor) {
-            // Paneles de receptores: mostrar UNICAMENTE America, Siglo XX, Simon Lopez (o Sopocachi/Miraflores)
-            if (esLaPaz) {
-                return n.includes('sopocachi') || n.includes('miraflores');
-            } else {
-                return n.includes('america') || n.includes('siglo xx') || n.includes('simón') || n.includes('simon');
-            }
-        } else {
-            // Encargados normales de sucursales (Cochabamba o La Paz)
-            if (esLaPaz) {
-                return s.principal || n.includes('6 de agosto');
-            } else {
-                return s.principal || n.includes('as america') || n.includes('as simón') || n.includes('as simon');
-            }
-        }
+        const esAlmacenAS = !!s.es_as || /^AS\s/i.test(s.nombre || '');
+        if (ciudadSucursal(s) !== ciudadActual) return false;
+        if (esReceptor) return !esAlmacenAS;
+        return s.principal || s.provee || s.es_as || esAlmacenAS;
     });
 }
 
@@ -4818,8 +4795,8 @@ function sucursalProvee() {
     return !!m.provee || !!m.es_as || !!window.SUCURSAL_PRINCIPAL;
 }
 
-// «Mis pedidos» (wizard + historial de los que yo realicé) es visible para
-// toda sucursal que hace pedidos. La bandeja «Pedidos que me realizaron» solo
+// «Mis pedidos» (wizard + historial de los que yo realicé) está disponible para
+// toda sucursal. La bandeja «Pedidos que me realizaron» solo
 // la ve quien DESPACHA la recepción: un encargado de almacén principal, o un
 // usuario RECEPTOR (p. ej. "AS America"/"AS Simon Lopez"), que son el almacén
 // receptor de las sucursales proveedoras. Quien no despacha queda solo con
@@ -4848,11 +4825,8 @@ function inicializarPestanasPedidos() {
     // Almacén principal «puro», preparador/repartidor y admin se quedan
     // únicamente con su bandeja. Las sucursales que piden (filiales y la
     // propia proveedora con su encargado normal) conservan «Mis pedidos».
-    // El usuario RECEPTOR del AS también queda solo con la bandeja: los AS no
-    // hacen pedidos — RECIBEN los de las otras sucursales.
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
         || window.ROL === 'preparador' || window.ROL === 'repartidor'
-        || window.RECEPTOR
         || (typeof esAlmacenPpal === 'function' && esAlmacenPpal());
 
     if (soloBandeja) {
@@ -5131,7 +5105,7 @@ async function listarPedidos() {
     if (vistaPropios === 'archivados') qs.set('archivados', '1');
     if (desdeR) qs.set('desde', desdeR);
     if (hastaR) qs.set('hasta', hastaR);
-    if (window.ROL === 'encargado' && window.SUCURSAL_ID) qs.set('sucursal_id', window.SUCURSAL_ID);
+    qs.set('vista', 'mis-pedidos');
     qs.set('pagina', pagState['#pedidos-paginacion'] || 1);
     const resp = await request(API + '/pedidos?' + qs.toString());
     const pedidos = resp.data || resp;

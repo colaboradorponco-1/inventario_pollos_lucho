@@ -139,13 +139,18 @@ def _texto_tacho(fraccion):
     return " + ".join(textos)
 
 
-def _puede_ver_pedido(conn, pedido, detalle):
+def _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=False):
     """Limita los pedidos a la sucursal propia, salvo para superadmin."""
     sid = sucursal_actual()
     if es_superadmin():
         return True
     if sid is None:
         return False
+    if es_receptor():
+        if permitir_solicitante and pedido["sucursal_id"] == sid:
+            return True
+        return any((d.get("destino_id") or pedido.get("destino_id")) == sid
+                   for d in detalle)
     if pedido["sucursal_id"] == sid or pedido.get("destino_id") == sid:
         return True
     return any((d.get("destino_id") or pedido.get("destino_id")) == sid for d in detalle)
@@ -379,7 +384,23 @@ def pedidos():
     params = []
     sid = sucursal_actual()
     sid_archivo = sucursal_operativa() if es_superadmin() else sid
-    if not es_superadmin():
+    vista_solicitante = request.args.get("vista") == "mis-pedidos"
+    if vista_solicitante:
+        sid_solicitante = sucursal_operativa() if es_superadmin() else sid
+        if sid_solicitante:
+            q += " AND p.sucursal_id = ?"
+            params.append(sid_solicitante)
+        else:
+            q += " AND 1 = 0"
+    elif es_receptor():
+        if sid:
+            q += (" AND EXISTS (SELECT 1 FROM pedido_detalle d4 "
+                  "WHERE d4.pedido_id = p.id "
+                  "AND COALESCE(d4.destino_id, p.destino_id) = ?)")
+            params.append(sid)
+        else:
+            q += " AND 1 = 0"
+    elif not es_superadmin():
         if sid:
             # `sucursal_id` es quien solicita y `destino_id` quien provee.
             q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
@@ -431,7 +452,20 @@ def pedidos():
         LEFT JOIN sucursales d ON d.id = p.destino_id
         WHERE 1=1
     """
-    if not es_superadmin():
+    if vista_solicitante:
+        sid_solicitante = sucursal_operativa() if es_superadmin() else sid
+        if sid_solicitante:
+            count_q += " AND p.sucursal_id = ?"
+        else:
+            count_q += " AND 1 = 0"
+    elif es_receptor():
+        if sid:
+            count_q += (" AND EXISTS (SELECT 1 FROM pedido_detalle d4 "
+                        "WHERE d4.pedido_id = p.id "
+                        "AND COALESCE(d4.destino_id, p.destino_id) = ?)")
+        else:
+            count_q += " AND 1 = 0"
+    elif not es_superadmin():
         if sid:
             count_q += (" AND (p.sucursal_id = ? OR p.destino_id = ? OR "
                         "EXISTS (SELECT 1 FROM pedido_detalle d4 "
@@ -493,14 +527,22 @@ def pedido_detalle(pedido_id):
         "WHERE d.pedido_id = ? "
         "ORDER BY d.destino_id, categoria_nombre, d.producto_nombre, d.id",
         (pedido_id,)).fetchall()
-    if not _puede_ver_pedido(conn, pedido, detalle):
+    if not _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=True):
         conn.close()
         return err("No tienes permisos para ver este pedido", 403)
+    es_receptor_proveedor = es_receptor() and pedido["sucursal_id"] != sucursal_actual()
+    if es_receptor_proveedor:
+        sid = sucursal_actual()
+        detalle = [d for d in detalle
+                   if (d.get("destino_id") or pedido.get("destino_id")) == sid]
     repartos = conn.execute(
         "SELECT r.id, r.fecha, r.total, r.origen_sucursal_id AS origen_id, "
         "   o.nombre AS origen_nombre "
         "FROM repartos r LEFT JOIN sucursales o ON o.id = r.origen_sucursal_id "
-        "WHERE r.pedido_id = ? ORDER BY r.id", (pedido_id,)).fetchall()
+        "WHERE r.pedido_id = ?"
+        + (" AND r.origen_sucursal_id = ?" if es_receptor_proveedor else "")
+        + " ORDER BY r.id",
+        (pedido_id, sucursal_actual()) if es_receptor_proveedor else (pedido_id,)).fetchall()
     conn.close()
     return ok({"pedido": dict(pedido), "detalle": [dict(r) for r in detalle],
                "repartos": [dict(r) for r in repartos]})
@@ -517,7 +559,7 @@ def pedido_eliminar_archivado(pedido_id):
         return err("Pedido no encontrado", 404)
     detalle = conn.execute(
         "SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,)).fetchall()
-    if not _puede_ver_pedido(conn, pedido, detalle):
+    if not _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=True):
         conn.close()
         return err("No tienes permisos para este pedido", 403)
     if pedido["estado"] not in ("entregado", "rechazado"):
@@ -557,7 +599,7 @@ def pedido_archivar(pedido_id):
         return err("Pedido no encontrado", 404)
     detalle = conn.execute(
         "SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,)).fetchall()
-    if not _puede_ver_pedido(conn, pedido, detalle):
+    if not _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=True):
         conn.close()
         return err("No tienes permisos para este pedido", 403)
     if pedido["estado"] not in ("entregado", "rechazado"):
@@ -613,7 +655,7 @@ def _ticket_data(conn, pedido_id):
         WHERE d.pedido_id = ?
         ORDER BY c.nombre, d.producto_nombre
     """, (pedido_id,)).fetchall()
-    if not _puede_ver_pedido(conn, pedido, detalle):
+    if not _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=True):
         return None
     suc_nombres = {r["id"]: dict(id=r["id"], nombre=r["nombre"], principal=bool(r["principal"]))
                    for r in conn.execute("SELECT id, nombre, principal FROM sucursales").fetchall()}
@@ -986,13 +1028,15 @@ def pedidos_bandeja():
         # despacha). De ahi el paréntesis: es O una cosa O la otra.
         if es_logistica():
             where += (" AND (EXISTS (SELECT 1 FROM pedido_detalle dd "
-                      "WHERE dd.pedido_id = p.id AND dd.destino_id = ?) "
+                      "WHERE dd.pedido_id = p.id "
+                      "AND COALESCE(dd.destino_id, p.destino_id) = ?) "
                       "OR (p.sucursal_id = ? AND EXISTS (SELECT 1 FROM pedido_detalle dd2 "
                       "WHERE dd2.pedido_id = p.id)))")
             params += [sid, sid]
         else:
             where += (" AND EXISTS (SELECT 1 FROM pedido_detalle dd "
-                      "WHERE dd.pedido_id = p.id AND dd.destino_id = ?)")
+                      "WHERE dd.pedido_id = p.id "
+                      "AND COALESCE(dd.destino_id, p.destino_id) = ?)")
             params.append(sid)
     elif not es_superadmin():
         conn.close()
@@ -1051,16 +1095,21 @@ def pedidos_bandeja():
     det = []
     if pedido_ids:
         marks = ",".join("?" * len(pedido_ids))
+        filtro_proveedor = (
+            " AND COALESCE(d.destino_id, p.destino_id) = ?"
+            if es_receptor() else "")
+        parametros_detalle = pedido_ids + ([sid] if es_receptor() else [])
         det = conn.execute(f"""
             SELECT d.pedido_id, d.producto_nombre, d.cantidad, d.unidad,
                    d.tacho_texto, d.tacho_unidad, d.destino_id, s.nombre AS destino_nombre,
                    COALESCE(c.nombre, 'Sin categoría') AS categoria_nombre
             FROM pedido_detalle d LEFT JOIN sucursales s ON s.id = d.destino_id
+            JOIN pedidos p ON p.id = d.pedido_id
             LEFT JOIN productos pr ON pr.id = d.producto_id
             LEFT JOIN categorias c ON c.id = pr.categoria_id
-            WHERE d.pedido_id IN ({marks})
+            WHERE d.pedido_id IN ({marks}){filtro_proveedor}
             ORDER BY d.pedido_id, d.destino_id, categoria_nombre, d.producto_nombre, d.id
-        """, pedido_ids).fetchall()
+        """, parametros_detalle).fetchall()
     conn.close()
     det_map = {}
     for d in det:
@@ -1102,7 +1151,8 @@ def logistica_resumen():
         f = conn.execute(
             f"SELECT COUNT(DISTINCT p.id) AS n FROM pedidos p "
             f"JOIN pedido_detalle dd ON dd.pedido_id = p.id "
-            f"WHERE dd.destino_id = %s AND p.etapa IN ({marcas}){extra}",
+            f"WHERE COALESCE(dd.destino_id, p.destino_id) = %s "
+            f"AND p.etapa IN ({marcas}){extra}",
             [sid] + list(etapas)).fetchone()
         return int((f or {}).get("n") or 0)
 

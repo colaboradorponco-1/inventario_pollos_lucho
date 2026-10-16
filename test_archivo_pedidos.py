@@ -76,13 +76,17 @@ def ejecutar_vista_invalida():
         return ped.pedidos_bandeja()
 
 
-def ejecutar_listado(archivados=False):
+def ejecutar_listado(archivados=False, rol="admin", sucursal_id=30,
+                     receptor=False, vista=None):
     CAPTURADO.clear()
     query = "/api/pedidos?archivados=1" if archivados else "/api/pedidos"
+    if vista:
+        query += ("&" if "?" in query else "?") + f"vista={vista}"
     with srv.test_request_context(query):
         session["user_id"] = 1
-        session["rol"] = "admin"
-        session["sucursal_id"] = 30
+        session["rol"] = rol
+        session["sucursal_id"] = sucursal_id
+        session["receptor"] = receptor
         ped.pedidos()
     principal = next(sql for sql, _ in CAPTURADO if "SELECT p.*" in sql)
     conteo = next(sql for sql, _ in CAPTURADO
@@ -155,7 +159,7 @@ check("una vista no reconocida devuelve error",
       isinstance(ejecutar_vista_invalida(), tuple))
 sql_superadmin = ejecutar_bandeja("activos", rol="superadmin", alcance="mi-almacen")
 check("superadmin por defecto queda limitado a su almacén",
-      "dd.destino_id = ?" in sql_superadmin)
+      "COALESCE(dd.destino_id, p.destino_id) = ?" in sql_superadmin)
 sql_global = ejecutar_bandeja("activos", rol="superadmin", alcance="todas")
 check("superadmin puede elegir la vista global",
       "dd.destino_id = ?" not in sql_global)
@@ -187,6 +191,8 @@ check("el filtro por botones lee la propiedad data-bsuc correctamente",
 check("mis solicitudes también permiten archivar estados terminales",
       "['entregado', 'rechazado'].includes(estado)" in interfaz
       and "await listarPedidos()" in interfaz)
+check("Mis pedidos solicita explícitamente los pedidos de la sucursal actual",
+      "qs.set('vista', 'mis-pedidos')" in interfaz)
 listado_activo, conteo_activo, params_activo, params_conteo_activo = ejecutar_listado()
 check("el listado normal oculta pedidos archivados de la sucursal",
       "NOT EXISTS (SELECT 1 FROM pedidos_archivados" in listado_activo
@@ -199,6 +205,33 @@ check("la vista archivada muestra solo pedidos archivados por esa sucursal",
       "AND EXISTS (SELECT 1 FROM pedidos_archivados" in listado_archivado
       and "AND EXISTS (SELECT 1 FROM pedidos_archivados" in conteo_archivado
       and params_archivado[:-2] == params_conteo_archivado)
+mis_pedidos_receptor, conteo_mis_pedidos_receptor, params_mis_receptor, params_conteo_mis_receptor = (
+    ejecutar_listado(rol="encargado", sucursal_id=30, receptor=True,
+                     vista="mis-pedidos"))
+check("el receptor ve en Mis pedidos lo que solicitó su propia sucursal",
+      "AND p.sucursal_id = ?" in mis_pedidos_receptor
+      and "EXISTS (SELECT 1 FROM pedido_detalle d4" not in mis_pedidos_receptor
+      and params_mis_receptor[:-2] == params_conteo_mis_receptor)
+pedidos_bandeja_receptor, _, _, _ = ejecutar_listado(
+    rol="encargado", sucursal_id=30, receptor=True)
+check("la consulta general del receptor sigue limitada a pedidos para su almacén",
+      "COALESCE(d4.destino_id, p.destino_id) = ?" in pedidos_bandeja_receptor)
+with srv.test_request_context("/"):
+    session["user_id"] = 1
+    session["rol"] = "encargado"
+    session["sucursal_id"] = 30
+    session["receptor"] = True
+    propio_receptor = {"sucursal_id": 30, "destino_id": 60}
+    detalle_propio = [{"destino_id": 60}]
+    ajeno_receptor = {"sucursal_id": 42, "destino_id": 30}
+    check("el receptor puede abrir solo lectura el detalle de su solicitud",
+          ped._puede_ver_pedido(None, propio_receptor, detalle_propio,
+                                permitir_solicitante=True)
+          and not ped._puede_ver_pedido(None, propio_receptor, detalle_propio))
+    check("el receptor conserva acceso a pedidos destinados a su almacén",
+          ped._puede_ver_pedido(None, ajeno_receptor, [{"destino_id": 30}]))
+check("los perfiles receptores conservan accesible la pestaña Mis pedidos",
+      "|| window.RECEPTOR" not in interfaz)
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()
