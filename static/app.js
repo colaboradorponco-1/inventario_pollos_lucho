@@ -5215,25 +5215,31 @@ function pintarEtapaEnModal(p, puedeGestionar) {
     if (!puedeGestionar) { box.innerHTML = ''; return; }
     const etapa = p.etapa || p.estado || 'pendiente';
     const rol = window.ROL || '';
+    const esAS = !!window.RECEPTOR;
+    const esPreparador = rol === 'preparador' || esAS;
     const b = (txt, sig, dark) =>
         `<button class="btn btn-sm" style="${dark ? 'background:#0F3D2E;color:#fff' : ''}" onclick="avanzarEtapa(${p.id}, '${sig}')">${txt}</button>`;
     if (etapa === 'pendiente') {
         if (rol === 'repartidor') {
             box.innerHTML = '<span class="respaldo-txt">El preparador debe marcar «En camino» primero.</span>';
-        } else if (rol === 'preparador') {
-            box.innerHTML = p.miProveedorPreparado
+        } else if (esPreparador) {
+            const listo = p.miProveedorPreparado
                 ? '<span class="respaldo-txt">Tu parte está lista. El pedido avanzará cuando terminen los demás proveedores.</span>'
                 : b('Marcar mi parte lista', 'en_camino', true);
+            box.innerHTML = listo + (esAS
+                ? `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`
+                : '');
         } else {
-            box.innerHTML = b('En camino', 'en_camino', true) +
-                `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`;
+            box.innerHTML = '<span class="respaldo-txt">El AS debe preparar este pedido.</span>';
         }
     } else if (etapa === 'en_camino') {
-        box.innerHTML = rol === 'preparador'
+        box.innerHTML = esPreparador
             ? '<span class="respaldo-txt">El repartidor debe confirmar la entrega.</span>'
-            : b('Entregado', 'entregado', true);
+            : rol === 'repartidor'
+                ? b('Entregado', 'entregado', true)
+                : '<span class="respaldo-txt">En camino. El repartidor confirmará la entrega.</span>';
     } else if (etapa === 'entregado' && Number(p.stock_movido) === 0
-            && rol !== 'preparador') {
+            && (rol === 'repartidor' || esAdmin())) {
         box.innerHTML = b('Reintentar movimiento de inventario', 'entregado', true);
     } else {
         box.innerHTML = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
@@ -5289,9 +5295,12 @@ window.verPedido = async (id, accionables = true) => {
             String(d.destino_id || p.destino_id) === String(window.SUCURSAL_ID));
         p.miProveedorPreparado = misLineas.length > 0 &&
             misLineas.every((d) => Boolean(d.preparado));
+        const etapaActual = p.etapa || p.estado || 'pendiente';
         const puedeGestionarEtapa = window.ROL === 'repartidor'
             ? String(p.sucursal_id) === String(window.SUCURSAL_ID)
-            : esDestinoMio;
+            : ((window.ROL === 'preparador' || window.RECEPTOR) && esDestinoMio)
+                || (esAdmin() && etapaActual === 'entregado'
+                    && Number(p.stock_movido) === 0);
         if (accionables) {
             pintarEtapaEnModal(p, puedeGestionarEtapa);
         } else {

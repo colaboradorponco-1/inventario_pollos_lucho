@@ -177,9 +177,10 @@ check("encargado de almacén no puede crear solicitudes",
 check("superadmin no puede crear solicitudes",
       isinstance(ejecutar_creacion("superadmin"), tuple))
 fuente_etapa = inspect.getsource(ped.pedido_etapa)
-check("encargado de almacén puede gestionar etapas",
-      "es_encargado_almacen(conn)" in fuente_etapa
-      and "_AVANCE_ORDENANTE.get(actual_etapa)" in fuente_etapa)
+check("solo AS/preparador y repartidor avanzan el flujo normal",
+      "es_preparador = rol == \"preparador\" or es_as" in fuente_etapa
+      and "rol != \"repartidor\"" in fuente_etapa
+      and "_AVANCE_ORDENANTE" not in fuente_etapa)
 with open(os.path.join(os.path.dirname(__file__), "static", "app.js"),
           encoding="utf-8") as archivo:
     interfaz = archivo.read()
@@ -230,8 +231,10 @@ with srv.test_request_context("/"):
           and not ped._puede_ver_pedido(None, propio_receptor, detalle_propio))
     check("el receptor conserva acceso a pedidos destinados a su almacén",
           ped._puede_ver_pedido(None, ajeno_receptor, [{"destino_id": 30}]))
+inicio_solo_bandeja = interfaz.index("const soloBandeja")
+fin_solo_bandeja = interfaz.index("if (soloBandeja)", inicio_solo_bandeja)
 check("los perfiles receptores conservan accesible la pestaña Mis pedidos",
-      "|| window.RECEPTOR" not in interfaz)
+      "window.RECEPTOR" not in interfaz[inicio_solo_bandeja:fin_solo_bandeja])
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()

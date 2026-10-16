@@ -19,6 +19,7 @@ import core.util as util  # noqa: E402
 # Matriz de avance declarada en el backend (flujo unificado).
 AVANCE = {
     "preparador": {"pendiente": "en_camino"},
+    "AS": {"pendiente": "en_camino", "rechazado": "rechazado"},
     "repartidor": {"en_camino": "entregado"},
 }
 ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
@@ -33,9 +34,15 @@ def check(nombre, condicion):
     print(f"  {'OK ' if condicion else 'FALLA'} {nombre}")
 
 
+def cuerpo_respuesta(respuesta):
+    return (respuesta[0] if isinstance(respuesta, tuple) else respuesta).get_json()
+
+
 def permitido(rol, actual, destino):
     if destino == actual:
         return True  # idempotente: ya esta
+    if rol == "AS" and destino == "rechazado":
+        return actual == "pendiente"
     return AVANCE.get(rol, {}).get(actual) == destino
 
 
@@ -43,7 +50,7 @@ print("=" * 70)
 print("MATRIZ DE ETAPAS (rol x etapa actual -> etapa destino)")
 print("=" * 70)
 
-for rol in ("preparador", "repartidor"):
+for rol in ("AS", "preparador", "repartidor"):
     print(f"\n--- {rol} ---")
     for actual in ETAPAS:
         for destino in ETAPAS:
@@ -57,11 +64,14 @@ for rol in ("preparador", "repartidor"):
                     marca = "  (ya lo continua otro rol)"
                 print(f"  bloqueado      {actual:15s} -> {destino}{marca}")
 
-# El preparador NO puede marcar entregado ni rechazar.
+# El AS prepara/rechaza; el preparador prepara; solo el repartidor entrega.
 print("\n" + "=" * 70)
 print("REGLAS CRITICAS")
 print("=" * 70)
 reglas = [
+    ("AS: pendiente -> en_camino", permitido("AS", "pendiente", "en_camino"), True),
+    ("AS puede rechazar solo desde pendiente", permitido("AS", "pendiente", "rechazado"), True),
+    ("AS: NO puede marcar entregado", permitido("AS", "en_camino", "entregado"), False),
     ("preparador: pendiente -> en_camino", permitido("preparador", "pendiente", "en_camino"), True),
     ("preparador: NO puede -> entregado", permitido("preparador", "pendiente", "entregado"), False),
     ("preparador: NO puede rechazar", permitido("preparador", "pendiente", "rechazado"), False),
@@ -84,33 +94,35 @@ print("ENTREGAR DOS VECES (debe quedar bloqueado por etapa, no por stock)")
 print("=" * 70)
 doble = permitido("repartidor", "entregado", "entregado")
 print(f"  entregado -> entregado: {'idempotente (sin mover stock)' if doble else 'bloqueado'}")
-# Los endpoints de entrega comparten el bloqueo de la fila del pedido y el
-# helper no debe hacer rollback, que liberaría el bloqueo antes del commit.
+# El endpoint de etapas bloquea el pedido y el helper no debe hacer rollback,
+# que liberaría el bloqueo antes del commit. Los endpoints antiguos no escriben.
 fuente = inspect.getsource(ped._despachar_stock)
 sin_rollback = ".rollback(" not in fuente
 check("el despacho no libera el bloqueo con rollback", sin_rollback)
 
-for nombre in ("pedido_despachar", "pedido_estado", "pedido_etapa"):
-    vista = getattr(ped, nombre)
-    bloquea_pedido = "FOR UPDATE" in inspect.getsource(vista)
-    check(f"{nombre} bloquea el pedido antes de cambiar stock/estado",
-          bloquea_pedido)
+fuente_etapa = inspect.getsource(ped.pedido_etapa)
+check("pedido_etapa bloquea el pedido antes de mover stock",
+      "FOR UPDATE" in fuente_etapa)
+for nombre in ("pedido_despachar", "pedido_estado"):
+    fuente_legacy = inspect.getsource(getattr(ped, nombre))
+    check(f"{nombre} no puede saltarse el flujo único",
+          "409" in fuente_legacy and "_despachar_stock" not in fuente_legacy)
 
 # Los roles actúan en el lado que les corresponde: preparar desde el proveedor
 # y confirmar entrega desde la sucursal que solicitó.
-fuente_etapa = inspect.getsource(ped.pedido_etapa)
 check("preparador limitado a su sucursal proveedora",
-      'rol == "preparador" and not es_proveedor' in fuente_etapa)
+      "if es_preparador and not es_proveedor" in fuente_etapa)
+check("AS se trata como preparador de sus propias líneas",
+      "es_preparador = rol == \"preparador\" or es_as" in fuente_etapa
+      and "UPDATE pedido_detalle SET preparado = 1" in fuente_etapa)
 check("repartidor limitado a su sucursal solicitante",
       'rol == "repartidor" and pedido["sucursal_id"] != sid' in fuente_etapa)
 check("el sistema registra por separado si el stock de un pedido ya se movió",
       'pedido["stock_movido"]' in fuente_etapa
-      and "stock_movido = 1" in fuente_etapa
-      and "stock_movido = 1" in inspect.getsource(ped.pedido_estado)
-      and "stock_movido = 1" in inspect.getsource(ped.pedido_despachar))
+      and "stock_movido = 1" in fuente_etapa)
 check("un pedido entregado sin movimiento permite una recuperación protegida",
       "reparar_stock_entregado" in fuente_etapa
-      and "Solo el repartidor o el almacén responsable" in fuente_etapa)
+      and "Solo el repartidor o administración" in fuente_etapa)
 
 base = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(base, "database.py"), encoding="utf-8") as archivo:
@@ -131,11 +143,21 @@ with app_pruebas.test_request_context("/"):
     check("una cuenta normal no recibe el permiso de receptor",
           not util.es_receptor())
 
-for nombre in ("pedido_despachar", "pedido_estado"):
-    fuente = inspect.getsource(getattr(ped, nombre))
-    check(f"{nombre} permite al superadmin despachar origenes globales",
-          "_despachar_stock" in fuente and
-          "origen_propio=not es_superadmin()" in fuente)
+with app_pruebas.test_request_context(
+        "/api/pedidos/1/estado", method="PUT", json={"estado": "entregado"}):
+    session["user_id"] = 1
+    session["rol"] = "admin"
+    session["sucursal_id"] = 20
+    estado_directo = ped.pedido_estado(1)
+with app_pruebas.test_request_context(
+        "/api/pedidos/1/despachar", method="POST"):
+    session["user_id"] = 1
+    session["rol"] = "admin"
+    session["sucursal_id"] = 20
+    despacho_directo = ped.pedido_despachar(1)
+check("las rutas administrativas antiguas rechazan cambios directos",
+      isinstance(estado_directo, tuple) and estado_directo[1] == 409
+      and isinstance(despacho_directo, tuple) and despacho_directo[1] == 409)
 
 
 class _ConnStockInsuficiente:
@@ -223,6 +245,7 @@ class _MultiProveedorConn:
         self.pedido = {
             "id": 11, "nro_ticket": "TKT-00011", "sucursal_id": 30,
             "destino_id": None, "estado": "pendiente", "etapa": "pendiente",
+            "stock_movido": 0,
         }
         self.detalle = [
             {"destino_id": 20, "preparado": 0},
@@ -243,6 +266,8 @@ class _MultiProveedorConn:
                         linea["preparado"] = 1
         elif self.sql_actual.startswith("UPDATE pedidos SET etapa = 'en_camino'"):
             self.pedido["etapa"] = self.pedido["estado"] = "en_camino"
+        elif self.sql_actual.startswith("UPDATE pedidos SET etapa = ?, estado = ?"):
+            self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
         return self
 
     def fetchone(self):
@@ -269,20 +294,47 @@ ped.get_conn = lambda: conn_multi
 ped.registrar_auditoria = lambda *args, **kwargs: None
 try:
     respuestas = []
-    etapas_despues_de_cada_preparador = []
-    for proveedor_id in (20, 21):
+    etapas_despues_de_cada_proveedor = []
+    for rol, proveedor_id, receptor in (
+            ("encargado", 20, True), ("preparador", 21, False)):
         with app_pruebas.test_request_context(
                 "/api/pedidos/11/etapa", method="PUT", json={"etapa": "en_camino"}):
             session["user_id"] = 1
-            session["rol"] = "preparador"
+            session["rol"] = rol
             session["sucursal_id"] = proveedor_id
+            session["receptor"] = receptor
             respuestas.append(ped.pedido_etapa(11).get_json())
-            etapas_despues_de_cada_preparador.append(conn_multi.pedido["etapa"])
-    check("cada preparador registra su parte y el pedido avanza al completar ambas",
+            etapas_despues_de_cada_proveedor.append(conn_multi.pedido["etapa"])
+    check("el AS y cada preparador marcan su parte antes de pasar a En camino",
           all(respuesta["ok"] for respuesta in respuestas)
-          and etapas_despues_de_cada_preparador == ["pendiente", "en_camino"]
+          and etapas_despues_de_cada_proveedor == ["pendiente", "en_camino"]
           and conn_multi.pedido["etapa"] == "en_camino"
           and all(linea["preparado"] for linea in conn_multi.detalle))
+
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.detalle = [
+        {"destino_id": 20, "preparado": 0},
+        {"destino_id": 21, "preparado": 0},
+    ]
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
+        session["user_id"] = 1
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = True
+        entrega_as = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el AS no puede confirmar Entregado",
+          not entrega_as["ok"] and conn_multi.pedido["etapa"] == "pendiente")
+
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
+        session["user_id"] = 1
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = True
+        rechazo_as = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el AS puede rechazar antes de que salga el pedido",
+          rechazo_as["ok"] and conn_multi.pedido["etapa"] == "rechazado")
 finally:
     ped.get_conn = get_conn_original
     ped.registrar_auditoria = auditoria_original

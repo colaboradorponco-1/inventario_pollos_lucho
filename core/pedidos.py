@@ -31,17 +31,6 @@ pedidos_bp = Blueprint("pedidos", __name__)
 # recibió). 'en_camino' y 'rechazado' no tocan el inventario.
 _ESTADOS = ("pendiente", "en_camino", "entregado", "rechazado")
 
-# Transiciones válidas. No se puede volver a 'pendiente' ni revivir un pedido
-# ya entregado/rechazado: el stock ya salió (entregado) o la operación se
-# cerró (rechazado). 'rechazado' nace ÚNICAMENTE desde 'pendiente'.
-_TRANSICIONES = {
-    "pendiente": {"pendiente", "en_camino", "entregado", "rechazado"},
-    "en_camino": {"en_camino", "entregado"},
-    "entregado": {"entregado"},
-    "rechazado": {"rechazado"},
-}
-
-
 def _nombre_sucursal(conn, sucursal_id):
     """Nombre de una sucursal para mensajes de error. Si no existe o no es un
     id válido devuelve el propio id, que es más útil que 'None'."""
@@ -726,75 +715,8 @@ def pedido_ticket_pagina(pedido_id):
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/estado", methods=["PUT"])
 @login_requerido
 def pedido_estado(pedido_id):
-    conn = get_conn()
-    pedido = conn.execute(
-        "SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
-    if not pedido:
-        conn.close()
-        return err("Pedido no encontrado", 404)
-    sid_op = sucursal_operativa()
-    detalle = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
-                           (pedido_id,)).fetchall()
-    if not _puede_ver_pedido(conn, pedido, detalle):
-        conn.close()
-        return err("No tienes permisos para ver este pedido", 403)
-    data = request.get_json() or {}
-    estado = data.get("estado", "")
-    actual = pedido["estado"]
-    if estado not in _ESTADOS:
-        conn.close()
-        return err("Estado inválido")
-    # Transición válida: no se puede volver atrás (el stock ya salió del almacén).
-    if estado not in _TRANSICIONES.get(actual, {actual}):
-        conn.close()
-        return err(f"No se puede pasar de '{actual}' a '{estado}'")
-
-    # La logística (preparador/repartidor) mueve la ETAPA, no el `estado`:
-    # ver PUT /api/pedidos/<id>/etapa. Aquí el cambio de estado sigue siendo
-    # exclusivo de quien coordina el inventario, como siempre.
-    if not es_gestion():
-        conn.close()
-        return err("Solo administración puede cambiar el estado directamente", 403)
-    es_destino = any((d.get("destino_id") or pedido.get("destino_id")) == sid_op
-                     for d in detalle)
-    if not es_superadmin() and not es_destino:
-        conn.close()
-        return err("Solo puedes cambiar el estado de pedidos que despacha tu sucursal", 403)
-
-    # El stock se mueve SOLO al marcar 'entregado' (baja del almacén que
-    # despacha y suma a la sucursal que lo pidió). 'en_camino' y 'rechazado'
-    # no tocan el inventario.
-    if estado == "entregado" and not pedido["stock_movido"]:
-        # El movimiento de stock solo puede hacerlo el almacén destino del
-        # pedido, igual que al entregar. Una filial no puede descontar
-        # mercadería del almacén desde el desplegable de estado.
-        det = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
-                           (pedido_id,)).fetchall()
-        es_destino = any((d["destino_id"] or pedido["destino_id"]) == sid_op for d in det)
-        if not (es_gestion() or es_encargado_almacen(conn)) \
-                or (not es_superadmin() and not es_destino):
-            conn.close()
-            return err("Para entregar la mercadería tienes que usar «Entregar». "
-                       "Marcar el estado no descuenta el inventario.")
-        movido = _despachar_stock(conn, pedido, origen_propio=not es_superadmin())
-        if movido[0] == "error":
-            conn.close()
-            return err(movido[1])
-        conn.execute("UPDATE pedidos SET estado = ?, etapa = ?, total = ?, "
-                     "stock_movido = 1 WHERE id = ?",
-                     (estado, estado, movido[0], pedido_id))
-        conn.commit()
-        conn.close()
-        registrar_auditoria("Pedido entregado", f"{pedido['nro_ticket']} -> entregado")
-        return ok(message=f"Pedido {pedido['nro_ticket']} entregado. "
-                          f"Se descontó el stock del almacén.")
-
-    conn.execute("UPDATE pedidos SET estado = ?, etapa = ? WHERE id = ?",
-                 (estado, estado, pedido_id))
-    conn.commit()
-    conn.close()
-    registrar_auditoria("Pedido actualizado", f"{pedido['nro_ticket']} -> {estado}")
-    return ok(message=f"Pedido {pedido['nro_ticket']} marcado como {estado}")
+    return err("El cambio directo de estado está deshabilitado. Usa el flujo "
+               "del pedido: AS para preparar y repartidor para confirmar entrega.", 409)
 
 
 def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
@@ -806,8 +728,8 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
     `movido[0] == "error"` — con `isinstance(movido, tuple)` el éxito se
     confundiría con un fallo y nunca se movería stock.
     NO hace commit ni cierra la conexión: eso es del llamador, para que
-    /despachar y el cambio de estado compartan exactamente la misma lógica y no
-    puedan divergir en el descuento de inventario.
+    la confirmación de entrega y el cambio de estado compartan exactamente la
+    misma transacción y no puedan divergir en el descuento de inventario.
 
     `origen_propio=False` se usa cuando quien entrega NO es el proveedor (el
     repartidor de América/Simón López entrega mercadería que salió del almacén
@@ -919,62 +841,8 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/despachar", methods=["POST"])
 @login_requerido
 def pedido_despachar(pedido_id):
-    """Convierte un pedido pendiente en repartos reales: uno por cada proveedor.
-    Puede despachar un admin/superadmin o un encargado de almacén principal."""
-    conn = get_conn()
-    # FOR UPDATE: bloquea la fila del pedido. Si dos usuarios dan clic en
-    # "Despachar" al mismo tiempo (o hay un doble clic rápido), el segundo
-    # intento frena acá y no duplica el descuento de stock ni los repartos.
-    pedido = conn.execute(
-        "SELECT * FROM pedidos WHERE id = ? FOR UPDATE", (pedido_id,)).fetchone()
-    if not pedido:
-        conn.close()
-        return err("Pedido no encontrado", 404)
-    detalle = conn.execute("SELECT destino_id FROM pedido_detalle WHERE pedido_id = ?",
-                           (pedido_id,)).fetchall()
-    if not _puede_ver_pedido(conn, pedido, detalle):
-        conn.close()
-        return err("No tienes permisos para despachar este pedido", 403)
-    if pedido["estado"] not in ("pendiente", "en_camino"):
-        conn.close()
-        return err(f"Este pedido no se puede despachar (estado actual: {pedido['estado']})", 400)
-    if not (es_gestion() or es_encargado_almacen(conn)):
-        conn.close()
-        return err("No tienes permisos para despachar pedidos", 403)
-    # Admins/almacén despachan SOLO pedidos destinados a su propia sucursal.
-    # Superadmin conserva acceso global.
-    sid_op = sucursal_operativa()
-    if not es_superadmin() and not any(
-            (d["destino_id"] or pedido["destino_id"]) == sid_op for d in detalle):
-        conn.close()
-        return err("Solo puedes despachar pedidos destinados a tu almacén", 403)
-    if pedido["estado"] not in ("pendiente", "en_camino"):
-        conn.close()
-        return err("Solo se pueden despachar pedidos en estado 'pendiente' o 'en_camino'")
-    detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ?", (pedido_id,)).fetchall()
-    if not detalle:
-        conn.close()
-        return err("El pedido no tiene productos")
-
-    movido = _despachar_stock(conn, pedido, detalle, origen_propio=not es_superadmin())
-    if movido[0] == "error":
-        conn.close()
-        return err(movido[1])
-    total, reparto_ids = movido
-    # SIN round(): las columnas son DOUBLE. Con round(total, 2) el mismo pedido
-    # guardaba un total si lo despachaba el almacen con el desplegable de estado
-    # y otro distinto si lo entregaba la logistica con las etapas. Con costo
-    # 3,333 x 3 uno guardaba 10.0 y el otro 9.999, y las cuentas no cuadraban.
-    conn.execute("UPDATE pedidos SET estado = 'entregado', etapa = 'entregado', total = ?, "
-                 "stock_movido = 1 WHERE id = ?",
-                 (total, pedido_id))
-    conn.commit()
-    conn.close()
-    registrar_auditoria("Pedido despachado",
-                        f"{pedido['nro_ticket']} -> repartos #{','.join(map(str, reparto_ids))} (Bs {total})")
-    return ok({"reparto_ids": reparto_ids, "reparto_id": reparto_ids[0] if reparto_ids else None,
-               "total": total},
-              message=f"Pedido {pedido['nro_ticket']} despachado como repartos #{','.join(map(str, reparto_ids))}")
+    return err("El despacho directo está deshabilitado para evitar marcar el pedido "
+               "como entregado antes de la confirmación del repartidor.", 409)
 
 
 @pedidos_bp.route("/api/pedidos/bandeja", methods=["GET"])
@@ -1177,7 +1045,6 @@ _ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
 
 _AVANCE_PREPARADOR = {"pendiente": "en_camino"}
 _AVANCE_REPARTIDOR = {"en_camino": "entregado"}
-_AVANCE_ORDENANTE = {"pendiente": "en_camino", "en_camino": "entregado"}
 
 _ETIQUETA_ETAPA = {
     "pendiente": "Pendiente",
@@ -1213,34 +1080,34 @@ def pedido_etapa(pedido_id):
 
     rol = session.get("rol")
     sid = sucursal_actual()
-    # Los roles logísticos, administración y el encargado de almacén pueden
-    # avanzar la etapa desde la sucursal que despacha. Superadmin conserva
-    # acceso global.
-    if rol not in ("preparador", "repartidor") and not es_receptor() \
-            and not (es_gestion() or es_encargado_almacen(conn)):
+    es_as = es_receptor()
+    es_preparador = rol == "preparador" or es_as
+    actual_etapa = pedido["etapa"] or "pendiente"
+    reparar_stock_entregado = (
+        destino_etapa == "entregado"
+        and actual_etapa == "entregado"
+        and not pedido["stock_movido"]
+    )
+    if not es_preparador and rol != "repartidor" \
+            and not (es_gestion() and reparar_stock_entregado):
         conn.close()
-        return err("Tu rol no puede cambiar la etapa del pedido", 403)
+        return err("Solo el AS prepara el pedido y el repartidor confirma la entrega.", 403)
     if not sid and not es_superadmin():
         conn.close()
         return err("No tenes sucursal asignada", 403)
 
-    # El preparador actúa en la sucursal proveedora; el repartidor confirma la
-    # recepción en la sucursal solicitante. Administración/encargado de almacén
-    # solo gestiona los pedidos que despacha su sucursal.
+    # El AS/preparador prepara desde el proveedor; el repartidor confirma
+    # desde la sucursal que solicitó. Administración solo puede recuperar un
+    # traslado histórico incompleto, nunca avanzar el flujo normal.
     es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in detalle)
-    if rol == "preparador" and not es_proveedor:
+    if es_preparador and not es_proveedor:
         conn.close()
         return err("Ese pedido no lo despacha tu sucursal", 403)
     if rol == "repartidor" and pedido["sucursal_id"] != sid:
         conn.close()
         return err("Ese pedido no lo recibe tu sucursal", 403)
-    if rol not in ("preparador", "repartidor") and not es_superadmin() \
-            and not es_proveedor:
-        conn.close()
-        return err("Ese pedido no lo despacha tu sucursal", 403)
 
-    actual_etapa = pedido["etapa"] or "pendiente"
-    if rol == "preparador" and destino_etapa == "en_camino" \
+    if es_preparador and destino_etapa == "en_camino" \
             and actual_etapa == "pendiente":
         conn.execute(
             "UPDATE pedido_detalle SET preparado = 1 "
@@ -1276,27 +1143,24 @@ def pedido_etapa(pedido_id):
     if destino_etapa == actual_etapa and not reparar_stock_entregado:
         conn.close()
         return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
-    if reparar_stock_entregado and rol == "preparador":
+    if reparar_stock_entregado and es_preparador:
         conn.close()
-        return err("Solo el repartidor o el almacén responsable puede recuperar el movimiento")
+        return err("Solo el repartidor o administración puede recuperar el movimiento")
 
-    # Cada rol solo puede avanzar SU paso, y hacia adelante. El rechazo es un
-    # caso aparte: solo el ordenante/coordinador puede rechazar, y solo desde
-    # 'pendiente' (el pedido recién entra, no se movió nada). Un pedido ya
-    # 'en_camino' o 'entregado' no se puede rechazar.
-    if rol == "preparador":
+    # El AS puede rechazar mientras sigue pendiente. El preparador solo marca
+    # su parte lista; únicamente el repartidor confirma la entrega.
+    if es_preparador and destino_etapa == "rechazado" and es_as:
+        permitido = "rechazado" if actual_etapa == "pendiente" else None
+    elif es_preparador:
         permitido = _AVANCE_PREPARADOR.get(actual_etapa)
     elif rol == "repartidor":
         permitido = _AVANCE_REPARTIDOR.get(actual_etapa)
     else:
-        if destino_etapa == "rechazado":
-            permitido = "rechazado" if actual_etapa == "pendiente" else None
-        else:
-            permitido = _AVANCE_ORDENANTE.get(actual_etapa)
+        permitido = "entregado" if reparar_stock_entregado else None
 
     if permitido != destino_etapa and not reparar_stock_entregado:
         conn.close()
-        if rol == "preparador":
+        if es_preparador and actual_etapa != "pendiente":
             esperado = _AVANCE_PREPARADOR.get(actual_etapa)
             if esperado is None:
                 return err(f"El pedido ya esta en {_ETIQUETA_ETAPA[actual_etapa]}; "
