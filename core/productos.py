@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 import unicodedata
 from datetime import datetime
@@ -6,6 +7,7 @@ from datetime import datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
+from core.backup import carpeta_respaldos, nombre_respaldo, volcar_a_archivo
 from .lotes import (destinos_validos, elegir_destino, stock_por_destino,
                     _ids_proveedores_misma_ciudad)
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
@@ -21,6 +23,31 @@ def norm_nombre(texto):
     s = unicodedata.normalize("NFKD", str(texto or ""))
     s = "".join(c for c in s if not unicodedata.combining(c)).lower()
     return re.sub(r"[^a-z0-9]", "", s)
+
+
+def _combinar_detalles_inventario(destino, origen):
+    """Combina dos líneas de la misma ficha sin inventar un conteo físico."""
+    campos_suma = ("stock_sistema", "inicial", "ingreso_dia", "ingreso_manual",
+                   "disponible", "conteo_fisico", "final", "utilizada", "diferencia")
+    campos_conteo = ("conteo_fisico", "final", "utilizada", "diferencia")
+    valores = {}
+    for campo in campos_conteo:
+        if (destino[campo] is None) != (origen[campo] is None):
+            raise ValueError(
+                "Las líneas tienen conteos distintos; completa o revisa ambas antes de unificar.")
+    for campo in campos_suma:
+        a, b = destino[campo], origen[campo]
+        valores[campo] = None if a is None and b is None else (a or 0) + (b or 0)
+    observaciones = " · ".join(
+        texto for texto in (destino["observaciones"], origen["observaciones"])
+        if texto and texto.strip())
+    valores["observaciones"] = observaciones or None
+    return valores
+
+
+def _chunks(valores, tamano=300):
+    for inicio in range(0, len(valores), tamano):
+        yield valores[inicio:inicio + tamano]
 
 
 def _producto_duplicado(conn, nombre, unidad, excluir_id=None):
@@ -755,6 +782,316 @@ def producto_restaurar(prod_id):
     conn.close()
     registrar_auditoria("Producto restaurado", f"Producto ID {prod_id}")
     return ok(message="Producto restaurado")
+
+
+@productos_bp.route("/api/productos/duplicados", methods=["GET", "POST"])
+@login_requerido
+def productos_duplicados():
+    if not es_gestion():
+        return err("Solo administradores pueden revisar fichas duplicadas", 403)
+
+    conn = get_conn()
+    if request.method == "GET":
+        productos = conn.execute("""
+            SELECT p.id, p.codigo, p.nombre, p.marca, p.unidad, p.sucursal_id,
+                   p.categoria_id, p.costo_promedio, p.precio_venta, p.para_proveer,
+                   s.nombre AS sucursal_nombre, c.nombre AS categoria_nombre
+            FROM productos p
+            LEFT JOIN sucursales s ON s.id = p.sucursal_id
+            LEFT JOIN categorias c ON c.id = p.categoria_id
+            WHERE p.activo = 1
+            ORDER BY p.nombre, p.id
+        """).fetchall()
+        grupos = {}
+        for fila in productos:
+            clave = (norm_nombre(fila["nombre"]), norm_nombre(fila["unidad"] or "unidad"))
+            grupos.setdefault(clave, []).append(dict(fila))
+        grupos = [grupo for grupo in grupos.values() if len(grupo) > 1]
+        ids = sorted({int(p["id"]) for grupo in grupos for p in grupo})
+        if not ids:
+            conn.close()
+            return ok({"grupos": []})
+
+        por_id = {int(p["id"]): p for grupo in grupos for p in grupo}
+        for pid in ids:
+            por_id[pid]["stocks"] = []
+            por_id[pid]["referencias"] = {
+                "movimientos": 0, "pedidos": 0, "pedidos_abiertos": 0,
+                "repartos": 0, "ventas": 0, "planillas_abiertas": 0,
+                "planillas_cerradas": 0,
+            }
+        for chunk in _chunks(ids):
+            ph = ",".join(["?"] * len(chunk))
+            for fila in conn.execute(f"""
+                SELECT l.producto_id, l.sucursal_id, s.nombre AS sucursal_nombre,
+                       SUM(l.cantidad) AS cantidad
+                FROM lotes l JOIN sucursales s ON s.id = l.sucursal_id
+                WHERE l.producto_id IN ({ph})
+                GROUP BY l.producto_id, l.sucursal_id, s.nombre
+                HAVING SUM(l.cantidad) <> 0
+            """, chunk).fetchall():
+                por_id[int(fila["producto_id"])]["stocks"].append({
+                    "sucursal_id": fila["sucursal_id"],
+                    "sucursal_nombre": fila["sucursal_nombre"],
+                    "cantidad": fila["cantidad"],
+                })
+            referencias = (
+                ("movimientos", "SELECT producto_id, COUNT(*) AS cantidad "
+                 "FROM movimientos WHERE producto_id IN ({ph}) GROUP BY producto_id"),
+                ("repartos", "SELECT producto_id, COUNT(*) AS cantidad "
+                 "FROM reparto_detalle WHERE producto_id IN ({ph}) GROUP BY producto_id"),
+                ("ventas", "SELECT producto_id, COUNT(*) AS cantidad "
+                 "FROM venta_detalle WHERE producto_id IN ({ph}) GROUP BY producto_id"),
+            )
+            for campo, sql in referencias:
+                for fila in conn.execute(sql.format(ph=ph), chunk).fetchall():
+                    por_id[int(fila["producto_id"])]["referencias"][campo] = fila["cantidad"]
+            for fila in conn.execute(f"""
+                SELECT d.producto_id, COUNT(*) AS cantidad,
+                       COUNT(DISTINCT CASE
+                           WHEN p.estado NOT IN ('entregado', 'rechazado', 'cancelado')
+                           THEN p.id END) AS abiertos
+                FROM pedido_detalle d JOIN pedidos p ON p.id = d.pedido_id
+                WHERE d.producto_id IN ({ph})
+                GROUP BY d.producto_id
+            """, chunk).fetchall():
+                refs = por_id[int(fila["producto_id"])]["referencias"]
+                refs["pedidos"] = fila["cantidad"]
+                refs["pedidos_abiertos"] = fila["abiertos"] or 0
+
+        inventarios_por_producto = {pid: [] for pid in ids}
+        for chunk in _chunks(ids):
+            ph = ",".join(["?"] * len(chunk))
+            for fila in conn.execute(f"""
+                SELECT d.producto_id, d.inventario_id, i.sucursal_id,
+                       s.nombre AS sucursal_nombre, i.fecha, i.estado,
+                       d.conteo_fisico, d.final
+                FROM inventario_detalle d
+                JOIN inventario_diario i ON i.id = d.inventario_id
+                JOIN sucursales s ON s.id = i.sucursal_id
+                WHERE d.producto_id IN ({ph})
+            """, chunk).fetchall():
+                inventarios_por_producto[int(fila["producto_id"])].append(dict(fila))
+
+        salida = []
+        for grupo in grupos:
+            por_inventario = {}
+            for producto in grupo:
+                pid = int(producto["id"])
+                producto["referencias"]["planillas_abiertas"] = sum(
+                    1 for i in inventarios_por_producto[pid] if i["estado"] == "abierto")
+                producto["referencias"]["planillas_cerradas"] = sum(
+                    1 for i in inventarios_por_producto[pid] if i["estado"] == "cerrado")
+                for detalle in inventarios_por_producto[pid]:
+                    por_inventario.setdefault(int(detalle["inventario_id"]), []).append({
+                        "producto_id": pid,
+                        "estado": detalle["estado"],
+                        "fecha": str(detalle["fecha"]),
+                        "sucursal_nombre": detalle["sucursal_nombre"],
+                    })
+            colisiones = [
+                {"estado": items[0]["estado"], "fecha": items[0]["fecha"],
+                 "sucursal_nombre": items[0]["sucursal_nombre"],
+                 "productos": [item["producto_id"] for item in items]}
+                for items in por_inventario.values() if len(items) > 1
+            ]
+            proveedores = sorted({
+                int(p["sucursal_id"]) for p in grupo
+                if p["para_proveer"] and p["sucursal_id"]
+            })
+            salida.append({
+                "productos": grupo,
+                "proveedores_distintos": len(proveedores),
+                "colisiones_planilla": colisiones,
+                "categorias_distintas": len({norm_nombre(p["categoria_nombre"])
+                                             for p in grupo}),
+                "marcas_distintas": len({norm_nombre(p["marca"]) for p in grupo}),
+                "costos_distintos": len({round(float(p["costo_promedio"] or 0), 4)
+                                         for p in grupo}),
+            })
+        conn.close()
+        return ok({"grupos": salida})
+
+    data = request.get_json() or {}
+    if data.get("confirmar") is not True:
+        conn.close()
+        return err("Confirma explícitamente la unificación de las fichas elegidas", 400)
+    if not isinstance(data.get("duplicados"), list):
+        conn.close()
+        return err("La lista de fichas duplicadas no es válida", 400)
+    try:
+        canonico_id = int(data.get("canonico_id"))
+        duplicados = list(dict.fromkeys(int(i) for i in data["duplicados"]))
+    except (TypeError, ValueError):
+        conn.close()
+        return err("Selecciona una ficha principal y las fichas que se unificarán", 400)
+    if not duplicados or canonico_id in duplicados:
+        conn.close()
+        return err("La ficha principal debe ser distinta de las fichas duplicadas", 400)
+
+    ids = [canonico_id, *duplicados]
+    placeholders = ",".join(["?"] * len(ids))
+    respaldo = nombre_respaldo("antes_unificar")
+    try:
+        filas = conn.execute(f"""
+            SELECT p.id, p.codigo, p.nombre, p.unidad, p.sucursal_id, p.categoria_id,
+                   p.para_proveer
+            FROM productos p WHERE p.activo = 1 AND p.id IN ({placeholders}) FOR UPDATE
+        """, ids).fetchall()
+        por_id = {int(f["id"]): f for f in filas}
+        if len(por_id) != len(ids):
+            raise ValueError("Una o más fichas ya no existen o están inactivas.")
+        canonico = por_id[canonico_id]
+        clave = (norm_nombre(canonico["nombre"]),
+                 norm_nombre(canonico["unidad"] or "unidad"))
+        if any((norm_nombre(por_id[i]["nombre"]),
+                norm_nombre(por_id[i]["unidad"] or "unidad")) != clave
+               for i in duplicados):
+            raise ValueError("Solo se pueden unificar productos con mismo nombre y unidad.")
+        proveedores = {
+            int(p["sucursal_id"]) for p in filas
+            if p["para_proveer"] and p["sucursal_id"]
+        }
+        if len(proveedores) > 1:
+            raise ValueError(
+                "Las fichas abastecen desde distintos AS. No se pueden unificar hasta "
+                "definir un producto con varios proveedores.")
+        if proveedores and (
+                not canonico["para_proveer"]
+                or int(canonico["sucursal_id"] or 0) not in proveedores):
+            raise ValueError(
+                "Conserva como principal la ficha del AS proveedor para no cambiar "
+                "el origen de los pedidos.")
+
+        pedidos_abiertos = conn.execute(f"""
+            SELECT p.id
+            FROM pedido_detalle d JOIN pedidos p ON p.id = d.pedido_id
+            WHERE d.producto_id IN ({placeholders})
+              AND p.estado NOT IN ('entregado', 'rechazado', 'cancelado')
+            FOR UPDATE
+        """, ids).fetchall()
+        pedidos_abiertos_ids = {int(f["id"]) for f in pedidos_abiertos}
+        if pedidos_abiertos_ids:
+            raise ValueError(
+                f"Hay {len(pedidos_abiertos_ids)} pedido(s) todavía abiertos con estas fichas. "
+                "Espera a que terminen antes de unificar.")
+
+        colisiones_cerradas = conn.execute(f"""
+            SELECT i.fecha, s.nombre AS sucursal_nombre
+            FROM inventario_detalle d
+            JOIN inventario_diario i ON i.id = d.inventario_id
+            JOIN sucursales s ON s.id = i.sucursal_id
+            WHERE d.producto_id IN ({placeholders}) AND i.estado = 'cerrado'
+            GROUP BY d.inventario_id, i.fecha, s.nombre
+            HAVING COUNT(DISTINCT d.producto_id) > 1
+        """, ids).fetchall()
+        if colisiones_cerradas:
+            detalles = ", ".join(
+                f"{r['sucursal_nombre']} {r['fecha']}" for r in colisiones_cerradas[:5])
+            raise ValueError(
+                "Hay planillas cerradas con varias de estas fichas; se conservan intactas. "
+                f"Revísalas antes de unificar: {detalles}.")
+
+        volcar_a_archivo(conn, os.path.join(carpeta_respaldos(), respaldo))
+
+        cat = conn.execute(
+            "SELECT nombre FROM categorias WHERE id = ?", (canonico["categoria_id"],)
+        ).fetchone() if canonico["categoria_id"] else None
+        nombre_categoria = cat["nombre"] if cat else None
+        inventarios_impactados = set()
+        columnas = ("stock_sistema", "inicial", "ingreso_dia", "ingreso_manual",
+                    "disponible", "conteo_fisico", "final", "utilizada", "diferencia")
+        for antiguo_id in duplicados:
+            detalles = conn.execute(
+                "SELECT d.*, i.estado FROM inventario_detalle d "
+                "JOIN inventario_diario i ON i.id = d.inventario_id "
+                "WHERE d.producto_id = ? FOR UPDATE", (antiguo_id,)).fetchall()
+            for detalle in detalles:
+                inventario_id = int(detalle["inventario_id"])
+                destino = conn.execute(
+                    "SELECT * FROM inventario_detalle "
+                    "WHERE inventario_id = ? AND producto_id = ? FOR UPDATE",
+                    (inventario_id, canonico_id)).fetchone()
+                if not destino:
+                    if detalle["estado"] == "abierto":
+                        conn.execute("""
+                            UPDATE inventario_detalle
+                            SET producto_id = ?, categoria_id = ?, categoria_nombre = ?,
+                                producto_nombre = ?, codigo = ?, unidad = ?
+                            WHERE id = ?
+                        """, (canonico_id, canonico["categoria_id"], nombre_categoria,
+                              canonico["nombre"], canonico["codigo"], canonico["unidad"],
+                              detalle["id"]))
+                    else:
+                        conn.execute(
+                            "UPDATE inventario_detalle SET producto_id = ? WHERE id = ?",
+                            (canonico_id, detalle["id"]))
+                    continue
+                if detalle["estado"] != "abierto":
+                    raise ValueError(
+                        "No se modifica automáticamente una planilla cerrada con fichas repetidas.")
+                valores = _combinar_detalles_inventario(destino, detalle)
+                conn.execute("""
+                    UPDATE inventario_detalle
+                    SET stock_sistema = ?, inicial = ?, ingreso_dia = ?, ingreso_manual = ?,
+                        disponible = ?, conteo_fisico = ?, final = ?, utilizada = ?,
+                        diferencia = ?, observaciones = ?, categoria_id = ?,
+                        categoria_nombre = ?, producto_nombre = ?, codigo = ?, unidad = ?
+                    WHERE id = ?
+                """, tuple(valores[c] for c in columnas)
+                     + (valores["observaciones"], canonico["categoria_id"], nombre_categoria,
+                        canonico["nombre"], canonico["codigo"], canonico["unidad"],
+                        destino["id"]))
+                conn.execute(
+                    "UPDATE inventario_ingresos_manuales SET detalle_id = ? WHERE detalle_id = ?",
+                    (destino["id"], detalle["id"]))
+                conn.execute("DELETE FROM inventario_detalle WHERE id = ?", (detalle["id"],))
+                inventarios_impactados.add(inventario_id)
+
+        for antiguo_id in duplicados:
+            for stock in conn.execute(
+                    "SELECT sucursal_id, cantidad FROM stock WHERE producto_id = ?",
+                    (antiguo_id,)).fetchall():
+                conn.execute("""
+                    INSERT INTO stock (producto_id, sucursal_id, cantidad) VALUES (?, ?, ?)
+                    ON DUPLICATE KEY UPDATE cantidad = cantidad + VALUES(cantidad)
+                """, (canonico_id, stock["sucursal_id"], stock["cantidad"]))
+            conn.execute("DELETE FROM stock WHERE producto_id = ?", (antiguo_id,))
+            for tabla in ("lotes", "movimientos", "pedido_detalle",
+                          "reparto_detalle", "venta_detalle"):
+                conn.execute(f"UPDATE {tabla} SET producto_id = ? WHERE producto_id = ?",
+                             (canonico_id, antiguo_id))
+            conn.execute(
+                "UPDATE productos SET activo = 0, para_proveer = 0 WHERE id = ?",
+                (antiguo_id,))
+
+        for inventario_id in inventarios_impactados:
+            conn.execute("""
+                UPDATE inventario_diario
+                SET total_items = (SELECT COUNT(*) FROM inventario_detalle WHERE inventario_id = ?)
+                WHERE id = ? AND estado = 'abierto'
+            """, (inventario_id, inventario_id))
+        conn.commit()
+    except ValueError as e:
+        conn.rollback()
+        conn.close()
+        return err(str(e), 409)
+    except Exception:
+        conn.rollback()
+        conn.close()
+        logging.getLogger("app").exception(
+            "Error unificando fichas de productos: principal=%s duplicados=%s",
+            canonico_id, duplicados)
+        return err("No se pudieron unificar las fichas; no se aplicó ningún cambio", 500)
+
+    conn.close()
+    registrar_auditoria(
+        "Productos unificados",
+        f"Producto principal {canonico_id}; fichas {', '.join(map(str, duplicados))}; "
+        f"respaldo {respaldo}")
+    return ok({"canonico_id": canonico_id, "unificados": duplicados,
+               "respaldo": respaldo},
+              message=f"Fichas unificadas; respaldo creado: {respaldo}")
 
 
 @productos_bp.route("/api/productos/<int:prod_id>/historial")

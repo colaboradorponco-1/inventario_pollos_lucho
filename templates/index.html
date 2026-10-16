@@ -317,6 +317,9 @@
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
                     Importar
                 </button>
+                <button class="btn" id="btn-revisar-duplicados" style="display:none">
+                    Revisar fichas repetidas
+                </button>
                 <button class="btn" id="btn-etiquetas">
                     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
                     Etiquetas
@@ -1158,6 +1161,19 @@
                 <button class="btn btn-primary" id="btn-ejecutar-importar" disabled>Importar</button>
             </div>
             <div id="importar-resultado" style="margin-top:10px;"></div>
+        </div>
+    </div>
+
+    <div id="modal-revisar-duplicados" class="modal">
+        <div class="modal-content modal-wide">
+            <button type="button" class="close" data-close="modal-revisar-duplicados" aria-label="Cerrar">&times;</button>
+            <h2>Revisión de fichas repetidas</h2>
+            <p style="color:var(--muted);font-size:13px">
+                Revisa nombre, unidad, proveedor, stock por sucursal y uso en pedidos/planillas antes
+                de unificar. La unificación es manual; las planillas cerradas o proveedores distintos
+                se protegen para no cambiar el historial ni el origen de los pedidos.
+            </p>
+            <div id="productos-repetidos-lista"></div>
         </div>
     </div>
 

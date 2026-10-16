@@ -1011,6 +1011,8 @@ async function pintarProdScope() {
 
 async function loadProductos() {
     try {
+        const btnRevisarDuplicados = $('#btn-revisar-duplicados');
+        if (btnRevisarDuplicados) btnRevisarDuplicados.style.display = esAdmin() ? '' : 'none';
         const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
         const categoria = ($('#prod-categoria') || {}).value || '';
         const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
@@ -1151,6 +1153,7 @@ $('#prod-categoria').addEventListener('change', loadProductos);
 on('#prod-filtro-proveedor', 'change', loadProductos);
 on('#prod-estado', 'change', loadProductos);
 $('#btn-nuevo-producto').addEventListener('click', () => openProductoModal());
+on('#btn-revisar-duplicados', 'click', abrirRevisionDuplicados);
 $('#prod-escaneo').addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
@@ -1168,6 +1171,130 @@ $('#prod-escaneo').addEventListener('keydown', async (e) => {
     }
 });
 $('#prod-escaneo').addEventListener('click', () => $('#prod-escaneo').select());
+
+async function abrirRevisionDuplicados() {
+    const lista = $('#productos-repetidos-lista');
+    lista.innerHTML = '<p class="empty">Revisando fichas, existencias y referencias...</p>';
+    if (!$('#modal-revisar-duplicados').classList.contains('open')) {
+        openModal('modal-revisar-duplicados');
+    }
+    try {
+        const resp = await request(API + '/productos/duplicados');
+        const grupos = resp.grupos || [];
+        if (!grupos.length) {
+            lista.innerHTML = '<p class="empty">No hay fichas activas con el mismo nombre y unidad.</p>';
+            return;
+        }
+        lista.innerHTML = `<p class="badge badge-info">${grupos.length} grupo(s) por revisar</p>` +
+            grupos.map((grupo, indice) => {
+                const productos = grupo.productos || [];
+                const bloqueos = [];
+                if (grupo.proveedores_distintos > 1) {
+                    bloqueos.push('Las fichas tienen más de un AS proveedor; la unificación está bloqueada para conservar el origen de pedidos.');
+                }
+                if (productos.some((p) => (p.referencias?.pedidos_abiertos || 0) > 0)) {
+                    bloqueos.push('Hay pedidos abiertos con estas fichas; espera a que terminen antes de unificar.');
+                }
+                if (grupo.colisiones_planilla.some((p) => p.estado === 'cerrado')) {
+                    bloqueos.push('Hay planillas cerradas con más de una ficha; no se modifican automáticamente.');
+                }
+                const avisos = [];
+                if (grupo.marcas_distintas > 1) avisos.push('Las marcas no coinciden.');
+                if (grupo.categorias_distintas > 1) avisos.push('Las categorías no coinciden.');
+                if (grupo.costos_distintos > 1) avisos.push('Los costos unitarios difieren; se conservará el costo de la ficha principal.');
+                if (grupo.colisiones_planilla.some((p) => p.estado === 'abierto')) {
+                    avisos.push('Hay planillas abiertas con varias fichas; sus saldos se combinarán en una línea al unificar.');
+                }
+                return `
+                    <section class="panel" style="padding:14px;margin:12px 0" data-revision-grupo="${indice}">
+                        <h3>${esc(productos[0].nombre)} · ${esc(productos[0].unidad || 'unidad')}</h3>
+                        ${bloqueos.map((m) => `<p class="scan-hint" style="color:#b91c1c"><strong>Bloqueo:</strong> ${esc(m)}</p>`).join('')}
+                        ${avisos.map((m) => `<p class="scan-hint" style="color:#9a6700"><strong>Revisar:</strong> ${esc(m)}</p>`).join('')}
+                        <label>Ficha que se conservará
+                            <select data-producto-principal>
+                                ${productos.map((p) => `<option value="${p.id}">
+                                    ${esc(p.codigo || '')} · ${esc(p.sucursal_nombre || 'Sin sucursal')}
+                                    ${p.para_proveer ? ' · PROVEEDOR DE PEDIDOS' : ''}
+                                    · ${esc(p.marca || 'sin marca')} · costo Bs ${fmtNum(p.costo_promedio || 0)}
+                                </option>`).join('')}
+                            </select>
+                        </label>
+                        <div class="table-scroll">
+                            <table class="data-table">
+                                <thead><tr><th>Ficha</th><th>Stock por sucursal</th><th>Referencias</th><th>Planillas repetidas</th></tr></thead>
+                                <tbody>${productos.map((p) => {
+                                    const r = p.referencias || {};
+                                    const stocks = p.stocks && p.stocks.length
+                                        ? p.stocks.map((s) => `${esc(s.sucursal_nombre)}: ${fmtNum(s.cantidad)} ${esc(p.unidad || '')}`).join('<br>')
+                                        : 'Sin stock en lotes';
+                                    return `<tr>
+                                        <td><label style="display:flex;gap:8px;align-items:center">
+                                            <input type="checkbox" data-producto-duplicado value="${p.id}">
+                                            <span><strong>${esc(p.codigo || '')}</strong><br>${esc(p.sucursal_nombre || 'Sin sucursal')}
+                                            ${p.para_proveer ? '<br><strong>Proveedor de pedidos</strong>' : ''}</span>
+                                        </label></td>
+                                        <td>${stocks}</td>
+                                        <td>Mov. ${r.movimientos || 0}<br>Pedidos ${r.pedidos || 0} (${r.pedidos_abiertos || 0} abiertos)<br>
+                                            Repartos ${r.repartos || 0} · Ventas ${r.ventas || 0}</td>
+                                        <td>${r.planillas_abiertas || 0} abiertas · ${r.planillas_cerradas || 0} cerradas</td>
+                                    </tr>`;
+                                }).join('')}</tbody>
+                            </table>
+                        </div>
+                        ${grupo.colisiones_planilla.length
+                            ? `<p><strong>Planillas con líneas duplicadas:</strong> ${grupo.colisiones_planilla.map((p) =>
+                                `${esc(p.sucursal_nombre)} ${esc(p.fecha)} (${esc(p.estado)})`).join(' · ')}</p>`
+                            : ''}
+                        <button class="btn btn-primary" data-unificar-fichas ${bloqueos.length ? 'disabled' : ''}>
+                            Unificar fichas seleccionadas
+                        </button>
+                    </section>`;
+            }).join('');
+
+        Array.from(lista.querySelectorAll('[data-revision-grupo]')).forEach((grupoEl, indice) => {
+            const productos = grupos[indice].productos;
+            const principal = grupoEl.querySelector('[data-producto-principal]');
+            const checks = Array.from(grupoEl.querySelectorAll('[data-producto-duplicado]'));
+            const sincronizar = () => checks.forEach((check) => {
+                check.disabled = check.value === principal.value;
+                if (check.disabled) check.checked = false;
+            });
+            principal.addEventListener('change', sincronizar);
+            sincronizar();
+            grupoEl.querySelector('[data-unificar-fichas]').addEventListener('click', async (event) => {
+                const boton = event.currentTarget;
+                const duplicados = checks.filter((check) => check.checked).map((check) => Number(check.value));
+                if (!duplicados.length) {
+                    toast('Selecciona las fichas que confirmaste que son el mismo producto', 'err');
+                    return;
+                }
+                const can = productos.find((p) => Number(p.id) === Number(principal.value));
+                const texto = `Se conservará ${can.codigo} (${can.sucursal_nombre || 'sin sucursal'}) y se cambiarán las referencias de ${duplicados.length} ficha(s). Los lotes seguirán en sus sucursales. Antes se creará un respaldo completo de la base de datos. ¿Confirmas que son el mismo producto?`;
+                if (!confirm(texto)) return;
+                boton.disabled = true;
+                try {
+                    const resultado = await request(API + '/productos/duplicados', {
+                        method: 'POST',
+                        body: {
+                            confirmar: true,
+                            canonico_id: Number(principal.value),
+                            duplicados
+                        }
+                    });
+                    toast(`Fichas unificadas; respaldo: ${resultado.respaldo}. Revisa el stock por sucursal`);
+                    await loadProductos();
+                    await abrirRevisionDuplicados();
+                } catch (error) {
+                    toast(error.message, 'err');
+                    boton.disabled = false;
+                }
+            });
+        });
+    } catch (error) {
+        lista.innerHTML = '';
+        toast(error.message, 'err');
+    }
+}
 
 async function verHistorialProducto(id) {
     try {
