@@ -189,6 +189,12 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
     if not inv or inv["estado"] == "cerrado":
         return 0
     filas = _productos_planilla(conn, ids_sucursal_consolidada(conn, sid), fecha, cat_id)
+    excluidos = {
+        int(f["producto_id"]) for f in conn.execute(
+            "SELECT producto_id FROM inventario_detalle_exclusiones WHERE inventario_id = ?",
+            (inv_id,)).fetchall()
+    }
+    filas = [f for f in filas if int(f["id"]) not in excluidos]
     det = _detalle(conn, inv_id)
     por_prod = {d["producto_id"]: d for d in det}
     cambios = 0
@@ -600,33 +606,33 @@ def inventario_limpiar_duplicados_america_alimentos_20261016():
 
     filas = conn.execute("""
         SELECT * FROM inventario_detalle
-        WHERE inventario_id = 163 AND id IN (8933, 8934, 8937, 8938)
+        WHERE inventario_id = 163 AND producto_id IN (399, 660, 401, 659)
         FOR UPDATE
     """).fetchall()
-    por_id = {int(f["id"]): f for f in filas}
+    por_producto = {int(f["producto_id"]): f for f in filas}
     esperadas = {
-        8933: (399, "PAPA HOLANDESA", "kg", 35),
-        8934: (660, "PAPA HOLANDESA", "kg", 72.4),
-        8937: (401, "PLÁTANO DE FREÍR", "unidad", 144),
-        8938: (659, "PLATANO DE FREIR", "unidad", 200),
+        399: ("PAPA HOLANDESA", "kg", 35),
+        660: ("PAPA HOLANDESA", "kg", 72.4),
+        401: ("PLÁTANO DE FREÍR", "unidad", 144),
+        659: ("PLATANO DE FREIR", "unidad", 200),
     }
-    if set(por_id) != set(esperadas):
+    if len(filas) != len(esperadas) or set(por_producto) != set(esperadas):
         conn.rollback()
         conn.close()
         return err("Las filas de la planilla ya no coinciden; no se borró nada", 409)
 
-    for detalle_id, (producto_id, nombre, unidad, cantidad) in esperadas.items():
-        fila = por_id[detalle_id]
-        if (int(fila["producto_id"]) != producto_id
-                or (fila["producto_nombre"] or "").strip().upper() != nombre.upper()
+    for producto_id, (nombre, unidad, cantidad) in esperadas.items():
+        fila = por_producto[producto_id]
+        if ((fila["producto_nombre"] or "").strip().upper() != nombre.upper()
                 or (fila["unidad"] or "").strip().lower() != unidad
                 or not _misma_cantidad(fila["inicial"], cantidad)):
             conn.rollback()
             conn.close()
             return err("Los productos o cantidades cambiaron; no se borró nada", 409)
 
-    for detalle_id in (8934, 8938):
-        fila = por_id[detalle_id]
+    detalles_a_quitar = [por_producto[producto_id] for producto_id in (660, 659)]
+    for fila in detalles_a_quitar:
+        detalle_id = int(fila["id"])
         if fila["conteo_fisico"] is not None or float(
                 fila["ingreso_manual"] or 0) != 0:
             conn.rollback()
@@ -642,9 +648,22 @@ def inventario_limpiar_duplicados_america_alimentos_20261016():
     respaldo = nombre_respaldo("antes_quitar_duplicados_confirmados_america")
     try:
         volcar_a_archivo(conn, os.path.join(carpeta_respaldos(), respaldo))
-        conn.execute(
+        conn.executemany(
+            "INSERT INTO inventario_detalle_exclusiones "
+            "(inventario_id, producto_id, motivo) VALUES (?, ?, ?) "
+            "ON DUPLICATE KEY UPDATE motivo = VALUES(motivo)",
+            [(163, producto_id, "Duplicado antiguo quitado por solicitud")
+             for producto_id in (660, 659)])
+        borradas = conn.execute(
             "DELETE FROM inventario_detalle "
-            "WHERE inventario_id = 163 AND id IN (8934, 8938)")
+            "WHERE inventario_id = 163 AND producto_id IN (660, 659)")
+        if borradas.rowcount != 2:
+            raise RuntimeError("No se pudieron quitar las dos filas confirmadas")
+        if conn.execute(
+                "SELECT COUNT(*) AS n FROM inventario_detalle_exclusiones "
+                "WHERE inventario_id = 163 AND producto_id IN (660, 659)"
+        ).fetchone()["n"] != 2:
+            raise RuntimeError("No se pudieron guardar las exclusiones de la planilla")
         conn.execute("""
             UPDATE inventario_diario
             SET total_items = (
@@ -662,11 +681,14 @@ def inventario_limpiar_duplicados_america_alimentos_20261016():
     conn.close()
     registrar_auditoria(
         "Filas duplicadas confirmadas quitadas de inventario",
-        f"Planilla 163: eliminadas 8934 (PAPA HOLANDESA 72.4 kg) y "
-        f"8938 (PLATANO DE FREIR 200 unidades); conservadas 35 kg y 144 "
-        f"unidades. Respaldo {respaldo}")
+        f"Planilla 163: quitadas las filas de producto 660 "
+        f"(PAPA HOLANDESA 72.4 kg, detalle {detalles_a_quitar[0]['id']}) y "
+        f"659 (PLATANO DE FREIR 200 unidades, detalle {detalles_a_quitar[1]['id']}); "
+        f"excluidas de la sincronización de esta planilla. Conservadas 35 kg y "
+        f"144 unidades. Respaldo {respaldo}")
     return ok({
-        "eliminadas": [8934, 8938],
+        "eliminadas": [int(f["id"]) for f in detalles_a_quitar],
+        "productos_excluidos_de_esta_planilla": [660, 659],
         "conservadas": {"PAPA HOLANDESA kg": 35, "PLATANO DE FREIR unidad": 144},
         "respaldo": respaldo,
     }, message="Se quitaron las dos filas repetidas confirmadas. "

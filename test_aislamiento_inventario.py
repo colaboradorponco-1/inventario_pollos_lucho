@@ -564,6 +564,9 @@ def prueba_sincronizacion_actualiza_inicial_sistema():
         Fila(id=4, categoria_id=1, categoria_nombre="Aves", nombre="Pavo",
              codigo="P2", unidad="kg", costo_promedio=5, precio_venta=8,
              stock=20, posterior=0),
+        Fila(id=5, categoria_id=1, categoria_nombre="Aves", nombre="Pato",
+             codigo="P3", unidad="kg", costo_promedio=5, precio_venta=8,
+             stock=20, posterior=0),
     ]
     detalles = [
         Fila(id=11, producto_id=3, inicial=12, stock_sistema=10,
@@ -576,16 +579,23 @@ def prueba_sincronizacion_actualiza_inicial_sistema():
              unidad="kg"),
     ]
     updates = []
+    inserciones = []
+    productos_excluidos = [Fila(producto_id=5)]
 
     class SyncConn:
         def execute(self, sql, params=None):
             s = " ".join(str(sql).split())
             if s.startswith("SELECT estado FROM inventario_diario"):
                 return CierreCursor([Fila(estado="abierto")])
+            if s.startswith("SELECT producto_id FROM inventario_detalle_exclusiones"):
+                return CierreCursor(productos_excluidos)
             if "FROM productos p" in s:
                 return CierreCursor(filas_productos)
             if "FROM inventario_detalle d" in s:
                 return CierreCursor(detalles)
+            if s.startswith("INSERT INTO inventario_detalle"):
+                inserciones.append((s, list(params or [])))
+                return CierreCursor([])
             if s.startswith("UPDATE inventario_detalle SET"):
                 updates.append((s, list(params or [])))
                 return CierreCursor([])
@@ -600,6 +610,9 @@ def prueba_sincronizacion_actualiza_inicial_sistema():
            cambios == 2 and 11 in update_ids and 12 in update_ids
            and next(p for _, p in updates if p[-1] == 11)[6] == 20,
            f"cambios={cambios}, updates={update_ids}")
+    _check("la sincronización no vuelve a crear productos excluidos de la planilla",
+           all(5 not in params for _, params in inserciones),
+           f"inserciones={inserciones}")
 
 
 def prueba_iniciar_planilla_no_falla_en_silencio():
