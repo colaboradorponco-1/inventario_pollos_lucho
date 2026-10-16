@@ -906,6 +906,16 @@ function sucursalesFiltroBandeja(lista) {
         const esAlmacenAS = !!s.es_as || /^AS\s/i.test(s.nombre || '');
         if (ciudadSucursal(s) !== ciudadActual) return false;
         if (esReceptor) return !esAlmacenAS;
+        // La tienda que tiene su gemelo AS ("AS America" para "America") no se
+        // lista en el filtro: quien reparte es el almacén AS. La sucursal del
+        // usuario logueado siempre se mantiene visible.
+        if (!esAlmacenAS && String(s.id) !== String(window.SUCURSAL_ID)) {
+            const nombreAS = ('AS ' + (s.nombre || '')).trim().toLowerCase();
+            const hayGemeloAS = base.some((o) =>
+                /^AS\s/i.test(o.nombre || '') &&
+                (o.nombre || '').trim().toLowerCase() === nombreAS);
+            if (hayGemeloAS) return false;
+        }
         return s.principal || s.provee || s.es_as || esAlmacenAS;
     });
 }
