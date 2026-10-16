@@ -242,6 +242,15 @@ inicio_solo_bandeja = interfaz.index("const soloBandeja")
 fin_solo_bandeja = interfaz.index("if (soloBandeja)", inicio_solo_bandeja)
 check("los perfiles receptores solo acceden a la bandeja",
       "window.RECEPTOR" in interfaz[inicio_solo_bandeja:fin_solo_bandeja])
+check("la bandeja de AS America y AS Simón filtra America, Simón y Siglo XX",
+      "solicitantes = ['america', 'simon lopez', 'siglo xx']" in interfaz)
+check("la bandeja de AS 6 de Agosto filtra Miraflores y Sopocachi",
+      "solicitantes = ['miraflores', 'sopocachi']" in interfaz)
+check("el filtro de la bandeja también se aplica a las cuentas AS",
+      "const sucF = bandejaSucF || selF;" in interfaz
+      and "const esReceptor = window.ROL === 'encargado'" not in interfaz)
+check("los filtros de principales muestran su estrella",
+      "nombre: (s.principal ? '★ ' : '') + s.nombre" in interfaz)
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()

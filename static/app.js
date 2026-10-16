@@ -922,6 +922,35 @@ function sucursalesFiltroBandeja(lista) {
     });
 }
 
+function sucursalesFiltroBandejaPedidos(lista) {
+    const base = lista || (catalogos && catalogos.sucursales) || [];
+    if (puedeVerTodasSucursales()) return base;
+    if (!window.RECEPTOR) return sucursalesFiltroBandeja(base);
+
+    const actual = base.find((s) =>
+        String(s.id) === String(window.SUCURSAL_ID));
+    const nombreAS = nombreNorm(actual && actual.nombre || '')
+        .replace(/^as\s+/, '').trim();
+    let solicitantes = [];
+    if (nombreAS.includes('america') || nombreAS.includes('simon lopez')) {
+        solicitantes = ['america', 'simon lopez', 'siglo xx'];
+    } else if (nombreAS.includes('6 de agosto')) {
+        solicitantes = ['miraflores', 'sopocachi'];
+    }
+    if (!solicitantes.length) return sucursalesFiltroBandeja(base);
+
+    const principales = base.filter((s) => !!s.principal);
+    const pedidosDe = base.filter((s) => {
+        if (s.principal || s.es_as || /^AS\s/i.test(s.nombre || '')) return false;
+        const nombre = nombreNorm(s.nombre || '')
+            .replace(/^la paz\s*-\s*/, '')
+            .replace(/^sucursal\s+/, '')
+            .trim();
+        return solicitantes.some((solicitante) => nombre.includes(solicitante));
+    });
+    return principales.concat(pedidosDe);
+}
+
 // ¿Puede ver los movimientos/ventas/repartos/gastos de TODAS las sucursales?
 function puedeVerTodasSucursales() { return esAdmin() || esAlmacenPpal(); }
 
@@ -4765,7 +4794,7 @@ async function loadPedidos() {
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + destinosP.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
         }
-        const opcionesAS = opcionesSucursales(sucursalesFiltroBandeja(sucursales), 'Todas las sucursales');
+        const opcionesAS = opcionesSucursales(sucursalesFiltroBandejaPedidos(sucursales), 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
         if (filtroSel) filtroSel.innerHTML = opcionesAS;
         const filtroReal = $('#pedido-sucursal-realizados');
@@ -4984,21 +5013,17 @@ async function cargarBandeja() {
         if (desde) qs.set('desde', desde);
         if (hasta) qs.set('hasta', hasta);
         const gruposRaw = (await request(API + '/pedidos/bandeja' + (qs.toString() ? '?' + qs.toString() : ''))) || [];
-        // Para un encargado de sucursal receptora (p. ej. América) el filtro por
-        // sucursal NO aplica: su bandeja ya está limitada a los pedidos que le
-        // llegan a SU propia sucursal. Si `sucurFiltro` quedara guardado con un
-        // valor distinto (p. ej. su propio id) filtraría todos los grupos y la
-        // bandeja aparecería vacía aunque sí haya pedidos. Así que el encargado
-        // receptor SIEMPRE ve su bandeja completa.
-        const esReceptor = window.ROL === 'encargado' && !esGestionPed() && !esAlmacenPpal();
         const selF = (($('#pedido-sucursal-filtro') || {}).value || '');
-        const sucF = esReceptor ? '' : (bandejaSucF || selF);
+        const sucF = bandejaSucF || selF;
         const grupos = sucF ? gruposRaw.filter((g) => String(g.sucursal_id) === sucF) : ordenarSucursales(gruposRaw);
         const btsB = $('#bandeja-suc-btns');
         if (btsB) {
-            const sucsFiltradas = sucursalesFiltroBandeja(catalogos.sucursales);
+            const sucsFiltradas = sucursalesFiltroBandejaPedidos(catalogos.sucursales);
             btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-                .concat(ordenarSucursales(sucsFiltradas.map((s) => ({ id: String(s.id), nombre: s.nombre }))))
+                .concat(ordenarSucursales(sucsFiltradas.map((s) => ({
+                    id: String(s.id),
+                    nombre: (s.principal ? '★ ' : '') + s.nombre,
+                }))))
                 .map((b) => `
                     <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
                 .join('');
