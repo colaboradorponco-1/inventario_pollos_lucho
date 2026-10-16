@@ -4838,11 +4838,11 @@ function inicializarPestanasPedidos() {
     const tabReal = $('#tab-hist-realizados');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
-    // Almacén principal «puro», preparador/repartidor y admin se quedan
-    // únicamente con su bandeja. Las sucursales que piden (filiales y la
-    // propia proveedora con su encargado normal) conservan «Mis pedidos».
+    // Administración, almacenes principales, AS y roles logísticos reciben
+    // pedidos; solo las sucursales solicitantes usan «Mis pedidos».
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
         || window.ROL === 'preparador' || window.ROL === 'repartidor'
+        || !!window.RECEPTOR
         || (typeof esAlmacenPpal === 'function' && esAlmacenPpal());
 
     if (soloBandeja) {

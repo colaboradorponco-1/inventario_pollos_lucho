@@ -96,13 +96,14 @@ def ejecutar_listado(archivados=False, rol="admin", sucursal_id=30,
     return principal, conteo, parametros_principal, parametros_conteo
 
 
-def ejecutar_creacion(rol, sucursal_id=30, principal=0):
+def ejecutar_creacion(rol, sucursal_id=30, principal=0, receptor=False):
     global SUCURSAL_PRINCIPAL
     SUCURSAL_PRINCIPAL = principal
     with srv.test_request_context("/api/pedidos", method="POST", json={}):
         session["user_id"] = 1
         session["rol"] = rol
         session["sucursal_id"] = sucursal_id
+        session["receptor"] = receptor
         return ped.pedidos()
 
 
@@ -176,6 +177,8 @@ check("encargado de almacén no puede crear solicitudes",
       isinstance(ejecutar_creacion("encargado", principal=1), tuple))
 check("superadmin no puede crear solicitudes",
       isinstance(ejecutar_creacion("superadmin"), tuple))
+check("AS no puede crear solicitudes",
+      isinstance(ejecutar_creacion("encargado", receptor=True), tuple))
 fuente_etapa = inspect.getsource(ped.pedido_etapa)
 check("AS, administración de almacén, preparador y repartidor tienen permisos separados",
       "es_as or es_preparador or puede_gestionar_todos" in fuente_etapa
@@ -237,8 +240,8 @@ with srv.test_request_context("/"):
           ped._puede_ver_pedido(None, ajeno_receptor, [{"destino_id": 30}]))
 inicio_solo_bandeja = interfaz.index("const soloBandeja")
 fin_solo_bandeja = interfaz.index("if (soloBandeja)", inicio_solo_bandeja)
-check("los perfiles receptores conservan accesible la pestaña Mis pedidos",
-      "window.RECEPTOR" not in interfaz[inicio_solo_bandeja:fin_solo_bandeja])
+check("los perfiles receptores solo acceden a la bandeja",
+      "window.RECEPTOR" in interfaz[inicio_solo_bandeja:fin_solo_bandeja])
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()

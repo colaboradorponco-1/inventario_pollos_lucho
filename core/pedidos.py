@@ -150,9 +150,9 @@ def _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=False):
 def pedidos():
     conn = get_conn()
     if request.method == "POST":
-        if es_gestion() or es_encargado_almacen(conn):
+        if es_gestion() or es_encargado_almacen(conn) or es_receptor():
             conn.close()
-            return err("Administración y encargados de almacén solo reciben y gestionan pedidos", 403)
+            return err("Administración, almacenes principales y AS solo reciben y gestionan pedidos", 403)
         data = request.get_json() or {}
         detalle = data.get("detalle", [])
         if not detalle:
