@@ -393,6 +393,8 @@ def prueba_guardado_parcial_compartido():
                 return Cursor(one=Fila(principal=0, nombre="America"))
             if "FROM inventario_detalle d" in s:
                 return Cursor(rows=[Fila(**fila) for fila in estado_lineas])
+            if s.startswith("SELECT id, sucursal_id FROM productos WHERE id IN"):
+                return Cursor(rows=[Fila(id=pid, sucursal_id=35) for pid in p])
             if "FROM lotes WHERE" in s:
                 return Cursor(rows=[Fila(producto_id=3, c=10),
                                     Fila(producto_id=4, c=6)])
@@ -587,7 +589,7 @@ def prueba_sincronizacion_actualiza_inicial_sistema():
             s = " ".join(str(sql).split())
             if s.startswith("SELECT estado FROM inventario_diario"):
                 return CierreCursor([Fila(estado="abierto")])
-            if s.startswith("SELECT producto_id FROM inventario_detalle_exclusiones"):
+            if s.startswith("SELECT producto_id, motivo FROM inventario_detalle_exclusiones"):
                 return CierreCursor(productos_excluidos)
             if "FROM productos p" in s:
                 return CierreCursor(filas_productos)
@@ -604,15 +606,128 @@ def prueba_sincronizacion_actualiza_inicial_sistema():
         def commit(self):
             pass
 
-    cambios = invmod._sincronizar_detalle(SyncConn(), 7, 35, "2026-10-09", 0)
+    original_productos_ajenos = invmod._productos_ajenos
+    invmod._productos_ajenos = lambda *args: {}
+    try:
+        resultado = invmod._sincronizar_detalle(
+            SyncConn(), 7, 35, "2026-10-09", 0)
+    finally:
+        invmod._productos_ajenos = original_productos_ajenos
     update_ids = [params[-1] for _, params in updates]
     _check("la sincronización refresca el inicial aunque haya observaciones",
-           cambios == 2 and 11 in update_ids and 12 in update_ids
+           resultado["cambios"] == 2 and 11 in update_ids and 12 in update_ids
            and next(p for _, p in updates if p[-1] == 11)[6] == 20,
-           f"cambios={cambios}, updates={update_ids}")
+           f"cambios={resultado['cambios']}, updates={update_ids}")
     _check("la sincronización no vuelve a crear productos excluidos de la planilla",
            all(5 not in params for _, params in inserciones),
            f"inserciones={inserciones}")
+
+
+def prueba_limpieza_segura_de_filas_ajenas():
+    """Quita filas de otra sucursal solo si no tienen datos del encargado."""
+    detalles = [
+        Fila(id=20, producto_id=2, producto_nombre="Papa", codigo="P2",
+             conteo_fisico=None, ingreso_manual=0, observaciones=None,
+             contado_por=None, utilizada=0, diferencia=0),
+        Fila(id=21, producto_id=3, producto_nombre="Plátano contado", codigo="P3",
+             conteo_fisico=4, ingreso_manual=0, observaciones=None,
+             contado_por="encargado", utilizada=0, diferencia=0),
+        Fila(id=22, producto_id=4, producto_nombre="Plátano con ingreso", codigo="P4",
+             conteo_fisico=None, ingreso_manual=0, observaciones=None,
+             contado_por=None, utilizada=0, diferencia=0),
+    ]
+    eliminadas = []
+    sql_eliminaciones = []
+    exclusiones = []
+
+    class SyncConn:
+        def execute(self, sql, params=None):
+            s = " ".join(str(sql).split())
+            if s.startswith("SELECT estado FROM inventario_diario"):
+                return CierreCursor([Fila(estado="abierto")])
+            if s.startswith("SELECT producto_id, motivo FROM inventario_detalle_exclusiones"):
+                return CierreCursor([])
+            if s.startswith("SELECT detalle_id FROM inventario_ingresos_manuales"):
+                return CierreCursor([Fila(detalle_id=22)])
+            if s.startswith("INSERT INTO inventario_detalle_exclusiones"):
+                exclusiones.append(tuple(params))
+                return CierreCursor([])
+            if s.startswith("DELETE FROM inventario_detalle WHERE"):
+                eliminadas.append(tuple(params))
+                sql_eliminaciones.append(s)
+                return CierreCursor([])
+            raise AssertionError(f"Consulta inesperada: {s}")
+
+        def commit(self):
+            pass
+
+    originales = (
+        invmod._productos_planilla, invmod._detalle,
+        invmod._productos_ajenos, invmod.ids_sucursal_consolidada,
+    )
+    invmod._productos_planilla = lambda *args: []
+    invmod._detalle = lambda *args: detalles
+    invmod._productos_ajenos = lambda *args: {2: 44, 3: 44, 4: 44}
+    invmod.ids_sucursal_consolidada = lambda *args: [35]
+    try:
+        resultado = invmod._sincronizar_detalle(
+            SyncConn(), 7, 35, "2026-10-09", 0)
+    finally:
+        (invmod._productos_planilla, invmod._detalle,
+         invmod._productos_ajenos, invmod.ids_sucursal_consolidada) = originales
+
+    _check("solo la fila ajena sin conteo ni datos manuales se elimina",
+           [p[0] for p in eliminadas] == [20],
+           f"eliminadas={eliminadas}")
+    _check("el borrado revalida que no aparezcan datos manuales",
+           len(sql_eliminaciones) == 1
+           and "contado_por IS NULL" in sql_eliminaciones[0]
+           and "COALESCE(utilizada, 0) = 0" in sql_eliminaciones[0]
+           and "NOT EXISTS" in sql_eliminaciones[0])
+    _check("la ficha ajena queda excluida de la planilla",
+           {p[1] for p in exclusiones} == {2, 3, 4},
+           f"exclusiones={exclusiones}")
+    _check("el conteo y el ingreso manual asociado se preservan con aviso",
+           len(resultado["avisos"]) == 2
+           and "Plátano contado" in resultado["avisos"][0]
+           and "Plátano con ingreso" in resultado["avisos"][1])
+
+
+def prueba_clasificacion_de_fichas_por_sucursal():
+    class ProductConn:
+        def execute(self, sql, params=None):
+            return CierreCursor([
+                Fila(id=2, sucursal_id=35),
+                Fila(id=3, sucursal_id=None),
+                Fila(id=4, sucursal_id=44),
+            ])
+
+    ajenos = invmod._productos_ajenos(ProductConn(), [2, 3, 4], [35])
+    _check("solo se consideran ajenas las fichas de otra sucursal",
+           ajenos == {4: 44}, f"ajenos={ajenos}")
+
+
+def prueba_filas_ajenas_no_se_guardan_ni_ajustan():
+    fuente = _leer_inventario()
+    guardar = re.search(r"def inventario_guardar\(.*?\n(?=@|\Z)",
+                        fuente, re.S)
+    cerrar = re.search(r"def inventario_cerrar\(.*?\n(?=@|\Z)",
+                       fuente, re.S)
+    js_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "static", "app.js")
+    with open(js_path, encoding="utf-8") as fh:
+        js = fh.read()
+    _check("el guardado bloquea ediciones de fichas de otra sucursal",
+           guardar and "_productos_ajenos" in guardar.group(0)
+           and "409" in guardar.group(0))
+    cerrar_fn = cerrar.group(0) if cerrar else ""
+    bloqueo = cerrar_fn.find("filas_ajenas")
+    ajuste = cerrar_fn.find("registrar_movimiento(")
+    _check("el cierre rechaza filas ajenas antes de modificar el stock",
+           bloqueo >= 0 and bloqueo < ajuste
+           and "No se aplicó ningún ajuste de stock" in cerrar_fn)
+    _check("la pantalla muestra el aviso de filas ajenas protegidas",
+           "d.avisos" in js and "INV_AVISOS_AJENOS" in js)
 
 
 def prueba_iniciar_planilla_no_falla_en_silencio():
@@ -720,6 +835,10 @@ def prueba_candados_en_el_codigo():
 class CierreCursor:
     def __init__(self, filas):
         self._filas = filas
+
+    @property
+    def rowcount(self):
+        return 1
 
     def fetchall(self):
         return self._filas
@@ -896,6 +1015,9 @@ def main():
     prueba_se_sabe_quien_conto()
     prueba_guardado_parcial_compartido()
     prueba_sincronizacion_actualiza_inicial_sistema()
+    prueba_limpieza_segura_de_filas_ajenas()
+    prueba_clasificacion_de_fichas_por_sucursal()
+    prueba_filas_ajenas_no_se_guardan_ni_ajustan()
     prueba_iniciar_planilla_no_falla_en_silencio()
     prueba_se_pueden_abrir_las_dos_tipos_de_planilla()
     prueba_columnas_inventario_diario()

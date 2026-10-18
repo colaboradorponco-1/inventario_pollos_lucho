@@ -3601,6 +3601,7 @@ let INV_SOLO_LECTURA = false;
 let INV_FILAS = [];
 let INV_CAMPOS_EDITADOS = new Map();
 let INV_INGRESO_IDS = new Map();
+const INV_AVISOS_AJENOS = new Set();
 let INV_OBS_BASE = '';
 let INV_HORA_BASE = '';
 
@@ -3817,6 +3818,14 @@ async function abrirInventario(invId) {
     const resp = await request(API + '/inventario-diario/' + invId);
     const d = resp.data || resp;
     if (!d || !d.id) { toast('No se pudo abrir la planilla', 'err'); return; }
+    const avisosAjenos = Array.isArray(d.avisos) ? d.avisos : [];
+    const claveAviso = `${d.id}:${avisosAjenos.join('|')}`;
+    if (avisosAjenos.length && !INV_AVISOS_AJENOS.has(claveAviso)) {
+        INV_AVISOS_AJENOS.add(claveAviso);
+        toast(
+            `Se conservaron filas de otra sucursal para proteger sus datos: ${avisosAjenos.join(' ')}`,
+            'err', 15000);
+    }
     INV_ID = d.id;
     INV_CERRADA = d.estado === 'cerrado';
     // Planilla de otra sucursal: se puede ver pero no tocar (admin y encargados de
