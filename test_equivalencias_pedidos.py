@@ -12,14 +12,18 @@ import core.productos as productos  # noqa: E402
 
 
 class _FilaConn:
-    def __init__(self, fila):
+    def __init__(self, fila, filas=None):
         self.fila = fila
+        self.filas = filas or []
 
     def execute(self, _sql, _params=None):
         return self
 
     def fetchone(self):
         return self.fila
+
+    def fetchall(self):
+        return self.filas
 
 
 class _DespachoConn:
@@ -144,6 +148,7 @@ class EquivalenciasPedidosTest(unittest.TestCase):
     def test_receptor_rechaza_falta_de_equivalencia_entre_sucursales(self):
         conn = _FilaConn({
             "sucursal_origen_id": 49,
+            "nombre_origen": "Producto sin ficha",
             "unidad_origen": "unidad",
             "equivalencia_destino_id": None,
             "producto_destino_id": None,
@@ -154,6 +159,45 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         destino, error = pedidos._producto_receptor(conn, 661, 35)
         self.assertIsNone(destino)
         self.assertIn("No hay equivalencia configurada", error)
+
+    def test_receptor_usa_ficha_local_unica_con_mismo_nombre_y_unidad(self):
+        conn = _FilaConn({
+            "sucursal_origen_id": 49,
+            "nombre_origen": "Plátano de freír",
+            "unidad_origen": "kg",
+            "equivalencia_destino_id": None,
+            "producto_destino_id": None,
+            "sucursal_producto_destino": None,
+            "unidad_destino": None,
+            "destino_activo": None,
+        }, filas=[{"id": 662, "nombre": "Platano de freir", "unidad": "kg"}])
+        self.assertEqual(pedidos._producto_receptor(conn, 661, 35), (662, None))
+
+    def test_receptor_rechaza_coincidencias_ambiguas_o_unidades_distintas(self):
+        origen = {
+            "sucursal_origen_id": 49,
+            "nombre_origen": "Papa holandesa",
+            "unidad_origen": "kg",
+            "equivalencia_destino_id": None,
+            "producto_destino_id": None,
+            "sucursal_producto_destino": None,
+            "unidad_destino": None,
+            "destino_activo": None,
+        }
+        duplicados = _FilaConn(origen, filas=[
+            {"id": 662, "nombre": "Papa holandesa", "unidad": "kg"},
+            {"id": 663, "nombre": "Papa holandesa", "unidad": "kg"},
+        ])
+        destino, error = pedidos._producto_receptor(duplicados, 661, 35)
+        self.assertIsNone(destino)
+        self.assertIn("varias fichas", error)
+
+        unidad_distinta = _FilaConn(origen, filas=[
+            {"id": 662, "nombre": "Papa holandesa", "unidad": "unidad"},
+        ])
+        destino, error = pedidos._producto_receptor(unidad_distinta, 661, 35)
+        self.assertIsNone(destino)
+        self.assertIn("unidades", error)
 
     def test_receptor_no_requiere_equivalencia_si_es_la_misma_sucursal(self):
         conn = _FilaConn({

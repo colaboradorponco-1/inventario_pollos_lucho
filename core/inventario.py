@@ -176,9 +176,26 @@ def _misma_cantidad(a, b):
         return (a or 0) == (b or 0)
 
 
+def _productos_ajenos(conn, producto_ids, ids_sucursal):
+    producto_ids = sorted({int(pid) for pid in producto_ids if pid is not None})
+    if not producto_ids:
+        return {}
+    sucursales_permitidas = {int(sid) for sid in ids_sucursal}
+    ph = ",".join(["%s"] * len(producto_ids))
+    return {
+        int(f["id"]): f["sucursal_id"]
+        for f in conn.execute(
+            f"SELECT id, sucursal_id FROM productos WHERE id IN ({ph})",
+            producto_ids).fetchall()
+        if f["sucursal_id"] is not None
+        and int(f["sucursal_id"]) not in sucursales_permitidas
+    }
+
+
 def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
     """Agrega a una planilla ABIERTA los productos que ahora pertenecen a su
-    categoría y actualiza sus nombres sin pisar conteos ya digitados.
+    categoría, actualiza sus nombres sin pisar conteos y retira filas ajenas sin
+    datos manuales.
 
     Las líneas se congelaban al crear la planilla: si un producto cambiaba de
     categoría (o se creaba) después, la planilla quedaba sin ese producto.
@@ -186,18 +203,97 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
     inv = conn.execute("SELECT estado FROM inventario_diario WHERE id = ?",
                        (inv_id,)).fetchone()
     if not inv or inv["estado"] == "cerrado":
-        return 0
-    filas = _productos_planilla(conn, ids_sucursal_consolidada(conn, sid), fecha, cat_id)
-    excluidos = {
-        int(f["producto_id"]) for f in conn.execute(
-            "SELECT producto_id FROM inventario_detalle_exclusiones WHERE inventario_id = ?",
-            (inv_id,)).fetchall()
-    }
-    filas = [f for f in filas if int(f["id"]) not in excluidos]
-    det = _detalle(conn, inv_id)
-    por_prod = {d["producto_id"]: d for d in det}
+        return {"cambios": 0, "avisos": []}
+    ids_sucursal = ids_sucursal_consolidada(conn, sid)
+    filas = _productos_planilla(conn, ids_sucursal, fecha, cat_id)
     cambios = 0
+    exclusiones = {
+        int(f["producto_id"]): f["motivo"] for f in conn.execute(
+            "SELECT producto_id, motivo FROM inventario_detalle_exclusiones "
+            "WHERE inventario_id = ?", (inv_id,)).fetchall()
+    }
+    excluidos = set(exclusiones)
+    det = _detalle(conn, inv_id)
+    ajenos = _productos_ajenos(
+        conn, [d["producto_id"] for d in det] + list(exclusiones),
+        ids_sucursal)
+    motivo_automatico = (
+        "La ficha pertenece a otra sucursal; se conserva el catálogo propio")
+    for producto_id, motivo in exclusiones.items():
+        if motivo == motivo_automatico and producto_id not in ajenos:
+            conn.execute(
+                "DELETE FROM inventario_detalle_exclusiones "
+                "WHERE inventario_id = ? AND producto_id = ?",
+                (inv_id, producto_id))
+            excluidos.remove(producto_id)
+            cambios += 1
+
+    filas_ajenas = [d for d in det if d["producto_id"] in ajenos]
+    ingresos_asociados = set()
+    ids_detalle_ajenos = [d["id"] for d in filas_ajenas]
+    if ids_detalle_ajenos:
+        ph_det = ",".join(["%s"] * len(ids_detalle_ajenos))
+        ingresos_asociados = {
+            int(f["detalle_id"]) for f in conn.execute(
+                f"SELECT detalle_id FROM inventario_ingresos_manuales "
+                f"WHERE detalle_id IN ({ph_det})",
+                ids_detalle_ajenos).fetchall()
+        }
+
+    avisos = []
+    seguros_para_quitar = []
+    for d in filas_ajenas:
+        producto_id = int(d["producto_id"])
+        if producto_id not in excluidos:
+            conn.execute(
+                "INSERT INTO inventario_detalle_exclusiones "
+                "(inventario_id, producto_id, motivo) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE motivo = VALUES(motivo)",
+                (inv_id, producto_id, motivo_automatico))
+            excluidos.add(producto_id)
+            cambios += 1
+
+        tiene_datos = (
+            d["conteo_fisico"] is not None
+            or not _misma_cantidad(d.get("ingreso_manual"), 0)
+            or bool((d.get("observaciones") or "").strip())
+            or bool((d.get("contado_por") or "").strip())
+            or not _misma_cantidad(d.get("utilizada"), 0)
+            or not _misma_cantidad(d.get("diferencia"), 0)
+            or d["id"] in ingresos_asociados
+        )
+        if tiene_datos:
+            avisos.append(
+                f"{d.get('producto_nombre') or d['producto_id']} "
+                f"({d.get('codigo') or 'sin código'}) pertenece a otra sucursal "
+                "y tiene datos manuales; no se quitó para proteger el conteo.")
+        else:
+            seguros_para_quitar.append(d)
+
+    for d in seguros_para_quitar:
+        borrado = conn.execute(
+            "DELETE FROM inventario_detalle WHERE id = %s AND inventario_id = %s "
+            "AND producto_id = %s AND conteo_fisico IS NULL "
+            "AND COALESCE(ingreso_manual, 0) = 0 "
+            "AND TRIM(COALESCE(observaciones, '')) = '' "
+            "AND (contado_por IS NULL OR TRIM(contado_por) = '') "
+            "AND COALESCE(utilizada, 0) = 0 AND COALESCE(diferencia, 0) = 0 "
+            "AND NOT EXISTS (SELECT 1 FROM inventario_ingresos_manuales "
+            "WHERE detalle_id = inventario_detalle.id)",
+            (d["id"], inv_id, d["producto_id"]))
+        if borrado.rowcount == 1:
+            cambios += 1
+        else:
+            avisos.append(
+                f"{d.get('producto_nombre') or d['producto_id']} "
+                f"({d.get('codigo') or 'sin código'}) cambió durante la limpieza; "
+                "no se quitó.")
+
+    filas = [f for f in filas if int(f["id"]) not in excluidos]
+    por_prod = {d["producto_id"]: d for d in det}
     for f in filas:
+        if f["id"] in ajenos:
+            continue
         stock_dia = (f["stock"] or 0) - (f["posterior"] or 0)
         inicial = max(stock_dia, 0.0)
         disponible = inicial
@@ -257,7 +353,7 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
                     cambios += 1
     if cambios:
         conn.commit()
-    return cambios
+    return {"cambios": cambios, "avisos": avisos}
 
 
 def _stocks_actuales(conn, ids):
@@ -495,9 +591,11 @@ def inventario_detalle(inv_id):
     if not permitido:
         conn.close()
         return err("Planilla no encontrada", 404)
+    sync = {"avisos": []}
     if inv["estado"] != "cerrado":
-        _sincronizar_detalle(conn, inv_id, inv["sucursal_id"],
-                             _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
+        sync = _sincronizar_detalle(
+            conn, inv_id, inv["sucursal_id"],
+            _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
     filas = _detalle(conn, inv_id)
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
     stocks = _stocks_actuales(conn, ids_planilla)
@@ -571,6 +669,7 @@ def inventario_detalle(inv_id):
         "estado": inv["estado"],
         "puede_editar": inv["sucursal_id"] == sucursal_operativa(),
         "observaciones": inv["observaciones"] or "",
+        "avisos": sync["avisos"],
         "lineas": lineas,
         "resumen": {
             "total_items": len(lineas),
@@ -654,6 +753,21 @@ def inventario_guardar(inv_id):
 
     validas = {f["id"]: f for f in _detalle(conn, inv_id)}
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
+    ajenos = _productos_ajenos(
+        conn, [f["producto_id"] for f in validas.values()], ids_planilla)
+    for item in lineas:
+        if not isinstance(item, dict):
+            continue
+        fila = validas.get(item.get("id"))
+        campos = item.get("campos_modificados") or []
+        if fila and fila["producto_id"] in ajenos and campos:
+            conn.rollback()
+            conn.close()
+            return err(
+                f"No se guardó: '{fila['producto_nombre']}' pertenece a otra "
+                "sucursal. Recarga la planilla y revisa la fila conservada "
+                "antes de continuar.",
+                409)
     stocks = _stocks_actuales(conn, ids_planilla)
     usuario_actual = session.get("usuario", "") or ""
     # Si la columna `contado_por` todavia no esta en la base, `_detalle` (que
@@ -897,6 +1011,22 @@ def inventario_cerrar(inv_id):
         return err("Solo puedes cerrar la planilla de tu sucursal", 403)
 
     filas = _detalle(conn, inv_id)
+    ajenos = _productos_ajenos(
+        conn, [f["producto_id"] for f in filas],
+        ids_sucursal_consolidada(conn, inv["sucursal_id"]))
+    filas_ajenas = [f for f in filas if f["producto_id"] in ajenos]
+    if filas_ajenas:
+        nombres = ", ".join(
+            f"{f['producto_nombre']} ({f['codigo'] or 'sin código'})"
+            for f in filas_ajenas[:5])
+        resto = f" y {len(filas_ajenas) - 5} más" if len(filas_ajenas) > 5 else ""
+        conn.rollback()
+        conn.close()
+        return err(
+            "No se puede cerrar: quedan filas de otra sucursal que se "
+            f"conservaron para proteger sus datos ({nombres}{resto}). "
+            "No se aplicó ningún ajuste de stock. Solicita revisar esos datos.",
+            409)
     sin_contar = [f for f in filas if f["conteo_fisico"] is None]
     if sin_contar:
         conn.rollback()

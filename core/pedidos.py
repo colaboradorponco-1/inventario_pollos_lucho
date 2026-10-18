@@ -12,6 +12,8 @@ se mueve una sola vez al marcar 'entregado'.
 """
 from collections import OrderedDict
 from datetime import datetime
+import re
+import unicodedata
 
 from flask import Blueprint, redirect, render_template, request, session
 
@@ -101,10 +103,19 @@ def _proveedores_preparados(detalle, pedido):
     return bool(preparados) and all(preparados.values())
 
 
+def _normalizar_nombre_producto(nombre):
+    normalizado = unicodedata.normalize("NFKD", str(nombre or ""))
+    sin_acentos = "".join(
+        caracter for caracter in normalizado
+        if not unicodedata.combining(caracter))
+    return " ".join(re.findall(r"[a-z0-9]+", sin_acentos.casefold()))
+
+
 def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
-    """Resuelve la ficha equivalente explícita de la sucursal receptora."""
+    """Resuelve ficha explícita o una única ficha local con nombre y unidad exactos."""
     equivalente = conn.execute("""
         SELECT origen.sucursal_id AS sucursal_origen_id,
+               origen.nombre AS nombre_origen,
                origen.unidad AS unidad_origen,
                e.producto_destino_id AS equivalencia_destino_id,
                destino.id AS producto_destino_id,
@@ -125,6 +136,30 @@ def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
             return None, "El producto equivalente de la sucursal receptora no existe"
         if equivalente["sucursal_origen_id"] == sucursal_destino_id:
             return producto_origen_id, None
+        unidad_origen = (equivalente["unidad_origen"] or "unidad").strip().casefold()
+        nombre_origen = _normalizar_nombre_producto(
+            equivalente.get("nombre_origen"))
+        if nombre_origen:
+            candidatos_nombre = [
+                producto for producto in conn.execute(
+                    "SELECT id, nombre, unidad FROM productos "
+                    "WHERE sucursal_id = ? AND activo = 1",
+                    (sucursal_destino_id,)).fetchall()
+                if _normalizar_nombre_producto(producto.get("nombre")) == nombre_origen
+            ]
+            candidatos = [
+                producto for producto in candidatos_nombre
+                if (producto.get("unidad") or "unidad").strip().casefold()
+                == unidad_origen
+            ]
+            if len(candidatos) == 1:
+                return candidatos[0]["id"], None
+            if len(candidatos) > 1:
+                return None, (
+                    "Hay varias fichas iguales en la sucursal receptora. "
+                    "Pide al superadministrador que configure la equivalencia correcta.")
+            if candidatos_nombre:
+                return None, "Las unidades de los productos con el mismo nombre no coinciden"
         return None, (
             "No hay equivalencia configurada para este producto en la sucursal receptora. "
             "Pide al superadministrador que la configure antes de entregar.")
