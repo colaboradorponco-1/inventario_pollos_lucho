@@ -20,6 +20,7 @@ Cada día se pueden hacer VARIAS planillas por sucursal: una por categoría
 propia sucursal; un admin/superadmin puede ver las de todas.
 """
 from datetime import date, datetime, timedelta
+import os
 
 from flask import (Blueprint, current_app, redirect, render_template, request,
                    session)
@@ -162,9 +163,10 @@ def _productos_planilla(conn, ids, fecha, cat_id):
                    GROUP BY producto_id) po ON po.producto_id = p.id
         WHERE p.activo = 1 AND (l.stock > 0 OR ent.ingreso > 0 OR sa.salida > 0
                                 OR p.sucursal_id IN ({ph}) OR p.sucursal_id IS NULL)
+          AND (p.sucursal_id IN ({ph}) OR p.sucursal_id IS NULL)
           AND (%s = 0 OR p.categoria_id = %s)
         ORDER BY c.nombre, p.nombre
-    """, (*list(ids) * 5, fecha, fecha, fecha, fecha, *ids, cat_id, cat_id)).fetchall()
+    """, (*list(ids) * 5, fecha, fecha, fecha, fecha, *ids, *ids, cat_id, cat_id)).fetchall()
 
 
 def _misma_cantidad(a, b):
@@ -581,6 +583,129 @@ def inventario_detalle(inv_id):
             "total_utilizada": round(sum(l["utilizada"] for l in lineas), 3),
         },
     })
+
+
+@inventario_bp.route(
+    "/api/inventario-diario/170/quitar-duplicados-confirmados", methods=["POST"])
+@login_requerido
+def inventario_quitar_duplicados_america_170():
+    """Retira dos filas históricas sin conteo de la planilla América 2026-10-17."""
+    try:
+        sucursal = int(sucursal_operativa() or 0)
+    except (TypeError, ValueError):
+        sucursal = 0
+    if sucursal != 35 or session.get("rol") not in ("encargado", "admin", "superadmin"):
+        return err("Solo la gestión de América puede corregir esta planilla", 403)
+    if request.get_json(silent=True) != {
+            "confirmacion": "QUITAR_FILAS_9110_9114_DE_PLANILLA_170"}:
+        return err("Falta la confirmación para las dos filas exactas", 400)
+
+    conn = get_conn()
+    try:
+        inv = conn.execute(
+            "SELECT id, sucursal_id, categoria_id, fecha, estado "
+            "FROM inventario_diario WHERE id = %s FOR UPDATE",
+            (170,)).fetchone()
+        if (not inv or inv["sucursal_id"] != 35 or inv["categoria_id"] != 13
+                or str(inv["fecha"])[:10] != "2026-10-17"
+                or inv["estado"] != "abierto"):
+            conn.close()
+            return err("La planilla cambió o ya está cerrada; no se modificó", 409)
+
+        filas = conn.execute(
+            "SELECT id, producto_id, producto_nombre, codigo, unidad, inicial, "
+            "ingreso_manual, conteo_fisico FROM inventario_detalle "
+            "WHERE inventario_id = %s AND id IN (%s, %s, %s, %s) "
+            "ORDER BY id FOR UPDATE",
+            (170, 9109, 9110, 9113, 9114)).fetchall()
+        esperadas = {
+            9109: (399, "PRD-0395", "papa holandesa", 30.0),
+            9110: (660, "PRD-0656", "papa holandesa", 72.4),
+            9113: (401, "PRD-0397", "plátano de freír", 73.0),
+            9114: (659, "PRD-0655", "platano de freir", 200.0),
+        }
+        if len(filas) != len(esperadas):
+            conn.close()
+            return err("Las cuatro filas no coinciden con lo revisado; no se modificó", 409)
+        for fila in filas:
+            esperado = esperadas.get(fila["id"])
+            if (not esperado or fila["producto_id"] != esperado[0]
+                    or fila["codigo"] != esperado[1]
+                    or (fila["producto_nombre"] or "").strip().casefold() != esperado[2]
+                    or not _misma_cantidad(fila["inicial"], esperado[3])
+                    or (fila["id"] in (9110, 9114)
+                        and fila["conteo_fisico"] is not None)):
+                conn.close()
+                return err("Una fila cambió desde la revisión; no se modificó", 409)
+            if (fila["unidad"] or "").strip().casefold() != (
+                    "kg" if fila["id"] in (9109, 9110) else "unidad"):
+                conn.close()
+                return err("La unidad de una fila cambió; no se modificó", 409)
+            if fila["id"] in (9110, 9114) and not _misma_cantidad(
+                    fila["ingreso_manual"], 0):
+                conn.close()
+                return err("Una fila duplicada tiene ingreso manual; no se modificó", 409)
+
+        contados = {fila["id"]: fila["conteo_fisico"] for fila in filas}
+        if not _misma_cantidad(contados[9113], 626):
+            conn.close()
+            return err("El conteo de plátano cambió; no se modificó", 409)
+        ingresos_manuales = conn.execute(
+            "SELECT COUNT(*) AS total FROM inventario_ingresos_manuales "
+            "WHERE detalle_id IN (%s, %s)",
+            (9110, 9114)).fetchone()["total"]
+        if ingresos_manuales:
+            conn.close()
+            return err("Hay ingresos manuales asociados; no se modificó", 409)
+
+        from .backup import carpeta_respaldos, nombre_respaldo, volcar_a_archivo
+
+        respaldo = nombre_respaldo("america_planilla_170_duplicados")
+        ruta = os.path.join(carpeta_respaldos(), respaldo)
+        respaldo_bytes, _ = volcar_a_archivo(conn, ruta)
+
+        for producto_id in (660, 659):
+            conn.execute(
+                "INSERT INTO inventario_detalle_exclusiones "
+                "(inventario_id, producto_id, motivo) VALUES (%s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE motivo = VALUES(motivo)",
+                (170, producto_id,
+                 "Ficha de otra sucursal; América mantiene su ficha propia"))
+        borrados = 0
+        for detalle_id, producto_id in ((9110, 660), (9114, 659)):
+            resultado = conn.execute(
+                "DELETE FROM inventario_detalle "
+                "WHERE id = %s AND inventario_id = %s AND producto_id = %s "
+                "AND conteo_fisico IS NULL",
+                (detalle_id, 170, producto_id))
+            borrados += resultado.rowcount
+        if borrados != 2:
+            conn.rollback()
+            conn.close()
+            return err("No coincidieron las dos filas para eliminar; se canceló la operación", 409)
+
+        total_items = conn.execute(
+            "SELECT COUNT(*) AS total FROM inventario_detalle WHERE inventario_id = %s",
+            (170,)).fetchone()["total"]
+        conn.execute(
+            "UPDATE inventario_diario SET total_items = %s WHERE id = %s",
+            (total_items, 170))
+        conn.commit()
+        conn.close()
+        registrar_auditoria(
+            "Filas duplicadas excluidas de inventario",
+            "Planilla América 170: se retiraron fichas 660/659 y se conservaron "
+            "las fichas 399/401, incluido el conteo de plátano. Sin cambios de stock.")
+        return ok({"inventario_id": 170, "filas_eliminadas": [9110, 9114],
+                   "filas_conservadas": [9109, 9113], "total_items": total_items,
+                   "respaldo": respaldo, "respaldo_bytes": respaldo_bytes},
+                  message="Se retiraron solo las dos filas duplicadas; stock intacto")
+    except Exception:
+        conn.rollback()
+        conn.close()
+        current_app.logger.exception(
+            "Error al quitar duplicados de la planilla de América 170")
+        return err("No se pudo corregir la planilla; no se aplicó ningún cambio", 500)
 
 
 # --------------------------------------------------------------------------
