@@ -20,6 +20,7 @@ Cada día se pueden hacer VARIAS planillas por sucursal: una por categoría
 propia sucursal; un admin/superadmin puede ver las de todas.
 """
 from datetime import date, datetime, timedelta
+import math
 
 from flask import (Blueprint, current_app, redirect, render_template, request,
                    session)
@@ -919,6 +920,130 @@ def inventario_guardar(inv_id):
                           f"había contado otro encargado. Revisá los avisos: tu "
                           f"número quedó guardado.")
     return ok(message="Conteo guardado")
+
+
+@inventario_bp.route(
+    "/api/inventario-diario/rebasar-referencia/<int:detalle_id>",
+    methods=["POST"])
+@login_requerido
+def inventario_rebasar_referencia(detalle_id):
+    """Rebasea una línea ya contada al stock actual, conservando su conteo.
+
+    Requiere que el cliente confirme los valores actualmente guardados y el
+    stock esperado. El bloqueo de la planilla serializa esta operación con
+    guardados y cierres; no crea movimientos ni modifica lotes.
+    """
+    data = request.get_json() or {}
+    try:
+        inicial_esperado = float(data.get("inicial_esperado"))
+        conteo_esperado = float(data.get("conteo_esperado"))
+        stock_esperado = float(data.get("stock_esperado"))
+        codigo_esperado = str(data.get("codigo_esperado") or "").strip()
+    except (TypeError, ValueError):
+        return err("Faltan los valores de confirmación de la fila", 400)
+    if (not codigo_esperado or not all(math.isfinite(valor) for valor in (
+            inicial_esperado, conteo_esperado, stock_esperado)) or min(
+            inicial_esperado, conteo_esperado, stock_esperado) < 0):
+        return err("Los valores de confirmación no son válidos", 400)
+
+    conn = get_conn()
+    referencia = conn.execute(
+        "SELECT inventario_id FROM inventario_detalle WHERE id = ?",
+        (detalle_id,)).fetchone()
+    if not referencia:
+        conn.close()
+        return err("La línea de inventario no existe", 404)
+
+    inv, permitido = _sucursal_de_planilla(
+        conn, referencia["inventario_id"], bloquear=True)
+    if not permitido:
+        conn.rollback()
+        conn.close()
+        return err("Planilla no encontrada", 404)
+    if inv["estado"] != "abierto":
+        conn.rollback()
+        conn.close()
+        return err("Solo se pueden rebasar líneas de planillas abiertas", 409)
+    if inv["sucursal_id"] != sucursal_operativa():
+        conn.rollback()
+        conn.close()
+        return err("Solo puedes rebasar una línea de tu sucursal", 403)
+
+    fila = conn.execute("""
+        SELECT d.*, p.codigo AS codigo_actual, p.sucursal_id AS producto_sucursal_id
+        FROM inventario_detalle d
+        JOIN productos p ON p.id = d.producto_id
+        WHERE d.id = ? AND d.inventario_id = ? FOR UPDATE
+    """, (detalle_id, inv["id"])).fetchone()
+    if not fila:
+        conn.rollback()
+        conn.close()
+        return err("La línea ya no pertenece a esa planilla", 409)
+    if fila["producto_sucursal_id"] != inv["sucursal_id"]:
+        conn.rollback()
+        conn.close()
+        return err("La línea no pertenece al catálogo de esta sucursal", 409)
+    if fila["codigo_actual"] != codigo_esperado:
+        conn.rollback()
+        conn.close()
+        return err("El código del producto no coincide; recarga la planilla", 409)
+    if (fila["conteo_fisico"] is None
+            or not _misma_cantidad(fila["conteo_fisico"], conteo_esperado)
+            or not _misma_cantidad(fila["inicial"], inicial_esperado)
+            or not _misma_cantidad(fila["stock_sistema"], inicial_esperado)):
+        conn.rollback()
+        conn.close()
+        return err(
+            "La fila cambió desde que se revisó. No se modificó; recarga la planilla.",
+            409)
+
+    stock_actual = _stocks_actuales(
+        conn, ids_sucursal_consolidada(conn, inv["sucursal_id"])
+    ).get(fila["producto_id"], 0.0)
+    if not _misma_cantidad(stock_actual, stock_esperado):
+        conn.rollback()
+        conn.close()
+        return err(
+            f"El stock actual cambió (ahora es {stock_actual:g}). "
+            "No se modificó la fila; revisa el producto y vuelve a confirmar.",
+            409)
+
+    inicial = stock_actual
+    ingreso_manual = fila["ingreso_manual"] or 0.0
+    disponible = inicial + ingreso_manual
+    final = fila["conteo_fisico"]
+    utilizada = round(max(disponible - final, 0.0), 3)
+    diferencia = round(final - stock_actual, 3)
+    actualizado = conn.execute("""
+        UPDATE inventario_detalle
+        SET inicial = %s, stock_sistema = %s, disponible = %s,
+            final = %s, utilizada = %s, diferencia = %s
+        WHERE id = %s AND inventario_id = %s
+          AND conteo_fisico = %s AND inicial = %s AND stock_sistema = %s
+    """, (inicial, stock_actual, disponible, final, utilizada, diferencia,
+          detalle_id, inv["id"], conteo_esperado,
+          inicial_esperado, inicial_esperado))
+    if actualizado.rowcount != 1:
+        conn.rollback()
+        conn.close()
+        return err(
+            "La fila cambió durante la reparación. No se modificó; recarga la planilla.",
+            409)
+
+    conn.commit()
+    conn.close()
+    registrar_auditoria(
+        "Referencia de inventario rebasada",
+        f"Planilla {inv['id']}, línea {detalle_id}, producto {codigo_esperado}: "
+        f"{inicial_esperado:g} -> {inicial:g}; conteo conservado {final:g}; "
+        f"diferencia {diferencia:g}. Sin cambios en stock ni movimientos.")
+    return ok({
+        "detalle_id": detalle_id,
+        "producto": fila["producto_nombre"],
+        "inicial": round(inicial, 3),
+        "conteo_fisico": round(final, 3),
+        "diferencia": diferencia,
+    }, message="Referencia actualizada; se conservó el conteo físico")
 
 
 # --------------------------------------------------------------------------
