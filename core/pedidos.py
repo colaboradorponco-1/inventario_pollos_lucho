@@ -174,6 +174,21 @@ def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
     return equivalente["producto_destino_id"], None
 
 
+def _validar_producto_receptor(conn, producto_id, nombre, proveedor_id,
+                               sucursal_receptora_id):
+    """Da un error accionable antes de guardar un pedido imposible de recibir."""
+    producto_destino_id, error = _producto_receptor(
+        conn, producto_id, sucursal_receptora_id)
+    if error:
+        proveedor = _nombre_sucursal(conn, proveedor_id)
+        receptora = _nombre_sucursal(conn, sucursal_receptora_id)
+        return None, (
+            f"No se puede identificar la ficha receptora para '{nombre}' "
+            f"(ficha {producto_id}) desde "
+            f"{proveedor} para {receptora}: {error}")
+    return producto_destino_id, None
+
+
 def _texto_tacho(fraccion):
     """'1 tacho entero', '1/2 tacho', '1/4 tacho'... a partir de la fracción."""
     try:
@@ -355,6 +370,11 @@ def pedidos():
             if proveedor not in proveedores_validos:
                 destinos_malos.setdefault(proveedor, []).append(fila["nombre"])
                 continue
+            _, error_recepcion = _validar_producto_receptor(
+                conn, prod_id, fila["nombre"], proveedor, sucursal_id)
+            if error_recepcion:
+                conn.close()
+                return err(f"{error_recepcion} No se guardó el pedido.", 409)
             # Si a quien le toca despachar no tiene de esto, se avisa y se sigue:
             # el pedido se guarda igual y la persona ve donde hay. Bloquear
             # acá seria peor, porque el problema real es el stock, no el pedido.
@@ -881,10 +901,11 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
             clave = (origen_id, d["producto_id"])
             if clave in productos_recepcion:
                 continue
-            producto_destino_id, error_equivalencia = _producto_receptor(
-                conn, d["producto_id"], pedido["sucursal_id"])
+            producto_destino_id, error_equivalencia = _validar_producto_receptor(
+                conn, d["producto_id"], d["producto_nombre"], origen_id,
+                pedido["sucursal_id"])
             if error_equivalencia:
-                return "error", error_equivalencia
+                return "error", f"{error_equivalencia} No se modificó stock."
             productos_recepcion[clave] = producto_destino_id
 
     # La mercadería se mueve HOY, no el día en que se hizo el pedido.
@@ -1391,7 +1412,7 @@ def pedido_reparar_stock_equivalencias():
             conn, grupo["producto_id"], pedido["sucursal_id"])
         if error_equivalencia:
             conn.close()
-            return err(error_equivalencia, 409)
+            return err(f"{error_equivalencia} No se modificó stock.", 409)
         if destino_id == grupo["producto_id"]:
             continue
         plan = por_producto.setdefault(grupo["producto_id"], {
@@ -1492,3 +1513,67 @@ def pedido_reparar_stock_equivalencias():
         f"{ticket}: {detalle_auditoria}")
     return ok({"simulacion": False, "ticket": ticket, "cambios": planes},
               message=f"Se corrigió el inventario de {ticket}.")
+
+
+@pedidos_bp.route("/api/pedidos/equivalencias-pendientes", methods=["GET"])
+@login_requerido
+def pedidos_equivalencias_pendientes():
+    """Lista líneas de pedidos abiertos que todavía no pueden recibirse."""
+    if not es_superadmin():
+        return err("Solo el superadministrador puede revisar equivalencias", 403)
+
+    conn = get_conn()
+    filas = conn.execute("""
+        SELECT p.nro_ticket, p.estado,
+               d.producto_id, pr.nombre AS producto_nombre,
+               pr.unidad AS producto_unidad,
+               COALESCE(d.destino_id, p.destino_id) AS proveedor_id,
+               proveedor.nombre AS proveedor_nombre,
+               p.sucursal_id AS sucursal_receptora_id,
+               receptora.nombre AS sucursal_receptora_nombre
+        FROM pedidos p
+        JOIN pedido_detalle d ON d.pedido_id = p.id
+        JOIN productos pr ON pr.id = d.producto_id
+        JOIN sucursales proveedor
+          ON proveedor.id = COALESCE(d.destino_id, p.destino_id)
+        JOIN sucursales receptora ON receptora.id = p.sucursal_id
+        WHERE p.estado IN ('pendiente', 'en_camino')
+          AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
+        ORDER BY p.nro_ticket, pr.nombre
+    """).fetchall()
+
+    pendientes = {}
+    resoluciones = {}
+    for fila in filas:
+        clave_resolucion = (
+            fila["producto_id"], fila["sucursal_receptora_id"])
+        if clave_resolucion not in resoluciones:
+            resoluciones[clave_resolucion] = _producto_receptor(
+                conn, fila["producto_id"], fila["sucursal_receptora_id"])
+        _, error = resoluciones[clave_resolucion]
+        if not error:
+            continue
+
+        clave = (*clave_resolucion, fila["proveedor_id"])
+        pendiente = pendientes.setdefault(clave, {
+            "producto_id": fila["producto_id"],
+            "producto_nombre": fila["producto_nombre"],
+            "producto_unidad": fila["producto_unidad"],
+            "proveedor_id": fila["proveedor_id"],
+            "proveedor_nombre": fila["proveedor_nombre"],
+            "sucursal_receptora_id": fila["sucursal_receptora_id"],
+            "sucursal_receptora_nombre": fila["sucursal_receptora_nombre"],
+            "motivo": error,
+            "tickets": [],
+        })
+        if fila["nro_ticket"] not in pendiente["tickets"]:
+            pendiente["tickets"].append(fila["nro_ticket"])
+
+    conn.close()
+    resultado = sorted(
+        pendientes.values(),
+        key=lambda fila: (
+            fila["sucursal_receptora_nombre"],
+            fila["proveedor_nombre"],
+            fila["producto_nombre"].casefold()))
+    return ok({"pendientes": resultado, "total": len(resultado)})

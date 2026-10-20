@@ -1241,6 +1241,54 @@ async function aplicarReparacionStock() {
     }
 }
 
+async function revisarPedidosEquivalenciasPendientes() {
+    const resultado = $('#equivalencias-pendientes-resultado');
+    resultado.textContent = 'Revisando pedidos pendientes y en camino...';
+    try {
+        const data = await request(API + '/pedidos/equivalencias-pendientes');
+        const pendientes = data.pendientes || [];
+        if (!pendientes.length) {
+            resultado.innerHTML = '<p class="empty">No hay pedidos abiertos con equivalencias pendientes.</p>';
+            return;
+        }
+        resultado.innerHTML = `
+            <p>${pendientes.length} combinación(es) de producto y sucursal necesitan revisión.</p>
+            <div class="table-scroll">
+                <table class="data-table">
+                    <thead><tr><th>Ticket(s)</th><th>Producto proveedor</th><th>Recibe</th><th>Motivo</th><th></th></tr></thead>
+                    <tbody>${pendientes.map((p) => {
+            const puedeConfigurar = $('#equiv-origen').querySelector(
+                `option[value="${p.producto_id}"]`);
+            return `<tr>
+                <td>${esc(p.tickets.join(', '))}</td>
+                <td>${esc(p.producto_nombre)} (${esc(p.producto_unidad || 'unidad')}) — ${esc(p.proveedor_nombre)}</td>
+                <td>${esc(p.sucursal_receptora_nombre)}</td>
+                <td>${esc(p.motivo)}</td>
+                <td>${puedeConfigurar
+                    ? `<button class="btn btn-sm" type="button" data-configurar-equivalencia-origen="${p.producto_id}" data-configurar-equivalencia-sucursal="${p.sucursal_receptora_id}">Configurar ficha</button>`
+                    : 'Revisar ficha proveedor inactiva'}</td>
+            </tr>`;
+        }).join('')}</tbody>
+                </table>
+            </div>`;
+        $$('[data-configurar-equivalencia-origen]').forEach((button) => {
+            button.addEventListener('click', () => {
+                $('#equiv-origen').value = button.dataset.configurarEquivalenciaOrigen;
+                $('#equiv-sucursal').value = button.dataset.configurarEquivalenciaSucursal;
+                $('#equiv-sucursal').dispatchEvent(new Event('change'));
+                $('#equiv-destino').focus();
+                $('#form-equivalencia').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            });
+        });
+    } catch (e) {
+        resultado.textContent = '';
+        toast(e.message, 'err');
+    }
+}
+
+$('#btn-revisar-equivalencias-pendientes')?.addEventListener(
+    'click', revisarPedidosEquivalenciasPendientes);
+
 $('#form-equivalencia')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
@@ -1256,6 +1304,7 @@ $('#form-equivalencia')?.addEventListener('submit', async (event) => {
         equivalenciasCargadas = false;
         await loadEquivalencias();
         equivalenciasCargadas = true;
+        await revisarPedidosEquivalenciasPendientes();
     } catch (e) {
         toast(e.message, 'err');
     }
