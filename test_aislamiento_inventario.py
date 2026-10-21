@@ -329,13 +329,16 @@ def prueba_guardado_parcial_compartido():
     _check("la otra sesión sincroniza cambios en un máximo de 10 segundos",
            "}, 10000);" in js)
     _check("Actualizar stock llama al refresco inmediato de la planilla",
-           "$('#btn-inv-refrescar')?.addEventListener('click', invClick(() => refrescarStockInicial(false)))"
+           "$('#btn-inv-refrescar')?.addEventListener('click', invClick(() => refrescarStockInicial(false, true)))"
            in js)
+    _check("Actualizar stock solicita sincronizar filas ya contadas",
+           "actualizarContados ? '?actualizar_stock=1' : ''" in js)
     with open(os.path.join(raiz, "templates", "index.html"), encoding="utf-8") as fh:
         html = fh.read()
     _check("la planilla explica editar el stock del producto y actualizar",
-           "edita el producto de esta sucursal en <strong>Productos</strong>" in html
-           and "pulsa <strong>Actualizar stock</strong>" in html)
+           "editas el stock del producto" in html
+           and "pulsa <strong>Actualizar stock</strong>" in html
+           and "conserva el inventario final contado" in html)
     with open(os.path.join(raiz, "core", "productos.py"), encoding="utf-8") as fh:
         productos = fh.read()
     producto_put = re.search(
@@ -621,6 +624,63 @@ def prueba_sincronizacion_actualiza_inicial_sistema():
     _check("la sincronización no vuelve a crear productos excluidos de la planilla",
            all(5 not in params for _, params in inserciones),
            f"inserciones={inserciones}")
+
+
+def prueba_actualizar_stock_rebasa_referencia_sin_pisar_conteo():
+    """El botón actualiza la referencia, pero conserva el conteo guardado."""
+    producto = Fila(
+        id=5, categoria_id=1, categoria_nombre="Insumos", nombre="PLATO 1/4",
+        codigo="PRD-0495", unidad="unidad", costo_promedio=0,
+        precio_venta=0, stock=350, posterior=0)
+    detalle = Fila(
+        id=15, producto_id=5, inicial=250, stock_sistema=250, disponible=250,
+        conteo_fisico=250, final=250, utilizada=0, diferencia=0,
+        ingreso_manual=0, categoria_nombre="Insumos",
+        producto_nombre="PLATO 1/4", codigo="PRD-0495", unidad="unidad")
+    updates = []
+
+    class SyncConn:
+        def execute(self, sql, params=None):
+            s = " ".join(str(sql).split())
+            if s.startswith("SELECT estado FROM inventario_diario"):
+                return CierreCursor([Fila(estado="abierto")])
+            if s.startswith("SELECT producto_id, motivo FROM inventario_detalle_exclusiones"):
+                return CierreCursor([])
+            if s.startswith("UPDATE inventario_detalle SET"):
+                updates.append((s, list(params or [])))
+                return CierreCursor([])
+            raise AssertionError(f"Consulta inesperada: {s}")
+
+        def commit(self):
+            pass
+
+    originals = (
+        invmod._productos_planilla, invmod._detalle,
+        invmod._productos_ajenos, invmod.ids_sucursal_consolidada,
+    )
+    invmod._productos_planilla = lambda *args: [producto]
+    invmod._detalle = lambda *args: [detalle]
+    invmod._productos_ajenos = lambda *args: {}
+    invmod.ids_sucursal_consolidada = lambda *args: [33]
+    try:
+        normal = invmod._sincronizar_detalle(
+            SyncConn(), 7, 33, "2026-10-20", 0)
+        actualizaciones_normales = len(updates)
+        actualizado = invmod._sincronizar_detalle(
+            SyncConn(), 7, 33, "2026-10-20", 0, actualizar_contados=True)
+    finally:
+        (invmod._productos_planilla, invmod._detalle,
+         invmod._productos_ajenos, invmod.ids_sucursal_consolidada) = originals
+
+    sql, params = updates[0] if updates else ("", [])
+    _check("la sincronización normal conserva una línea ya contada",
+           normal["cambios"] == 0 and actualizaciones_normales == 0)
+    _check("Actualizar stock sincroniza la referencia sin pisar el conteo",
+           actualizado["cambios"] == 1 and len(updates) == 1
+           and "stock_sistema = %s, inicial = %s" in sql
+           and "conteo_fisico =" not in sql
+           and params[5:12] == [350, 350, 350, 250, 100, -100, 15],
+           f"params={params}")
 
 
 def prueba_limpieza_segura_de_filas_ajenas():
@@ -1015,6 +1075,7 @@ def main():
     prueba_se_sabe_quien_conto()
     prueba_guardado_parcial_compartido()
     prueba_sincronizacion_actualiza_inicial_sistema()
+    prueba_actualizar_stock_rebasa_referencia_sin_pisar_conteo()
     prueba_limpieza_segura_de_filas_ajenas()
     prueba_clasificacion_de_fichas_por_sucursal()
     prueba_filas_ajenas_no_se_guardan_ni_ajustan()

@@ -504,7 +504,7 @@
                         <h3 id="inv-titulo">Conteo del día</h3>
                         <p id="inv-subtitulo">El inventario inicial viene del stock del sistema. Si cambias el stock en Productos, vuelve aquí y pulsa “Actualizar stock”.</p>
                     </div>
-                    <button class="btn btn-sm" id="btn-inv-refrescar" title="Vuelve a leer el stock actual de Productos y actualiza el inventario inicial de los productos que aún no contaste" style="white-space:nowrap">&#8635; Actualizar stock</button>
+                    <button class="btn btn-sm" id="btn-inv-refrescar" title="Actualiza el inventario inicial desde Productos. En filas contadas conserva el conteo y muestra la diferencia." style="white-space:nowrap">&#8635; Actualizar stock</button>
                     <button class="btn btn-icon" id="btn-inv-cerrar-panel" title="Cerrar la planilla (guarda antes de cerrar)" aria-label="Cerrar panel de conteo">&#10005;</button>
                 </div>
 
@@ -512,7 +512,7 @@
 
                 <div class="toolbar small" id="inv-resumen" style="margin-bottom:10px"></div>
 
-                <p class="scan-hint inv-ayuda"><strong>Cómo se llena:</strong> el <strong>inventario inicial</strong> viene del stock actual del sistema (incluye los pedidos entregados) y es de solo lectura. Si necesitas corregir el stock, edita el producto de esta sucursal en <strong>Productos</strong>, vuelve a esta planilla y pulsa <strong>Actualizar stock</strong>; el inicial se actualiza mientras el producto aún no esté contado. En <strong>Ingreso manual</strong> aparece el total actual recibido fuera del sistema. Reemplázalo por el total correcto; escribe <strong>0</strong> si no hubo ingreso manual. Luego escribe el <strong>inventario final</strong> con lo que contaste. <strong>Disp. día</strong> = inventario inicial + ingreso manual.</p>
+                <p class="scan-hint inv-ayuda"><strong>Cómo se llena:</strong> el <strong>inventario inicial</strong> viene del stock del sistema (incluye los pedidos entregados) y es de solo lectura. Si editas el stock del producto, vuelve a esta planilla y pulsa <strong>Actualizar stock</strong>: actualiza el inicial incluso si ya hay un conteo, pero conserva el inventario final contado y muestra cualquier diferencia. Si el conteo final también fue incorrecto, corrígelo y guarda antes de cerrar. En <strong>Ingreso manual</strong> aparece el total recibido fuera del sistema; escribe el total correcto o <strong>0</strong> si no hubo ingreso. <strong>Disp. día</strong> = inventario inicial + ingreso manual.</p>
 
                 <div class="table-scroll"><table class="data-table inv-tabla">
                     <thead>

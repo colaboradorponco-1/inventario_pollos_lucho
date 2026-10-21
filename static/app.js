@@ -3402,7 +3402,7 @@ $('#btn-inv-print')?.addEventListener('click', () => {
 $('#btn-inv-borrar')?.addEventListener('click', invClick(borrarInventario));
 // Sincronización de la planilla compartida: ambos encargados ven los cambios
 // guardados por el otro sin tener que cerrar y volver a abrirla.
-$('#btn-inv-refrescar')?.addEventListener('click', invClick(() => refrescarStockInicial(false)));
+$('#btn-inv-refrescar')?.addEventListener('click', invClick(() => refrescarStockInicial(false, true)));
 $('#btn-inv-cerrar-panel')?.addEventListener('click', invClick(async () => {
     detenerVigilaInventario();
     const Digitado = Array.from($$('#inv-tbody .inv-conteo')).some((i) => i.value !== '');
@@ -3995,11 +3995,12 @@ async function abrirInventario(invId) {
 
 // Sincroniza la planilla compartida mientras está abierta. Cada campo se
 // actualiza desde el servidor salvo los que el usuario está editando localmente.
-async function refrescarStockInicial(silencioso) {
+async function refrescarStockInicial(silencioso, actualizarContados) {
     if (!INV_ID || INV_CERRADA) return;
     let d;
     try {
-        const resp = await request(API + '/inventario-diario/' + INV_ID);
+        const actualizar = actualizarContados ? '?actualizar_stock=1' : '';
+        const resp = await request(API + '/inventario-diario/' + INV_ID + actualizar);
         d = resp.data || resp;
     } catch (e) {
         if (!silencioso) toast(e.message || 'No se pudo actualizar el stock', 'err');

@@ -193,7 +193,8 @@ def _productos_ajenos(conn, producto_ids, ids_sucursal):
     }
 
 
-def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
+def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id,
+                         actualizar_contados=False):
     """Agrega a una planilla ABIERTA los productos que ahora pertenecen a su
     categoría, actualiza sus nombres sin pisar conteos y retira filas ajenas sin
     datos manuales.
@@ -313,7 +314,8 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
             cambios += 1
         else:
             # El inicial sigue el stock del sistema hasta que se registra el
-            # conteo físico. Una observación no debe impedir esta actualización.
+            # conteo físico. El botón explícito de actualizar también permite
+            # rebasar la referencia de filas contadas, sin pisar el conteo.
             #
             # OJO: se escribe SOLO si el valor cambió de verdad. La planilla
             # abierta se refresca sola cada 10s, y escribir las ~100 filas en
@@ -340,17 +342,37 @@ def _sincronizar_detalle(conn, inv_id, sid, fecha, cat_id):
                           stock_dia, inicial, disponible, d["id"]))
                     cambios += 1
             else:
+                stock_contado = (stock_dia if actualizar_contados
+                                 else d["stock_sistema"])
+                inicial_contado = (inicial if actualizar_contados
+                                   else d["inicial"])
+                disponible_contado = inicial_contado + (d["ingreso_manual"] or 0)
+                final_contado = d["conteo_fisico"]
+                utilizada_contada = max(disponible_contado - final_contado, 0)
+                diferencia_contada = round(final_contado - stock_contado, 3)
                 if (d["categoria_nombre"] or "") != (f["categoria_nombre"] or "Sin categoría") or \
                         (d["producto_nombre"] or "") != (f["nombre"] or "") or \
                         (d["codigo"] or "") != (f["codigo"] or "") or \
-                        (d["unidad"] or "") != (f["unidad"] or "unidad"):
+                        (d["unidad"] or "") != (f["unidad"] or "unidad") or \
+                        (actualizar_contados and (
+                            not _misma_cantidad(d["inicial"], inicial_contado) or
+                            not _misma_cantidad(d["disponible"], disponible_contado) or
+                            not _misma_cantidad(d["stock_sistema"], stock_contado) or
+                            not _misma_cantidad(d["final"], final_contado) or
+                            not _misma_cantidad(d["utilizada"], utilizada_contada) or
+                            not _misma_cantidad(d["diferencia"], diferencia_contada))):
                     conn.execute("""
                         UPDATE inventario_detalle
                         SET categoria_id = %s, categoria_nombre = %s,
-                            producto_nombre = %s, codigo = %s, unidad = %s
+                            producto_nombre = %s, codigo = %s, unidad = %s,
+                            stock_sistema = %s, inicial = %s, disponible = %s,
+                            final = %s, utilizada = %s, diferencia = %s
                         WHERE id = %s
                     """, (f["categoria_id"], f["categoria_nombre"] or "Sin categoría",
-                          f["nombre"], f["codigo"], f["unidad"] or "unidad", d["id"]))
+                          f["nombre"], f["codigo"], f["unidad"] or "unidad",
+                          stock_contado, inicial_contado, disponible_contado,
+                          final_contado, utilizada_contada, diferencia_contada,
+                          d["id"]))
                     cambios += 1
     if cambios:
         conn.commit()
@@ -596,7 +618,8 @@ def inventario_detalle(inv_id):
     if inv["estado"] != "cerrado":
         sync = _sincronizar_detalle(
             conn, inv_id, inv["sucursal_id"],
-            _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0)
+            _fecha_iso(inv["fecha"]), inv["categoria_id"] or 0,
+            actualizar_contados=request.args.get("actualizar_stock") == "1")
     filas = _detalle(conn, inv_id)
     ids_planilla = ids_sucursal_consolidada(conn, inv["sucursal_id"])
     stocks = _stocks_actuales(conn, ids_planilla)
