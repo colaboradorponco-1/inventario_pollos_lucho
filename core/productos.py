@@ -25,6 +25,12 @@ def norm_nombre(texto):
     return re.sub(r"[^a-z0-9]", "", s)
 
 
+def _norm_nombre_tokens(texto):
+    s = unicodedata.normalize("NFKD", str(texto or ""))
+    s = "".join(c for c in s if not unicodedata.combining(c)).lower()
+    return tuple(sorted(re.findall(r"[a-z0-9]+", s)))
+
+
 def _combinar_detalles_inventario(destino, origen):
     """Combina dos líneas de la misma ficha sin inventar un conteo físico."""
     campos_suma = ("stock_sistema", "inicial", "ingreso_dia", "ingreso_manual",
@@ -211,6 +217,9 @@ def productos():
         if not nombre:
             conn.close()
             return err("El nombre del producto es obligatorio", 400)
+        if len(nombre) > 255:
+            conn.close()
+            return err("El nombre del producto no puede superar 255 caracteres", 400)
         duplicado = _producto_duplicado(conn, nombre, data.get("unidad", "unidad"))
         if duplicado:
             sucursal_dup = duplicado["sucursal_nombre"] or "sin sucursal"
@@ -1131,30 +1140,39 @@ def producto_historial(prod_id):
 @productos_bp.route("/api/equivalencias-productos", methods=["GET", "POST"])
 @login_requerido
 def equivalencias_productos():
-    if not es_superadmin():
-        return err("Solo el superadministrador puede gestionar equivalencias", 403)
-
     conn = get_conn()
+    if not (es_gestion() or es_encargado_almacen(conn)):
+        conn.close()
+        return err(
+            "Solo administración y encargados de Almacén Principal 1 o 2 "
+            "pueden confirmar equivalencias", 403)
+
     if request.method == "GET":
         equivalencias = conn.execute("""
             SELECT e.id, e.producto_origen_id, e.sucursal_destino_id,
                    e.producto_destino_id, origen.nombre AS origen_nombre,
                    origen.unidad AS origen_unidad,
+                   origen_categoria.nombre AS origen_categoria_nombre,
                    origen_sucursal.nombre AS origen_sucursal_nombre,
                    destino.nombre AS destino_nombre,
                    destino.unidad AS destino_unidad,
+                   destino_categoria.nombre AS destino_categoria_nombre,
                    destino_sucursal.nombre AS destino_sucursal_nombre
             FROM equivalencias_productos e
             JOIN productos origen ON origen.id = e.producto_origen_id
+            LEFT JOIN categorias origen_categoria ON origen_categoria.id = origen.categoria_id
             LEFT JOIN sucursales origen_sucursal ON origen_sucursal.id = origen.sucursal_id
             JOIN productos destino ON destino.id = e.producto_destino_id
+            LEFT JOIN categorias destino_categoria ON destino_categoria.id = destino.categoria_id
             JOIN sucursales destino_sucursal ON destino_sucursal.id = e.sucursal_destino_id
             ORDER BY origen_sucursal.nombre, origen.nombre, destino_sucursal.nombre
         """).fetchall()
         productos = conn.execute("""
-            SELECT p.id, p.nombre, p.unidad, p.sucursal_id,
+            SELECT p.id, p.nombre, p.unidad, p.sucursal_id, p.categoria_id,
+                   c.nombre AS categoria_nombre,
                    COALESCE(s.nombre, 'Sin sucursal') AS sucursal_nombre
             FROM productos p
+            LEFT JOIN categorias c ON c.id = p.categoria_id
             LEFT JOIN sucursales s ON s.id = p.sucursal_id
             WHERE p.activo = 1
             ORDER BY s.nombre, p.nombre
@@ -1211,6 +1229,159 @@ def equivalencias_productos():
         "Equivalencia de producto configurada",
         f"{producto_origen_id} -> {producto_destino_id} en sucursal {sucursal_destino_id}")
     return ok(message="Equivalencia guardada")
+
+
+@productos_bp.route("/api/equivalencias-productos/crear-ficha", methods=["POST"])
+@login_requerido
+def equivalencia_producto_crear_ficha():
+    """Crea una ficha receptora sin stock y la vincula en una sola transacción."""
+    conn = get_conn()
+    if not (es_gestion() or es_encargado_almacen(conn)):
+        conn.close()
+        return err(
+            "Solo administración y encargados de Almacén Principal 1 o 2 "
+            "pueden crear fichas receptoras", 403)
+
+    data = request.get_json() or {}
+    try:
+        producto_origen_id = int(data.get("producto_origen_id"))
+        sucursal_destino_id = int(data.get("sucursal_destino_id"))
+        categoria = data.get("categoria_id")
+        if categoria in (None, ""):
+            raise ValueError
+        categoria_id = None if categoria == "sin" else int(categoria)
+    except (TypeError, ValueError):
+        conn.close()
+        return err("Selecciona un producto, una sucursal y una categoría válida", 400)
+
+    nombre = (data.get("nombre") or "").strip()
+    if not nombre:
+        conn.close()
+        return err("El nombre del producto es obligatorio", 400)
+    if data.get("confirmar_no_existe") is not True:
+        conn.close()
+        return err(
+            "Confirma que revisaste las fichas sugeridas y que el producto no existe "
+            "en la sucursal receptora", 400)
+
+    # Bloquea la sucursal mientras se revisa la duplicidad para evitar que dos
+    # solicitudes simultáneas creen la misma ficha receptora.
+    sucursal = conn.execute(
+        "SELECT id, nombre FROM sucursales WHERE id = ? FOR UPDATE",
+        (sucursal_destino_id,)).fetchone()
+    origen = conn.execute("""
+        SELECT id, nombre, unidad, categoria_id, marca, costo_promedio,
+               precio_venta, unidad_tacho, pide_tacho
+        FROM productos WHERE id = ? AND activo = 1
+    """, (producto_origen_id,)).fetchone()
+    if not sucursal or not origen:
+        conn.close()
+        return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
+
+    solicitud = conn.execute("""
+        SELECT 1
+        FROM pedidos p
+        JOIN pedido_detalle d ON d.pedido_id = p.id
+        WHERE p.sucursal_id = ?
+          AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
+          AND d.producto_id = ?
+          AND p.estado IN ('pendiente', 'en_camino')
+        LIMIT 1
+    """, (sucursal_destino_id, producto_origen_id)).fetchone()
+    if not solicitud:
+        conn.close()
+        return err("Este producto no tiene un pedido abierto para esa sucursal", 409)
+
+    equivalencia = conn.execute("""
+        SELECT producto_destino_id
+        FROM equivalencias_productos
+        WHERE producto_origen_id = ? AND sucursal_destino_id = ?
+        FOR UPDATE
+    """, (producto_origen_id, sucursal_destino_id)).fetchone()
+    if equivalencia:
+        conn.close()
+        return err("Este producto ya tiene una equivalencia. Recarga la revisión del pedido.", 409)
+
+    existentes = conn.execute("""
+        SELECT id, nombre, unidad
+        FROM productos
+        WHERE sucursal_id = ? AND activo = 1
+    """, (sucursal_destino_id,)).fetchall()
+    nombre_normalizado = norm_nombre(nombre)
+    nombre_tokens = _norm_nombre_tokens(nombre)
+    unidad_normalizada = norm_nombre(origen["unidad"] or "unidad")
+    existente = next((producto for producto in existentes
+                      if (norm_nombre(producto["nombre"]) == nombre_normalizado
+                          or _norm_nombre_tokens(producto["nombre"]) == nombre_tokens)
+                      and norm_nombre(producto["unidad"] or "unidad")
+                      == unidad_normalizada), None)
+    if existente:
+        conn.close()
+        return err(
+            f"Ya existe la ficha '{existente['nombre']}' en esa sucursal. "
+            "Selecciona esa ficha y confirma la equivalencia en vez de crear otra.",
+            409)
+
+    if categoria_id is not None and not conn.execute(
+            "SELECT id FROM categorias WHERE id = ?", (categoria_id,)).fetchone():
+        conn.close()
+        return err("La categoría seleccionada no existe", 400)
+
+    almacenes = conn.execute(
+        "SELECT id, nombre FROM almacenes WHERE sucursal_id = ? ORDER BY id",
+        (sucursal_destino_id,)).fetchall()
+    nombre_sucursal = norm_nombre(sucursal["nombre"])
+    almacen = next(
+        (fila for fila in almacenes
+         if norm_nombre(fila["nombre"]) == nombre_sucursal), None)
+    if not almacen:
+        almacen = next(
+            (fila for fila in almacenes
+             if norm_nombre(fila["nombre"]) == "almacenprincipal"), None)
+    if not almacen and almacenes:
+        almacen = almacenes[0]
+    try:
+        codigo = siguiente_codigo(conn)
+        cur = conn.execute("""
+            INSERT INTO productos (
+                codigo, nombre, marca, categoria_id, unidad, stock_minimo,
+                costo_promedio, precio_venta, vencimiento, almacen_id,
+                proveedor_id, sucursal_id, unidad_tacho, pide_tacho,
+                para_proveer, activo
+            )
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?, NULL, ?, NULL, ?, ?, ?, 0, 1)
+        """, (codigo, nombre, origen.get("marca"), categoria_id,
+              origen.get("unidad") or "unidad",
+              origen.get("costo_promedio") or 0,
+              origen.get("precio_venta") or 0,
+              (almacen or {}).get("id"), sucursal_destino_id,
+              origen.get("unidad_tacho") or 0,
+              origen.get("pide_tacho") or 0))
+        producto_destino_id = cur.lastrowid
+        conn.execute("""
+            INSERT INTO equivalencias_productos
+                (producto_origen_id, sucursal_destino_id, producto_destino_id,
+                 creado_por, creado_en)
+            VALUES (?, ?, ?, ?, ?)
+        """, (producto_origen_id, sucursal_destino_id, producto_destino_id,
+              session.get("usuario", ""),
+              datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logging.exception(
+            "No se pudo crear y vincular la ficha receptora del producto %s "
+            "en la sucursal %s", producto_origen_id, sucursal_destino_id)
+        conn.close()
+        return err("No se pudo crear la ficha ni guardar la equivalencia", 500)
+
+    conn.close()
+    registrar_auditoria(
+        "Ficha receptora creada y vinculada",
+        f"{producto_origen_id} -> {producto_destino_id} "
+        f"en sucursal {sucursal_destino_id}; stock inicial 0")
+    return ok({"producto_destino_id": producto_destino_id, "codigo": codigo},
+              message="Ficha creada con stock 0 y equivalencia confirmada")
 
 
 @productos_bp.route("/api/equivalencias-productos/<int:equivalencia_id>", methods=["DELETE"])

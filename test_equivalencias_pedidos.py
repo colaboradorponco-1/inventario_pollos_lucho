@@ -47,6 +47,48 @@ class _DespachoConn:
         return None
 
 
+class _EtapaPedidoConn:
+    def __init__(self, etapa):
+        self.pedido = {
+            "id": 46, "nro_ticket": "TKT-00046", "estado": etapa,
+            "etapa": etapa, "stock_movido": 0, "sucursal_id": 35,
+            "destino_id": 49,
+        }
+        self.detalle = [{"destino_id": 49, "preparado": 0}]
+        self.queries = []
+        self.commits = 0
+        self.rollbacks = 0
+        self.closed = False
+
+    def execute(self, sql, params=None):
+        sql = " ".join(str(sql).split())
+        self.queries.append((sql, params or ()))
+        if sql.startswith("UPDATE pedido_detalle SET preparado"):
+            for linea in self.detalle:
+                linea["preparado"] = 1
+        if "UPDATE pedidos SET etapa = 'en_camino'" in sql:
+            self.pedido["etapa"] = "en_camino"
+            self.pedido["estado"] = "en_camino"
+        return self
+
+    def fetchone(self):
+        if self.queries[-1][0].startswith("SELECT * FROM pedidos"):
+            return self.pedido
+        return None
+
+    def fetchall(self):
+        return self.detalle
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
+
+    def close(self):
+        self.closed = True
+
+
 class _EquivalenciaApiConn:
     def __init__(self, unidad_destino="unidad", sucursal_destino=35):
         self.unidad_destino = unidad_destino
@@ -76,6 +118,68 @@ class _EquivalenciaApiConn:
 
     def commit(self):
         self.commits += 1
+
+    def close(self):
+        self.closed = True
+
+
+class _CrearFichaEquivalenciaConn:
+    def __init__(self, duplicado=None, falla_equivalencia=False):
+        self.duplicado = duplicado
+        self.falla_equivalencia = falla_equivalencia
+        self.sql = ""
+        self.params = ()
+        self.inserts = []
+        self.commits = 0
+        self.rollbacks = 0
+        self.closed = False
+        self.lastrowid = 801
+
+    def execute(self, sql, params=None):
+        self.sql = " ".join(str(sql).split())
+        self.params = params or ()
+        if self.sql.startswith("INSERT INTO productos") or self.sql.startswith(
+                "INSERT INTO equivalencias_productos"):
+            self.inserts.append((self.sql, self.params))
+            if (self.falla_equivalencia
+                    and self.sql.startswith("INSERT INTO equivalencias_productos")):
+                raise RuntimeError("Falló la relación de equivalencia")
+        return self
+
+    def fetchone(self):
+        if "FROM sucursales WHERE id = ? FOR UPDATE" in self.sql:
+            return {"id": 35, "nombre": "America"}
+        if "FROM productos WHERE id = ? AND activo = 1" in self.sql:
+            return {
+                "id": 661, "nombre": "Aceite Grisol", "unidad": "litro",
+                "categoria_id": 8, "marca": "Grisol", "costo_promedio": 12,
+                "precio_venta": 14, "unidad_tacho": 0, "pide_tacho": 0,
+            }
+        if "FROM pedidos p" in self.sql and "JOIN pedido_detalle d" in self.sql:
+            return {"1": 1}
+        if "FROM equivalencias_productos" in self.sql:
+            return None
+        if "FROM categorias WHERE id = ?" in self.sql:
+            return {"id": 8}
+        return None
+
+    def fetchall(self):
+        if "SELECT codigo FROM productos" in self.sql:
+            return [{"codigo": "PRD-0800"}]
+        if "SELECT id, nombre, unidad FROM productos" in self.sql:
+            return [self.duplicado] if self.duplicado else []
+        if "SELECT id, nombre FROM almacenes WHERE sucursal_id = ?" in self.sql:
+            return [
+                {"id": 10, "nombre": "Almacén Principal"},
+                {"id": 9, "nombre": "America"},
+            ]
+        return []
+
+    def commit(self):
+        self.commits += 1
+
+    def rollback(self):
+        self.rollbacks += 1
 
     def close(self):
         self.closed = True
@@ -151,10 +255,17 @@ class _PedidoSinEquivalenciaConn:
     def __init__(self):
         self.queries = []
         self.closed = False
+        self.lastrowid = 901
 
     def execute(self, sql, params=None):
         self.queries.append((" ".join(str(sql).split()), params or ()))
         return self
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
 
     def fetchone(self):
         sql = self.queries[-1][0]
@@ -198,9 +309,9 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         })
         destino, error = pedidos._producto_receptor(conn, 661, 35)
         self.assertIsNone(destino)
-        self.assertIn("No hay equivalencia configurada", error)
+        self.assertIn("No hay equivalencia confirmada", error)
 
-    def test_receptor_usa_ficha_local_unica_con_mismo_nombre_y_unidad(self):
+    def test_receptor_no_asigna_ficha_local_automaticamente_por_nombre(self):
         conn = _FilaConn({
             "sucursal_origen_id": 49,
             "nombre_origen": "Plátano de freír",
@@ -211,9 +322,27 @@ class EquivalenciasPedidosTest(unittest.TestCase):
             "unidad_destino": None,
             "destino_activo": None,
         }, filas=[{"id": 662, "nombre": "Platano de freir", "unidad": "kg"}])
-        self.assertEqual(pedidos._producto_receptor(conn, 661, 35), (662, None))
+        destino, error = pedidos._producto_receptor(conn, 661, 35)
+        self.assertIsNone(destino)
+        self.assertIn("No hay equivalencia confirmada", error)
 
-    def test_receptor_rechaza_coincidencias_ambiguas_o_unidades_distintas(self):
+    def test_receptor_no_asigna_automaticamente_nombre_con_palabras_reordenadas(self):
+        conn = _FilaConn({
+            "sucursal_origen_id": 49,
+            "nombre_origen": "Aceite Sabrosa",
+            "unidad_origen": "litro",
+            "equivalencia_destino_id": None,
+            "producto_destino_id": None,
+            "sucursal_producto_destino": None,
+            "unidad_destino": None,
+            "destino_activo": None,
+        }, filas=[{"id": 667, "nombre": "SABROSA aceite", "unidad": "litro"}])
+
+        destino, error = pedidos._producto_receptor(conn, 661, 35)
+        self.assertIsNone(destino)
+        self.assertIn("No hay equivalencia confirmada", error)
+
+    def test_receptor_no_infiere_por_nombre_aunque_haya_ambiguos_o_unidad_distinta(self):
         origen = {
             "sucursal_origen_id": 49,
             "nombre_origen": "Papa holandesa",
@@ -230,14 +359,14 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         ])
         destino, error = pedidos._producto_receptor(duplicados, 661, 35)
         self.assertIsNone(destino)
-        self.assertIn("varias fichas", error)
+        self.assertIn("No hay equivalencia confirmada", error)
 
         unidad_distinta = _FilaConn(origen, filas=[
             {"id": 662, "nombre": "Papa holandesa", "unidad": "unidad"},
         ])
         destino, error = pedidos._producto_receptor(unidad_distinta, 661, 35)
         self.assertIsNone(destino)
-        self.assertIn("unidades", error)
+        self.assertIn("No hay equivalencia confirmada", error)
 
     def test_receptor_no_requiere_equivalencia_si_es_la_misma_sucursal(self):
         conn = _FilaConn({
@@ -285,7 +414,7 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         self.assertIn("ficha 661", error)
         self.assertIn("Sucursal", error)
 
-    def test_crear_pedido_sin_equivalencia_no_guarda_ticket(self):
+    def test_crear_pedido_sin_equivalencia_guarda_ticket_pendiente(self):
         conn = _PedidoSinEquivalenciaConn()
         app = Flask(__name__)
         app.secret_key = "test"
@@ -303,17 +432,74 @@ class EquivalenciasPedidosTest(unittest.TestCase):
                     patch.object(pedidos, "sucursal_actual", return_value=35), \
                     patch.object(pedidos, "destinos_validos", return_value=[49]), \
                     patch.object(pedidos, "stock_por_destino", return_value={}), \
+                    patch.object(pedidos, "stock_en_destino", return_value=0), \
                     patch.object(pedidos, "_ids_proveedores_misma_ciudad",
                                  return_value=None), \
+                    patch.object(pedidos, "_nro_ticket", return_value="TKT-TEST"), \
                     patch.object(
                         pedidos, "_producto_receptor",
-                        return_value=(None, "No hay equivalencia configurada")):
-                respuesta, status = pedidos.pedidos()
-        self.assertEqual(status, 409)
-        self.assertIn("No se guardó el pedido",
+                        return_value=(None, "No hay equivalencia configurada")), \
+                    patch.object(pedidos, "registrar_auditoria"):
+                respuesta = pedidos.pedidos()
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn("Se envió el pedido; antes de recibir",
                       respuesta.get_json()["message"])
-        self.assertFalse(any("INSERT INTO pedidos " in sql
-                             for sql, _ in conn.queries))
+        self.assertTrue(any("INSERT INTO pedidos " in sql
+                            for sql, _ in conn.queries))
+        self.assertTrue(any("INSERT INTO pedido_detalle " in sql
+                            for sql, _ in conn.queries))
+        self.assertTrue(conn.closed)
+
+    def test_encargado_puede_marcar_en_camino_sin_equivalencia_y_sin_mover_stock(self):
+        conn = _EtapaPedidoConn("pendiente")
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/pedidos/46/etapa", method="PUT",
+                json={"etapa": "en_camino"}):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            session["sucursal_id"] = 49
+            with patch.object(pedidos, "get_conn", return_value=conn), \
+                    patch.object(pedidos, "sucursal_actual", return_value=49), \
+                    patch.object(pedidos, "es_encargado_almacen", return_value=True), \
+                    patch.object(pedidos, "es_receptor", return_value=False), \
+                    patch.object(pedidos, "registrar_auditoria"), \
+                    patch.object(pedidos, "_despachar_stock") as despachar:
+                respuesta = pedidos.pedido_etapa(46)
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(conn.pedido["etapa"], "en_camino")
+        self.assertEqual(conn.pedido["stock_movido"], 0)
+        despachar.assert_not_called()
+        self.assertTrue(conn.closed)
+
+    def test_entrega_sin_equivalencia_se_detiene_antes_de_mover_stock(self):
+        conn = _EtapaPedidoConn("en_camino")
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/pedidos/46/etapa", method="PUT",
+                json={"etapa": "entregado"}):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            session["sucursal_id"] = 49
+            with patch.object(pedidos, "get_conn", return_value=conn), \
+                    patch.object(pedidos, "sucursal_actual", return_value=49), \
+                    patch.object(pedidos, "es_encargado_almacen", return_value=True), \
+                    patch.object(pedidos, "es_receptor", return_value=False), \
+                    patch.object(pedidos, "_despachar_stock",
+                                 return_value=("error", "Falta equivalencia. No se modificó stock.")) \
+                    as despachar:
+                respuesta, status = pedidos.pedido_etapa(46)
+
+        self.assertEqual(status, 400)
+        self.assertIn("Falta equivalencia", respuesta.get_json()["message"])
+        despachar.assert_called_once()
+        self.assertEqual(conn.pedido["etapa"], "en_camino")
+        self.assertEqual(conn.pedido["stock_movido"], 0)
+        self.assertFalse(any("stock_movido = 1" in sql for sql, _ in conn.queries))
+        self.assertEqual(conn.rollbacks, 1)
         self.assertTrue(conn.closed)
 
     def test_reporte_pedidos_pendientes_solo_muestra_equivalencias_faltantes(self):
@@ -321,21 +507,27 @@ class EquivalenciasPedidosTest(unittest.TestCase):
             {
                 "nro_ticket": "TKT-00051", "estado": "pendiente",
                 "producto_id": 661, "producto_nombre": "Producto",
-                "producto_unidad": "unidad", "proveedor_id": 49,
+                "producto_unidad": "unidad", "producto_categoria_id": 8,
+                "producto_categoria": "Aceites",
+                "proveedor_id": 49,
                 "proveedor_nombre": "Proveedor", "sucursal_receptora_id": 35,
                 "sucursal_receptora_nombre": "Receptora",
             },
             {
                 "nro_ticket": "TKT-00052", "estado": "en_camino",
                 "producto_id": 661, "producto_nombre": "Producto",
-                "producto_unidad": "unidad", "proveedor_id": 49,
+                "producto_unidad": "unidad", "producto_categoria_id": 8,
+                "producto_categoria": "Aceites",
+                "proveedor_id": 49,
                 "proveedor_nombre": "Proveedor", "sucursal_receptora_id": 35,
                 "sucursal_receptora_nombre": "Receptora",
             },
             {
                 "nro_ticket": "TKT-00053", "estado": "pendiente",
                 "producto_id": 662, "producto_nombre": "Ya vinculado",
-                "producto_unidad": "kg", "proveedor_id": 50,
+                "producto_unidad": "kg", "producto_categoria_id": 9,
+                "producto_categoria": "Otros",
+                "proveedor_id": 50,
                 "proveedor_nombre": "Otro proveedor", "sucursal_receptora_id": 35,
                 "sucursal_receptora_nombre": "Receptora",
             },
@@ -345,7 +537,7 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         app.secret_key = "test"
         with app.test_request_context("/api/pedidos/equivalencias-pendientes"):
             session["user_id"] = 1
-            session["rol"] = "superadmin"
+            session["rol"] = "admin"
             with patch.object(pedidos, "get_conn", return_value=conn), \
                     patch.object(
                         pedidos, "_producto_receptor",
@@ -359,16 +551,18 @@ class EquivalenciasPedidosTest(unittest.TestCase):
             "TKT-00051", "TKT-00052"])
         self.assertTrue(conn.closed)
 
-    def test_reporte_equivalencias_pendientes_restringido_a_superadmin(self):
+    def test_reporte_equivalencias_pendientes_restringido_a_roles_autorizados(self):
         app = Flask(__name__)
         app.secret_key = "test"
+        conn = _PendientesConn([])
         with app.test_request_context("/api/pedidos/equivalencias-pendientes"):
             session["user_id"] = 1
             session["rol"] = "encargado"
-            with patch.object(pedidos, "get_conn") as get_conn:
+            with patch.object(pedidos, "get_conn", return_value=conn), \
+                    patch.object(pedidos, "es_encargado_almacen", return_value=False):
                 respuesta, status = pedidos.pedidos_equivalencias_pendientes()
         self.assertEqual(status, 403)
-        get_conn.assert_not_called()
+        self.assertTrue(conn.closed)
 
     def test_despacho_registra_salida_origen_y_entrada_receptor_sin_duplicar(self):
         conn = _DespachoConn()
@@ -452,6 +646,152 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         self.assertIn("unidades", respuesta.get_json()["message"])
         self.assertEqual(conn.inserts, [])
         self.assertTrue(conn.closed)
+
+    def test_crear_ficha_receptora_crea_stock_cero_y_equivalencia_juntos(self):
+        conn = _CrearFichaEquivalenciaConn()
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Sabrosa", "categoria_id": 8,
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "admin"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "registrar_auditoria"), \
+                    patch.object(productos, "registrar_movimiento") as movimiento:
+                respuesta = productos.equivalencia_producto_crear_ficha()
+
+        data = respuesta.get_json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["data"]["producto_destino_id"], 801)
+        self.assertEqual(conn.commits, 1)
+        self.assertEqual(len(conn.inserts), 2)
+        alta, equivalencia = conn.inserts
+        self.assertIn("stock_minimo, costo_promedio", alta[0])
+        self.assertEqual(alta[1][1], "Aceite Sabrosa")
+        self.assertEqual(alta[1][3:5], (8, "litro"))
+        self.assertEqual(alta[1][6:9], (14, 9, 35))
+        self.assertEqual(equivalencia[1][:3], (661, 35, 801))
+        movimiento.assert_not_called()
+        self.assertTrue(conn.closed)
+
+    def test_crear_ficha_receptora_exige_confirmacion_de_no_existencia(self):
+        conn = _CrearFichaEquivalenciaConn()
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Sabrosa", "categoria_id": 8,
+                    "confirmar_no_existe": False,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "admin"
+            with patch.object(productos, "get_conn", return_value=conn):
+                respuesta, status = productos.equivalencia_producto_crear_ficha()
+
+        self.assertEqual(status, 400)
+        self.assertIn("Confirma que revisaste", respuesta.get_json()["message"])
+        self.assertEqual(conn.inserts, [])
+        self.assertEqual(conn.commits, 0)
+        self.assertTrue(conn.closed)
+
+    def test_crear_ficha_receptora_no_duplica_nombre_ya_existente(self):
+        conn = _CrearFichaEquivalenciaConn(
+            duplicado={"id": 667, "nombre": "Aceite Sabrosa", "unidad": "litro"})
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Sabrosa", "categoria_id": 8,
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "admin"
+            with patch.object(productos, "get_conn", return_value=conn):
+                respuesta, status = productos.equivalencia_producto_crear_ficha()
+
+        self.assertEqual(status, 409)
+        self.assertIn("Ya existe la ficha", respuesta.get_json()["message"])
+        self.assertEqual(conn.inserts, [])
+        self.assertEqual(conn.commits, 0)
+        self.assertTrue(conn.closed)
+
+    def test_crear_ficha_receptora_no_duplica_nombre_con_palabras_reordenadas(self):
+        conn = _CrearFichaEquivalenciaConn(
+            duplicado={"id": 667, "nombre": "SABROSA aceite", "unidad": "litro"})
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Sabrosa", "categoria_id": 8,
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "admin"
+            with patch.object(productos, "get_conn", return_value=conn):
+                respuesta, status = productos.equivalencia_producto_crear_ficha()
+
+        self.assertEqual(status, 409)
+        self.assertIn("SABROSA aceite", respuesta.get_json()["message"])
+        self.assertEqual(conn.inserts, [])
+        self.assertEqual(conn.commits, 0)
+        self.assertTrue(conn.closed)
+
+    def test_crear_ficha_receptora_requiere_usuario_autorizado(self):
+        conn = _CrearFichaEquivalenciaConn()
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Sabrosa", "categoria_id": 8,
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False):
+                respuesta, status = productos.equivalencia_producto_crear_ficha()
+
+        self.assertEqual(status, 403)
+        self.assertEqual(conn.inserts, [])
+        self.assertTrue(conn.closed)
+
+    def test_crear_ficha_receptora_revierte_si_falla_el_vinculo(self):
+        conn = _CrearFichaEquivalenciaConn(falla_equivalencia=True)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Sabrosa", "categoria_id": 8,
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "admin"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "logging") as logger:
+                respuesta, status = productos.equivalencia_producto_crear_ficha()
+
+        self.assertEqual(status, 500)
+        self.assertIn("No se pudo crear la ficha", respuesta.get_json()["message"])
+        self.assertEqual(conn.commits, 0)
+        self.assertEqual(conn.rollbacks, 1)
+        self.assertTrue(conn.closed)
+        logger.exception.assert_called_once()
 
     def test_reparacion_simula_y_aplica_una_sola_vez(self):
         conn = _ReparacionConn()

@@ -333,13 +333,44 @@
             </div>
             <div class="panel" id="panel-equivalencias" style="display:none">
                 <h2>Equivalencias para recibir pedidos</h2>
-                <p class="scan-hint">Relaciona la ficha del almacén proveedor con la ficha equivalente de la sucursal receptora. Solo se aceptan unidades iguales.</p>
+                <p class="scan-hint">Confirma manualmente qué ficha de la sucursal receptora corresponde al producto del proveedor. El nombre parecido no basta: se requiere la misma unidad y una revisión para evitar acreditar stock en una ficha equivocada.</p>
                 <form id="form-equivalencia" class="toolbar">
                     <select id="equiv-origen" required aria-label="Producto del proveedor"></select>
                     <select id="equiv-sucursal" required aria-label="Sucursal receptora"></select>
+                    <input type="search" id="equiv-buscar-destino" placeholder="Buscar ficha receptora..."
+                           aria-label="Buscar producto en la sucursal receptora">
                     <select id="equiv-destino" required aria-label="Producto de la sucursal receptora"></select>
-                    <button class="btn btn-primary" type="submit">Guardar equivalencia</button>
+                    <button class="btn btn-primary" type="submit">Confirmar equivalencia</button>
                 </form>
+                <p class="scan-hint" id="equiv-candidatos-ayuda" aria-live="polite"></p>
+                <button class="btn" id="equiv-crear-abrir" type="button" style="display:none">
+                    No existe la ficha: crearla y vincular
+                </button>
+                <div id="equiv-crear-panel" class="panel" style="display:none">
+                    <h3>Crear ficha nueva en la sucursal receptora</h3>
+                    <p id="equiv-crear-contexto" class="scan-hint"></p>
+                    <form id="form-crear-ficha-equivalencia">
+                        <label>Nombre del producto
+                            <input id="equiv-crear-nombre" type="text" required maxlength="255">
+                        </label>
+                        <div class="grid-2">
+                            <label>Categoría
+                                <select id="equiv-crear-categoria" required></select>
+                            </label>
+                            <label>Unidad
+                                <input id="equiv-crear-unidad" type="text" readonly>
+                            </label>
+                        </div>
+                        <label class="chk">
+                            <input id="equiv-crear-confirmar" type="checkbox" required>
+                            Revisé las fichas sugeridas, incluida su categoría y unidad, y confirmo que este producto no existe en la sucursal receptora.
+                        </label>
+                        <button class="btn btn-primary" type="submit">
+                            Crear ficha con stock 0 y confirmar equivalencia
+                        </button>
+                        <button class="btn" id="equiv-crear-cancelar" type="button">Cancelar</button>
+                    </form>
+                </div>
                 <div class="table-scroll">
                     <table class="data-table">
                         <thead><tr><th>Producto proveedor</th><th>Producto receptor</th><th></th></tr></thead>
@@ -347,7 +378,7 @@
                     </table>
                 </div>
                 <h3 style="margin-top:18px">Pedidos que requieren revisar equivalencias</h3>
-                <p class="scan-hint">Revisa los pedidos pendientes o en camino. Las coincidencias únicas de nombre y unidad se resuelven automáticamente; aquí aparecen solo los casos que necesitan revisión para no acreditar stock en una ficha equivocada.</p>
+                <p class="scan-hint">El pedido se registra aunque falte una equivalencia y AP1/AP2 pueden marcar «En camino» normalmente. La ficha se debe revisar y confirmar antes de «Entregado», porque ahí se mueve el stock. El sistema no vincula productos ni crea fichas automáticamente por similitud de nombre, categoría o unidad.</p>
                 <button class="btn" id="btn-revisar-equivalencias-pendientes" type="button">Revisar pedidos pendientes</button>
                 <div id="equivalencias-pendientes-resultado" aria-live="polite"></div>
                 <h3 style="margin-top:18px">Reparar recepción histórica</h3>
