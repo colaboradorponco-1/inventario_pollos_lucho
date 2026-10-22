@@ -1,3 +1,6 @@
+import os
+import sqlite3
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -6,6 +9,7 @@ from flask import Flask, session
 from core.inventario import _ocultar_valores_inventario_sasonador
 import core.dashboard as dashboard_module
 import core.pedidos as pedidos_module
+import core.sazonador as sazonador_module
 from core.dashboard import _datos_dashboard_sasonador
 from core.productos import _ocultar_datos_comerciales_productos, scope_productos
 from core.pedidos import _puede_ver_pedido
@@ -32,6 +36,25 @@ class FakeConn:
         pass
 
 
+class SqliteCompatConnection:
+    def __init__(self, path):
+        self.conn = sqlite3.connect(path)
+        self.conn.row_factory = sqlite3.Row
+        self.conn.create_function("GREATEST", -1, max)
+
+    def execute(self, query, params=()):
+        return self.conn.execute(query.replace(" FOR UPDATE", ""), params)
+
+    def commit(self):
+        self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
+
+    def close(self):
+        self.conn.close()
+
+
 class SasonadorPermisosTests(unittest.TestCase):
     def setUp(self):
         self.app = Flask(__name__)
@@ -55,10 +78,19 @@ class SasonadorPermisosTests(unittest.TestCase):
         self.assertFalse(ruta_bloqueada_sasonador("/api/logout", "POST"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/pedidos/15/etapa", "PUT"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/pedidos/bandeja", "GET"))
-        self.assertFalse(ruta_bloqueada_sasonador("/api/productos", "POST"))
+        self.assertTrue(ruta_bloqueada_sasonador(
+            "/api/productos", "POST"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/productos/15", "PUT"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/usuarios", "GET"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/sucursales", "GET"))
+        self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/productos", "POST"))
+        self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/inventario-diario", "POST"))
+        self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/inventario-diario/15", "PUT"))
+        self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/inventario-diario/15/cerrar", "POST"))
 
     def test_dashboard_productos_e_inventario_diario(self):
         for path in ("/api/dashboard", "/api/productos", "/api/inventario-diario",
@@ -162,6 +194,129 @@ class SasonadorPermisosTests(unittest.TestCase):
         self.assertEqual(list_params[0], 42)
         self.assertNotIn("p.destino_id = ?", count_query)
         self.assertNotIn("p.destino_id = ?", list_query)
+
+
+class InventarioSazonadorSeparadoTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db_path = os.path.join(self.temp.name, "inventario.db")
+        conn = sqlite3.connect(self.db_path)
+        conn.executescript("""
+            CREATE TABLE sucursales (id INTEGER PRIMARY KEY, nombre TEXT);
+            INSERT INTO sucursales VALUES (42, 'Sucursal de prueba');
+            CREATE TABLE categorias (id INTEGER PRIMARY KEY, nombre TEXT);
+            INSERT INTO categorias VALUES (1, 'Insumos');
+            CREATE TABLE productos (
+                id INTEGER PRIMARY KEY, sucursal_id INTEGER, nombre TEXT, stock_actual REAL
+            );
+            INSERT INTO productos VALUES (1, 42, 'Producto del encargado', 18);
+            CREATE TABLE sazonador_productos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal_id INTEGER NOT NULL,
+                codigo TEXT, nombre TEXT NOT NULL, marca TEXT, categoria_id INTEGER,
+                unidad TEXT NOT NULL, stock_minimo REAL NOT NULL, stock_actual REAL NOT NULL,
+                vencimiento TEXT, creado_por TEXT, activo INTEGER NOT NULL DEFAULT 1,
+                UNIQUE (sucursal_id, codigo)
+            );
+            CREATE TABLE sazonador_inventarios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal_id INTEGER NOT NULL,
+                categoria_id INTEGER NOT NULL DEFAULT 0, fecha TEXT NOT NULL,
+                hora_corte TEXT, usuario TEXT, cerrado_por TEXT, estado TEXT NOT NULL,
+                fecha_hora_cierre TEXT, observaciones TEXT, total_items INTEGER DEFAULT 0,
+                total_faltantes INTEGER DEFAULT 0, total_sobrantes INTEGER DEFAULT 0,
+                UNIQUE (sucursal_id, categoria_id, fecha)
+            );
+            CREATE TABLE sazonador_inventario_detalle (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, inventario_id INTEGER NOT NULL,
+                producto_id INTEGER NOT NULL, categoria_id INTEGER, producto_nombre TEXT,
+                codigo TEXT, unidad TEXT, stock_sistema REAL, inicial REAL,
+                disponible REAL, conteo_fisico REAL, final REAL DEFAULT 0,
+                utilizada REAL DEFAULT 0, diferencia REAL DEFAULT 0,
+                observaciones TEXT, UNIQUE (inventario_id, producto_id)
+            );
+        """)
+        conn.commit()
+        conn.close()
+        self.app = Flask(__name__)
+        self.app.secret_key = "test"
+        self.app.register_blueprint(sazonador_module.sazonador_bp)
+        self.client = self.app.test_client()
+        self.patch_conn = patch.object(
+            sazonador_module, "get_conn",
+            side_effect=lambda: SqliteCompatConnection(self.db_path))
+        self.patch_conn.start()
+        self.addCleanup(self.patch_conn.stop)
+        self.addCleanup(self.temp.cleanup)
+
+    def test_producto_y_conteo_usan_stock_separado_del_encargado(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        crear = self.client.post("/api/sazonador/productos", json={
+            "nombre": "Adobo del Sazonador", "categoria_id": 1,
+            "unidad": "kg", "stock_minimo": 2, "stock_inicial": 5,
+        })
+        self.assertEqual(crear.status_code, 200)
+        product_id = crear.json["data"]["id"]
+
+        listado = self.client.get("/api/sazonador/productos")
+        self.assertEqual([p["nombre"] for p in listado.json["data"]],
+                         ["Adobo del Sazonador"])
+        inicio = self.client.post("/api/sazonador/inventario-diario")
+        self.assertEqual(inicio.status_code, 200)
+        inventario_id = inicio.json["data"]["id"]
+        self.assertEqual(len(self.client.get(
+            "/api/sazonador/inventario-diario").json["data"]), 1)
+        self.assertEqual(self.client.get(
+            "/api/sazonador/inventario-diario?desde=9999-01-01").json["data"], [])
+        detalle = self.client.get(
+            f"/api/sazonador/inventario-diario/{inventario_id}")
+        linea = detalle.json["data"]["lineas"][0]
+        self.assertEqual(linea["inicial"], 5)
+        guardado = self.client.put(
+            f"/api/sazonador/inventario-diario/{inventario_id}",
+            json={"lineas": [{
+                "id": linea["id"], "campos_modificados": ["conteo_fisico"],
+                "conteo_fisico": 3,
+            }]})
+        self.assertEqual(guardado.status_code, 200)
+        guardado_vacio = self.client.put(
+            f"/api/sazonador/inventario-diario/{inventario_id}",
+            json={"lineas": [{
+                "id": linea["id"], "campos_modificados": ["conteo_fisico"],
+                "conteo_fisico": None,
+            }]})
+        self.assertEqual(guardado_vacio.status_code, 200)
+        detalle_vacio = self.client.get(
+            f"/api/sazonador/inventario-diario/{inventario_id}")
+        self.assertEqual(
+            detalle_vacio.json["data"]["lineas"][0]["diferencia"], 0)
+        cierre_incompleto = self.client.post(
+            f"/api/sazonador/inventario-diario/{inventario_id}/cerrar")
+        self.assertEqual(cierre_incompleto.status_code, 400)
+        self.assertEqual(self.client.put(
+            f"/api/sazonador/inventario-diario/{inventario_id}",
+            json={"lineas": [{
+                "id": linea["id"], "campos_modificados": ["conteo_fisico"],
+                "conteo_fisico": 3,
+            }]}).status_code, 200)
+        cierre = self.client.post(
+            f"/api/sazonador/inventario-diario/{inventario_id}/cerrar")
+        self.assertEqual(cierre.status_code, 200)
+
+        conn = sqlite3.connect(self.db_path)
+        stock_sazonador = conn.execute(
+            "SELECT stock_actual FROM sazonador_productos WHERE id = ?",
+            (product_id,)).fetchone()[0]
+        stock_encargado = conn.execute(
+            "SELECT stock_actual FROM productos WHERE sucursal_id = 42").fetchone()[0]
+        conn.close()
+        self.assertEqual(stock_sazonador, 3)
+        self.assertEqual(stock_encargado, 18)
+        inventario_duplicado = self.client.post(
+            "/api/sazonador/inventario-diario?categoria_id=1")
+        self.assertEqual(inventario_duplicado.status_code, 409)
 
 
 if __name__ == "__main__":

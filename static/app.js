@@ -696,11 +696,13 @@ async function loadDashboard() {
         }
 
         try {
-            const g = await request(API + '/dashboard/graficos' + par);
-            graficoVentasGastos(g.meses);
-            graficoUtilidad(g.meses);
-            graficoHBar('#graf-top-productos', g.top_productos, 'cantidad', 'unid', '#FCC302');
-            graficoHBar('#graf-top-repartos', g.top_repartos, 'total', 'Bs ', '#CF141D');
+            if (window.ROL !== 'sasonador') {
+                const g = await request(API + '/dashboard/graficos' + par);
+                graficoVentasGastos(g.meses);
+                graficoUtilidad(g.meses);
+                graficoHBar('#graf-top-productos', g.top_productos, 'cantidad', 'unid', '#FCC302');
+                graficoHBar('#graf-top-repartos', g.top_repartos, 'total', 'Bs ', '#CF141D');
+            }
         } catch (e) { /* gráficos opcionales */ }
 
         graficoHBar('#graf-top-entradas', d.top_entrada, 'total', ' ', '#2e7d32');
@@ -789,6 +791,13 @@ function graficoHBar(selector, items, campo, pref, color) {
 
 // ---------------- Productos ----------------
 function esAdmin() { return window.ROL === 'admin' || window.ROL === 'superadmin'; }
+function apiProductos() {
+    return API + (window.ROL === 'sasonador' ? '/sazonador/productos' : '/productos');
+}
+function apiInventarioDiario() {
+    return API + (window.ROL === 'sasonador'
+        ? '/sazonador/inventario-diario' : '/inventario-diario');
+}
 function esAlmacenPpal() { return window.ROL === 'encargado' && !!window.SUCURSAL_PRINCIPAL && !window.ES_LA_PAZ; }
 // Admin/superadmin y encargados de almacén principal actúan como "mano derecha" del admin
 function esCentral() { return esAdmin() || esAlmacenPpal(); }
@@ -1045,7 +1054,7 @@ async function loadProductos() {
         if (estado) qs.set('estado', estado);
         if (_prodSuc !== '') qs.set('sucursal', _prodSuc);
         qs.set('por_pagina', 1000);
-        const resp = await request(API + '/productos?' + qs.toString());
+        const resp = await request(apiProductos() + '?' + qs.toString());
         const prods = resp.data || resp;
         $('#prod-scope-info').textContent = 'Mostrando ' + (resp.total != null ? resp.total : prods.length) + ' producto(s)';
 
@@ -1759,8 +1768,20 @@ async function openProductoModal(id, lista) {
     $('#prod-stock-hint').style.display = 'none';
     const esGestionDlg = esCentral();
     const esAdminDlg = esAdmin();
+    const esSazonador = window.ROL === 'sasonador';
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
+    ['prod-almacen', 'prod-costo', 'prod-precio-venta',
+        'prod-proveedor', 'prod-para-proveer-wrap', 'prod-para-proveer-hint',
+        'prod-sucursal-label'].forEach((idCampo) => {
+        const campo = document.getElementById(idCampo);
+        const etiqueta = campo && (campo.closest('label') || campo.closest('.grid-2'));
+        if (etiqueta && esSazonador) etiqueta.style.display = 'none';
+    });
+    if (esSazonador) {
+        const stockInicial = $('#campo-stock-inicial');
+        if (stockInicial) stockInicial.firstChild.textContent = 'Cantidad inicial adquirida ';
+    }
     const selSuc = $('#prod-sucursal');
     let sid0 = window.SUCURSAL_ID;
     if (!sid0 && esGestionDlg) {
@@ -1861,7 +1882,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
             resp = await conSubmit(() => request(API + '/productos/' + id, { method: 'PUT', body: JSON.stringify(body) }),
                 '#form-producto button[type="submit"]');
         } else {
-            resp = await conSubmit(() => request(API + '/productos', { method: 'POST', body: JSON.stringify(body) }),
+            resp = await conSubmit(() => request(apiProductos(), { method: 'POST', body: JSON.stringify(body) }),
                 '#form-producto button[type="submit"]');
         }
         toast(id ? 'Producto actualizado' : 'Producto creado');
@@ -3547,9 +3568,11 @@ $('#inv-fecha')?.addEventListener('change', revisarHoraCorte);
 $('#btn-inv-guardar')?.addEventListener('click', invClick(guardarInventario));
 $('#btn-inv-cerrar')?.addEventListener('click', invClick(cerrarInventario));
 $('#btn-inv-excel')?.addEventListener('click', () => {
+    if (window.ROL === 'sasonador') return;
     if (INV_ID) window.open(API + '/inventario-diario/' + INV_ID + '/excel', '_blank');
 });
 $('#btn-inv-print')?.addEventListener('click', () => {
+    if (window.ROL === 'sasonador') return;
     if (INV_ID) window.open('/inventario-diario/' + INV_ID + '/imprimir', '_blank');
     else toast('Abre una planilla del día primero', 'err');
 });
@@ -3926,7 +3949,7 @@ async function listarInventario() {
         if (desde) qs.append('desde', desde);
         if (hasta) qs.append('hasta', hasta);
         if (busq) qs.append('busqueda', busq);
-        const url = API + '/inventario-diario' + (qs.toString() ? ('?' + qs.toString()) : '');
+        const url = apiInventarioDiario() + (qs.toString() ? ('?' + qs.toString()) : '');
         const resp = await request(url);
         const filas = resp.data || resp || [];
         const tb = $('#inv-lista-tbody');
@@ -3953,7 +3976,9 @@ async function listarInventario() {
                 toast('No se pudo abrir la planilla: ' + (e.message || 'error del servidor'), 'err');
             }
         }));
-    } catch (e) { /* la lista no es crítica */ }
+    } catch (e) {
+        toast(e.message || 'No se pudo cargar el inventario diario', 'err');
+    }
 }
 $('#btn-inv-lista-filtrar').addEventListener('click', listarInventario);
 $('#btn-inv-lista-limpiar').addEventListener('click', () => {
@@ -3993,7 +4018,7 @@ async function confirmarCrearInventario() {
     const qs = new URLSearchParams({ fecha, hora: hora || '', categoria_id: categoria });
     let r;
     try {
-        r = await request(API + '/inventario-diario?' + qs.toString(), { method: 'POST' });
+        r = await request(apiInventarioDiario() + '?' + qs.toString(), { method: 'POST' });
     } catch (e) {
         // Antes este boton NO estaba envuelto en invClick, asi que el error del
         // servidor se perdia: solo aparecia en la consola y en pantalla no
@@ -4018,7 +4043,7 @@ async function confirmarCrearInventario() {
 $('#btn-inv-nueva-crear')?.addEventListener('click', confirmarCrearInventario);
 
 async function abrirInventario(invId) {
-    const resp = await request(API + '/inventario-diario/' + invId);
+    const resp = await request(apiInventarioDiario() + '/' + invId);
     const d = resp.data || resp;
     if (!d || !d.id) { toast('No se pudo abrir la planilla', 'err'); return; }
     const avisosAjenos = Array.isArray(d.avisos) ? d.avisos : [];
@@ -4057,6 +4082,12 @@ async function abrirInventario(invId) {
     revisarHoraCorte();
 
     const r = d.resumen || {};
+    const ingresoHeader = $('#view-inventario .inv-tabla thead th:nth-child(4)');
+    const disponibleHeader = $('#view-inventario .inv-tabla thead th:nth-child(5)');
+    if (ingresoHeader) ingresoHeader.style.display = window.ROL === 'sasonador' ? 'none' : '';
+    if (disponibleHeader && window.ROL === 'sasonador') {
+        disponibleHeader.innerHTML = 'Disponible<br><small>= inicial</small>';
+    }
     $('#inv-resumen').innerHTML =
         `<span class="tb-tag">Planilla</span>` +
         `<span class="tb-tag">Ítems: <strong>${r.total_items || 0}</strong></span>` +
@@ -4078,7 +4109,7 @@ async function abrirInventario(invId) {
             // El colspan tiene que coincidir con la cantidad real de columnas
             // (antes estaba en 9 con 10 columnas y por eso la fila de categoria
             // no cubria la ultima).
-            html += `<tr style="background:#F5F5F5"><td colspan="9"><strong>${esc(catActual)}</strong></td></tr>`;
+            html += `<tr style="background:#F5F5F5"><td colspan="${window.ROL === 'sasonador' ? 8 : 9}"><strong>${esc(catActual)}</strong></td></tr>`;
         }
         const conteo = f.conteo_fisico === null || f.conteo_fisico === undefined ? '' : f.conteo_fisico;
         // Planilla cerrada O de otra sucursal: los casilleros no se tocan.
@@ -4093,12 +4124,12 @@ async function abrirInventario(invId) {
                            title="Calculado por el sistema según el stock; no se puede editar."
                            style="text-align:right;background:#F5F5F5">
                 </td>
-                <td>
+                ${window.ROL === 'sasonador' ? '' : `<td>
                     <input type="number" step="any" min="0" class="inv-ingreso-man" data-id="${f.id}"
                            value="${esc(fmtInvQ(f.ingreso_manual))}" placeholder="Total manual" ${bloq}
                            title="Escribe el total correcto recibido fuera del sistema. Escribe 0 para dejar solo el inventario inicial."
                            style="text-align:right">
-                </td>
+                </td>`}
                 <td class="num" data-inv-disp="${f.id}">${esc(fmtInvQ(f.disponible))}</td>
                 <td>
                     ${f.contado_por ? `<small data-inv-autor="${f.id}" style="display:block;color:${f.es_de_otro ? '#B45309' : '#6B7280'};font-size:10px;margin-bottom:3px">Lo contó: ${esc(f.contado_por)}</small>` : `<small data-inv-autor="${f.id}" style="display:none"></small>`}
@@ -4136,8 +4167,9 @@ async function abrirInventario(invId) {
     $('#btn-inv-cerrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-borrar').style.display =
         (INV_CERRADA || INV_SOLO_LECTURA || window.ROL === 'sasonador') ? 'none' : '';
-    $('#btn-inv-excel').style.display = '';
-    $('#btn-inv-print').style.display = '';
+    $('#btn-inv-excel').style.display = window.ROL === 'sasonador' ? 'none' : '';
+    $('#btn-inv-print').style.display = window.ROL === 'sasonador' ? 'none' : '';
+    $('#btn-inv-refrescar').style.display = window.ROL === 'sasonador' ? 'none' : '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
         ? 'Esta planilla está cerrada. El stock ya fue ajustado según el conteo.'
         : (INV_SOLO_LECTURA
@@ -4156,7 +4188,7 @@ async function refrescarStockInicial(silencioso, actualizarContados) {
     let d;
     try {
         const actualizar = actualizarContados ? '?actualizar_stock=1' : '';
-        const resp = await request(API + '/inventario-diario/' + INV_ID + actualizar);
+        const resp = await request(apiInventarioDiario() + '/' + INV_ID + actualizar);
         d = resp.data || resp;
     } catch (e) {
         if (!silencioso) toast(e.message || 'No se pudo actualizar el stock', 'err');
@@ -4289,7 +4321,7 @@ async function guardarInventario() {
     if (observaciones !== INV_OBS_BASE) payload.observaciones = observaciones;
     const hora = $('#inv-hora') ? $('#inv-hora').value : '';
     if (hora !== INV_HORA_BASE) payload.hora_corte = hora;
-    const r = await request(API + '/inventario-diario/' + INV_ID, {
+    const r = await request(apiInventarioDiario() + '/' + INV_ID, {
         method: 'PUT',
         body: JSON.stringify(payload),
     });
@@ -4350,7 +4382,7 @@ async function cerrarInventario() {
         toast('No se pudo guardar el conteo, la planilla sigue abierta: ' + e.message, 'err');
         return;
     }
-    const r = await request(API + '/inventario-diario/' + INV_ID + '/cerrar', { method: 'POST' });
+    const r = await request(apiInventarioDiario() + '/' + INV_ID + '/cerrar', { method: 'POST' });
     toast(r.message || 'Planilla cerrada', 'ok');
     // El cierre se hizo igual (el usuario pidió que las dos planillas se puedan
     // cerrar), pero si un producto ya estaba contado en otra planilla del mismo
@@ -6076,6 +6108,20 @@ async function init() {
             document.querySelectorAll('#view-dashboard > h3').forEach((elemento) => {
                 elemento.style.display = 'none';
             });
+            const filtroProveedor = $('#prod-filtro-proveedor');
+            if (filtroProveedor) filtroProveedor.style.display = 'none';
+            const estadoInactivo = $('#prod-estado option[value="inactivos"]');
+            if (estadoInactivo) estadoInactivo.remove();
+            const ayudaInventario = $('#view-inventario .inv-ayuda');
+            if (ayudaInventario) {
+                ayudaInventario.textContent =
+                    'Este inventario es independiente del inventario de la sucursal. El stock inicial de tus productos se registra al crearlos; cuenta el inventario físico y ciérralo para actualizar únicamente las existencias del Sazonador.';
+            }
+            const encabezadoInventario = $('#view-inventario .panel-head p');
+            if (encabezadoInventario) {
+                encabezadoInventario.textContent =
+                    'El conteo y las existencias pertenecen al inventario del Sazonador, separado del inventario del encargado de la sucursal.';
+            }
             document.querySelectorAll('#view-inventario .inv-finance').forEach((elemento) => {
                 elemento.style.display = 'none';
             });

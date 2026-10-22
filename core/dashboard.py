@@ -34,6 +34,53 @@ def _datos_dashboard_sasonador(datos):
     return resultado
 
 
+def _dashboard_sazonador(conn, sid):
+    productos = conn.execute("""
+        SELECT id, nombre, codigo, unidad, stock_minimo, stock_actual AS stock,
+               vencimiento
+        FROM sazonador_productos
+        WHERE sucursal_id = ? AND activo = 1
+        ORDER BY nombre
+    """, (sid,)).fetchall()
+    filas = [dict(producto) for producto in productos]
+    stock_bajo = [
+        {campo: producto[campo] for campo in (
+            "id", "nombre", "codigo", "stock_minimo", "unidad", "stock"
+        )}
+        for producto in filas
+        if float(producto["stock"] or 0) <= (
+            float(producto["stock_minimo"])
+            if float(producto["stock_minimo"] or 0) > 0 else 10
+        )
+    ]
+    hoy = date.today()
+    por_vencer = []
+    for producto in filas:
+        vencimiento = producto.get("vencimiento")
+        if not vencimiento:
+            continue
+        dias = (date.fromisoformat(str(vencimiento)[:10]) - hoy).days
+        if dias <= 7:
+            por_vencer.append({
+                "id": producto["id"], "nombre": producto["nombre"],
+                "vencimiento": str(vencimiento)[:10], "unidad": producto["unidad"],
+                "stock": producto["stock"],
+                "estado": "vencido" if dias < 0 else ("urgente" if dias <= 3 else "proximo"),
+            })
+    return {
+        "rol": "sasonador",
+        "total_productos": len(filas),
+        "stock_total": sum(1 for producto in filas if float(producto["stock"] or 0) > 0),
+        "stock_bajo": stock_bajo,
+        "por_vencer": por_vencer,
+        "por_vencer_hoy": sum(1 for producto in por_vencer if producto["estado"] == "vencido"),
+        "total_alertas": len(stock_bajo) + len(por_vencer),
+        "top_entrada": [],
+        "top_salida": [],
+        "mov_recientes": [],
+    }
+
+
 def _cls(col, conn=None):
     """Devuelve (condición SQL, params) para filtrar por la sucursal del usuario.
     Quien ve todo (sin sucursal asignada) puede restringir por ciudad si el
@@ -65,6 +112,10 @@ def dashboard():
     if session.get("rol") == "sasonador" and sid is None:
         conn.close()
         return err("El usuario Sazonador debe tener una sucursal asignada", 403)
+    if session.get("rol") == "sasonador":
+        datos = _dashboard_sazonador(conn, sid)
+        conn.close()
+        return ok(datos)
     g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     # Filtro opcional por UNA sucursal individual (?sucursal=<id>): reduce el scope
     # a esa sucursal puntual (además de/independiente del filtro por ciudad).

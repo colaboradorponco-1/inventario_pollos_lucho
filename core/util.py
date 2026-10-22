@@ -209,7 +209,15 @@ def ruta_bloqueada_sasonador(path, method="GET"):
                 "/api/perfil/avatar/imagen"):
         return metodo not in lectura
     if path == "/api/productos":
-        return metodo not in lectura and metodo != "POST"
+        return metodo not in lectura
+    if path == "/api/sazonador/productos":
+        return metodo not in ("GET", "HEAD", "OPTIONS", "POST")
+    if path == "/api/sazonador/inventario-diario":
+        return metodo not in ("GET", "HEAD", "OPTIONS", "POST")
+    if re.fullmatch(r"/api/sazonador/inventario-diario/\d+", path):
+        return metodo not in ("GET", "HEAD", "OPTIONS", "PUT")
+    if re.fullmatch(r"/api/sazonador/inventario-diario/\d+/cerrar", path):
+        return metodo != "POST"
     if path == "/api/dashboard":
         return metodo not in lectura
     if path == "/api/inventario-diario":

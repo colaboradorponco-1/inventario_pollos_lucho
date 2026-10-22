@@ -21,6 +21,7 @@ from core.pages import pages_bp
 from core.productos import productos_bp
 from core.pedidos import pedidos_bp
 from core.reportes import reportes_bp
+from core.sazonador import sazonador_bp
 from core.sucursales import sucursales_bp
 from core.usuarios import usuarios_bp
 from core.util import ruta_bloqueada_logistica, ruta_bloqueada_sasonador
@@ -76,7 +77,7 @@ def create_app():
 
     for bp in (pages_bp, auth_bp, dashboard_bp, catalogos_bp, productos_bp,
                movimientos_bp, ventas_bp, sucursales_bp, usuarios_bp, reportes_bp,
-               pedidos_bp, inventario_bp):
+               pedidos_bp, inventario_bp, sazonador_bp):
         app.register_blueprint(bp)
 
     @app.before_request
@@ -88,8 +89,7 @@ def create_app():
                 or ruta_bloqueada_sasonador(flask_request.path, flask_request.method)):
             if flask_request.path.startswith("/api/"):
                 return jsonify({"ok": False,
-                                "message": "Tu rol solo permite trabajar con los "
-                                           "pedidos de tu sucursal"}), 403
+                                "message": "Tu rol no tiene permiso para esta operación"}), 403
             return redirect("/login")
         return None
 
