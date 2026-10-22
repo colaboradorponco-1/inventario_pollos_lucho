@@ -13,7 +13,6 @@ se mueve una sola vez al marcar 'entregado'.
 from collections import OrderedDict
 from datetime import datetime
 import re
-import unicodedata
 
 from flask import Blueprint, redirect, render_template, request, session
 
@@ -103,16 +102,8 @@ def _proveedores_preparados(detalle, pedido):
     return bool(preparados) and all(preparados.values())
 
 
-def _normalizar_nombre_producto(nombre):
-    normalizado = unicodedata.normalize("NFKD", str(nombre or ""))
-    sin_acentos = "".join(
-        caracter for caracter in normalizado
-        if not unicodedata.combining(caracter))
-    return " ".join(re.findall(r"[a-z0-9]+", sin_acentos.casefold()))
-
-
 def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
-    """Resuelve ficha explícita o una única ficha local con nombre y unidad exactos."""
+    """Resuelve una ficha explícitamente vinculada; nunca infiere por nombre."""
     equivalente = conn.execute("""
         SELECT origen.sucursal_id AS sucursal_origen_id,
                origen.nombre AS nombre_origen,
@@ -136,33 +127,9 @@ def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
             return None, "El producto equivalente de la sucursal receptora no existe"
         if equivalente["sucursal_origen_id"] == sucursal_destino_id:
             return producto_origen_id, None
-        unidad_origen = (equivalente["unidad_origen"] or "unidad").strip().casefold()
-        nombre_origen = _normalizar_nombre_producto(
-            equivalente.get("nombre_origen"))
-        if nombre_origen:
-            candidatos_nombre = [
-                producto for producto in conn.execute(
-                    "SELECT id, nombre, unidad FROM productos "
-                    "WHERE sucursal_id = ? AND activo = 1",
-                    (sucursal_destino_id,)).fetchall()
-                if _normalizar_nombre_producto(producto.get("nombre")) == nombre_origen
-            ]
-            candidatos = [
-                producto for producto in candidatos_nombre
-                if (producto.get("unidad") or "unidad").strip().casefold()
-                == unidad_origen
-            ]
-            if len(candidatos) == 1:
-                return candidatos[0]["id"], None
-            if len(candidatos) > 1:
-                return None, (
-                    "Hay varias fichas iguales en la sucursal receptora. "
-                    "Pide al superadministrador que configure la equivalencia correcta.")
-            if candidatos_nombre:
-                return None, "Las unidades de los productos con el mismo nombre no coinciden"
         return None, (
-            "No hay equivalencia configurada para este producto en la sucursal receptora. "
-            "Pide al superadministrador que la configure antes de entregar.")
+            "No hay equivalencia confirmada para este producto en la sucursal receptora. "
+            "Un encargado autorizado debe revisar la ficha antes de recibir.")
     if equivalente["sucursal_producto_destino"] != sucursal_destino_id:
         return None, "El producto equivalente no pertenece a la sucursal receptora"
     if not equivalente["destino_activo"]:
@@ -297,6 +264,7 @@ def pedidos():
         # Destinos invalidos acumulados (ver mas abajo): antes se cortaba en el
         # primero y se caia el pedido entero.
         destinos_malos = {}
+        equivalencias_pendientes = []
         # Productos cuyo destino responsable no tiene stock: aviso, no bloqueo.
         sin_stock = []
         items = []
@@ -370,11 +338,11 @@ def pedidos():
             if proveedor not in proveedores_validos:
                 destinos_malos.setdefault(proveedor, []).append(fila["nombre"])
                 continue
-            _, error_recepcion = _validar_producto_receptor(
-                conn, prod_id, fila["nombre"], proveedor, sucursal_id)
+            _, error_recepcion = _producto_receptor(conn, prod_id, sucursal_id)
             if error_recepcion:
-                conn.close()
-                return err(f"{error_recepcion} No se guardó el pedido.", 409)
+                equivalencias_pendientes.append(
+                    f"{fila['nombre']} ({_nombre_sucursal(conn, proveedor)} → "
+                    f"{_nombre_sucursal(conn, sucursal_id)})")
             # Si a quien le toca despachar no tiene de esto, se avisa y se sigue:
             # el pedido se guarda igual y la persona ve donde hay. Bloquear
             # acá seria peor, porque el problema real es el stock, no el pedido.
@@ -458,10 +426,21 @@ def pedidos():
                 partes.append(msg)
             aviso = " ".join(partes)
         conn.close()
-        registrar_auditoria("Pedido registrado", f"{nro} de sucursal ID {sucursal_id}")
+        registrar_auditoria(
+            "Pedido registrado",
+            f"{nro} de sucursal ID {sucursal_id}")
+        mensaje = ("Pedido %s registrado" % nro)
+        if aviso:
+            mensaje += ". Ojo: " + aviso
+        if equivalencias_pendientes:
+            lista = ", ".join(sorted(set(equivalencias_pendientes))[:3])
+            if len(set(equivalencias_pendientes)) > 3:
+                lista += " (+%d más)" % (len(set(equivalencias_pendientes)) - 3)
+            mensaje += (
+                ". Se envió el pedido; antes de recibir debe confirmarse la "
+                "ficha de: " + lista)
         return ok({"id": pedido_id, "nro_ticket": nro},
-                  message=("Pedido %s registrado. Ojo: %s" % (nro, aviso)) if aviso
-                          else "Pedido %s registrado" % nro)
+                  message=mensaje)
 
     estado = request.args.get("estado", "").strip()
     filtro = request.args.get("filtro", "").strip()
@@ -1519,14 +1498,19 @@ def pedido_reparar_stock_equivalencias():
 @login_requerido
 def pedidos_equivalencias_pendientes():
     """Lista líneas de pedidos abiertos que todavía no pueden recibirse."""
-    if not es_superadmin():
-        return err("Solo el superadministrador puede revisar equivalencias", 403)
-
     conn = get_conn()
+    if not (es_gestion() or es_encargado_almacen(conn)):
+        conn.close()
+        return err(
+            "Solo administración y encargados de Almacén Principal 1 o 2 "
+            "pueden revisar equivalencias", 403)
+
     filas = conn.execute("""
         SELECT p.nro_ticket, p.estado,
                d.producto_id, pr.nombre AS producto_nombre,
                pr.unidad AS producto_unidad,
+               pr.categoria_id AS producto_categoria_id,
+               c.nombre AS producto_categoria,
                COALESCE(d.destino_id, p.destino_id) AS proveedor_id,
                proveedor.nombre AS proveedor_nombre,
                p.sucursal_id AS sucursal_receptora_id,
@@ -1534,6 +1518,7 @@ def pedidos_equivalencias_pendientes():
         FROM pedidos p
         JOIN pedido_detalle d ON d.pedido_id = p.id
         JOIN productos pr ON pr.id = d.producto_id
+        LEFT JOIN categorias c ON c.id = pr.categoria_id
         JOIN sucursales proveedor
           ON proveedor.id = COALESCE(d.destino_id, p.destino_id)
         JOIN sucursales receptora ON receptora.id = p.sucursal_id
@@ -1559,6 +1544,8 @@ def pedidos_equivalencias_pendientes():
             "producto_id": fila["producto_id"],
             "producto_nombre": fila["producto_nombre"],
             "producto_unidad": fila["producto_unidad"],
+            "producto_categoria_id": fila["producto_categoria_id"],
+            "producto_categoria": fila["producto_categoria"],
             "proveedor_id": fila["proveedor_id"],
             "proveedor_nombre": fila["proveedor_nombre"],
             "sucursal_receptora_id": fila["sucursal_receptora_id"],

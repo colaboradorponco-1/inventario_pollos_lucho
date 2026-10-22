@@ -33,6 +33,8 @@ const fmtDate = (d) => {
 
 let catalogos = { almacenes: [], categorias: [], proveedores: [] };
 let equivalenciasCargadas = false;
+let productosEquivalencia = [];
+let pedidoEquivalenciaActual = null;
 let reparacionStockSimulada = null;
 
 function nowLocal() {
@@ -1016,9 +1018,8 @@ async function loadProductos() {
         const btnRevisarDuplicados = $('#btn-revisar-duplicados');
         if (btnRevisarDuplicados) btnRevisarDuplicados.style.display = esAdmin() ? '' : 'none';
         const panelEquivalencias = $('#panel-equivalencias');
-        if (panelEquivalencias) panelEquivalencias.style.display =
-            window.ROL === 'superadmin' ? '' : 'none';
-        if (window.ROL === 'superadmin' && !equivalenciasCargadas) {
+        if (panelEquivalencias) panelEquivalencias.style.display = esCentral() ? '' : 'none';
+        if (esCentral() && !equivalenciasCargadas) {
             try {
                 await loadEquivalencias();
                 equivalenciasCargadas = true;
@@ -1161,9 +1162,67 @@ async function loadProductos() {
     }
 }
 
+function actualizarProductosEquivalenciaDestino() {
+    const origen = $('#equiv-origen');
+    const sucursal = $('#equiv-sucursal');
+    const destino = $('#equiv-destino');
+    if (!origen || !sucursal || !destino) return;
+    const productoOrigen = productosEquivalencia.find(
+        (p) => String(p.id) === String(origen.value));
+    const unidadOrigen = _nombreNormalizado(productoOrigen?.unidad || 'unidad');
+    const terminos = _nombreNormalizado($('#equiv-buscar-destino')?.value || '')
+        .split(/\s+/).filter(Boolean);
+    const candidatos = productosEquivalencia
+        .filter((p) => String(p.sucursal_id) === String(sucursal.value))
+        .map((p) => {
+            const texto = _nombreNormalizado(
+                `${p.nombre} ${p.categoria_nombre || ''} ${p.unidad || 'unidad'}`);
+            const puntos = terminos.reduce(
+                (total, termino) => total + (texto.includes(termino) ? 1 : 0), 0);
+            return { producto: p, puntos };
+        })
+        .filter((item) => !terminos.length || item.puntos > 0)
+        .sort((a, b) => b.puntos - a.puntos
+            || String(a.producto.nombre).localeCompare(String(b.producto.nombre)));
+    const seleccionado = destino.value;
+    destino.innerHTML = '<option value="">Selecciona la ficha correcta...</option>' +
+        candidatos.map(({ producto: p, puntos }) => {
+            const unidad = _nombreNormalizado(p.unidad || 'unidad');
+            const unidadDistinta = unidad !== unidadOrigen;
+            const etiqueta = `${p.nombre} (${p.unidad || 'unidad'}) · ` +
+                `${p.categoria_nombre || 'Sin categoría'}` +
+                (terminos.length && puntos ? ` · coincide en ${puntos} término(s)` : '');
+            return `<option value="${p.id}" ${unidadDistinta ? 'disabled' : ''}>` +
+                `${esc(etiqueta)}${unidadDistinta ? ' — unidad distinta' : ''}</option>`;
+        }).join('');
+    if (candidatos.some(({ producto: p }) => String(p.id) === seleccionado)) {
+        destino.value = seleccionado;
+    }
+    const ayuda = $('#equiv-candidatos-ayuda');
+    if (ayuda) {
+        ayuda.textContent = candidatos.length
+            ? 'Revisa nombre, categoría y unidad. Las sugerencias no se vinculan automáticamente; puedes borrar la búsqueda para ver todas las fichas de la sucursal.'
+            : 'No hay fichas que coincidan con la búsqueda. Borra el texto para revisar todas antes de crear una nueva.';
+    }
+}
+
+function actualizarContextoEquivalencia() {
+    $('#equiv-destino').value = '';
+    if (pedidoEquivalenciaActual
+            && (String($('#equiv-origen').value) !== String(pedidoEquivalenciaActual.producto_id)
+                || String($('#equiv-sucursal').value)
+                    !== String(pedidoEquivalenciaActual.sucursal_receptora_id))) {
+        pedidoEquivalenciaActual = null;
+        $('#equiv-crear-panel').style.display = 'none';
+        $('#equiv-crear-abrir').style.display = 'none';
+    }
+    actualizarProductosEquivalenciaDestino();
+}
+
 async function loadEquivalencias() {
     const data = await request(API + '/equivalencias-productos');
     const productos = data.productos || [];
+    productosEquivalencia = productos;
     const sucursales = data.sucursales || [];
     const origen = $('#equiv-origen');
     const sucursal = $('#equiv-sucursal');
@@ -1171,27 +1230,22 @@ async function loadEquivalencias() {
     if (!origen || !sucursal || !destino) return;
 
     const labelProducto = (p) =>
-        `${p.nombre} (${p.unidad || 'unidad'}) — ${p.sucursal_nombre}`;
+        `${p.nombre} (${p.unidad || 'unidad'}) · ${p.categoria_nombre || 'Sin categoría'} — ${p.sucursal_nombre}`;
     origen.innerHTML = '<option value="">Producto del proveedor...</option>' +
         productos.map((p) => `<option value="${p.id}">${esc(labelProducto(p))}</option>`).join('');
     sucursal.innerHTML = '<option value="">Sucursal receptora...</option>' +
         sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join('');
-    const llenarDestino = () => {
-        const productosDestino = productos.filter((p) =>
-            String(p.sucursal_id) === String(sucursal.value));
-        destino.innerHTML = '<option value="">Ficha de la sucursal...</option>' +
-            productosDestino.map((p) =>
-                `<option value="${p.id}">${esc(p.nombre)} (${esc(p.unidad || 'unidad')})</option>`
-            ).join('');
-    };
-    llenarDestino();
-    sucursal.onchange = llenarDestino;
+    actualizarProductosEquivalenciaDestino();
+    sucursal.onchange = actualizarContextoEquivalencia;
+    origen.onchange = actualizarContextoEquivalencia;
 
     $('#equivalencias-tbody').innerHTML = (data.equivalencias || []).map((e) => `
         <tr>
-            <td>${esc(e.origen_nombre)} (${esc(e.origen_unidad || 'unidad')}) — ${esc(e.origen_sucursal_nombre)}</td>
-            <td>${esc(e.destino_nombre)} (${esc(e.destino_unidad || 'unidad')}) — ${esc(e.destino_sucursal_nombre)}</td>
-            <td><button class="btn btn-icon btn-danger" data-eliminar-equivalencia="${e.id}">Eliminar</button></td>
+            <td>${esc(e.origen_nombre)} (${esc(e.origen_unidad || 'unidad')}) · ${esc(e.origen_categoria_nombre || 'Sin categoría')} — ${esc(e.origen_sucursal_nombre)}</td>
+            <td>${esc(e.destino_nombre)} (${esc(e.destino_unidad || 'unidad')}) · ${esc(e.destino_categoria_nombre || 'Sin categoría')} — ${esc(e.destino_sucursal_nombre)}</td>
+            <td>${window.ROL === 'superadmin'
+                ? `<button class="btn btn-icon btn-danger" data-eliminar-equivalencia="${e.id}">Eliminar</button>`
+                : ''}</td>
         </tr>`).join('') || '<tr><td colspan="3" class="empty">Sin equivalencias configuradas</td></tr>';
     $$('[data-eliminar-equivalencia]').forEach((button) => {
         button.addEventListener('click', async () => {
@@ -1207,6 +1261,85 @@ async function loadEquivalencias() {
         });
     });
 }
+
+function iniciarRevisionEquivalencia(pendiente) {
+    pedidoEquivalenciaActual = pendiente;
+    $('#equiv-origen').value = String(pendiente.producto_id);
+    $('#equiv-sucursal').value = String(pendiente.sucursal_receptora_id);
+    $('#equiv-destino').value = '';
+    $('#equiv-buscar-destino').value = pendiente.producto_nombre;
+    $('#equiv-crear-panel').style.display = 'none';
+    $('#equiv-crear-abrir').style.display = '';
+    $('#equiv-crear-contexto').textContent =
+        `Pedido ${pendiente.tickets.join(', ')}: ${pendiente.producto_nombre} ` +
+        `(${pendiente.producto_unidad || 'unidad'}, ` +
+        `${pendiente.producto_categoria || 'Sin categoría'}) para ` +
+        `${pendiente.sucursal_receptora_nombre}. La ficha nueva tendrá stock 0; ` +
+        'el stock del pedido solo se sumará al confirmar «Entregado».';
+    $('#equiv-crear-nombre').value = pendiente.producto_nombre;
+    $('#equiv-crear-unidad').value = pendiente.producto_unidad || 'unidad';
+    const categorias = catalogos.categorias || [];
+    $('#equiv-crear-categoria').innerHTML =
+        '<option value="">— Selecciona la categoría de la sucursal —</option>' +
+        '<option value="sin">Sin categoría</option>' +
+        categorias.map((categoria) =>
+            `<option value="${categoria.id}">${esc(categoria.nombre)}</option>`).join('');
+    $('#equiv-crear-categoria').value = '';
+    $('#equiv-crear-confirmar').checked = false;
+    actualizarProductosEquivalenciaDestino();
+    $('#form-equivalencia').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('#equiv-buscar-destino').focus();
+}
+
+$('#equiv-buscar-destino')?.addEventListener(
+    'input', actualizarProductosEquivalenciaDestino);
+$('#equiv-destino')?.addEventListener('change', () => {
+    if ($('#equiv-destino').value) $('#equiv-crear-panel').style.display = 'none';
+});
+$('#equiv-crear-abrir')?.addEventListener('click', () => {
+    if (!pedidoEquivalenciaActual) return;
+    $('#equiv-crear-panel').style.display = '';
+    $('#equiv-crear-nombre').focus();
+});
+$('#equiv-crear-cancelar')?.addEventListener('click', () => {
+    $('#equiv-crear-panel').style.display = 'none';
+});
+
+$('#form-crear-ficha-equivalencia')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const pendiente = pedidoEquivalenciaActual;
+    if (!pendiente
+            || String($('#equiv-origen').value) !== String(pendiente.producto_id)
+            || String($('#equiv-sucursal').value) !== String(pendiente.sucursal_receptora_id)) {
+        toast('Vuelve a seleccionar un pedido pendiente antes de crear la ficha.', 'err');
+        return;
+    }
+    try {
+        const data = await conSubmit(() => request(
+            API + '/equivalencias-productos/crear-ficha', {
+                method: 'POST',
+                body: {
+                    producto_origen_id: pendiente.producto_id,
+                    sucursal_destino_id: pendiente.sucursal_receptora_id,
+                    nombre: $('#equiv-crear-nombre').value.trim(),
+                    categoria_id: $('#equiv-crear-categoria').value === 'sin'
+                        ? 'sin' : Number($('#equiv-crear-categoria').value) || null,
+                    confirmar_no_existe: $('#equiv-crear-confirmar').checked,
+                },
+            }), '#form-crear-ficha-equivalencia button[type="submit"]');
+        toast(data.message || 'Ficha creada y equivalencia confirmada');
+        pedidoEquivalenciaActual = null;
+        $('#equiv-crear-panel').style.display = 'none';
+        $('#equiv-crear-abrir').style.display = 'none';
+        equivalenciasCargadas = false;
+        await loadEquivalencias();
+        equivalenciasCargadas = true;
+        await revisarPedidosEquivalenciasPendientes();
+        loadProductos();
+    } catch (e) {
+        toast(e.message, 'err');
+    }
+});
 
 function renderSimulacionReparacion(data) {
     reparacionStockSimulada = data;
@@ -1256,28 +1389,25 @@ async function revisarPedidosEquivalenciasPendientes() {
             <div class="table-scroll">
                 <table class="data-table">
                     <thead><tr><th>Ticket(s)</th><th>Producto proveedor</th><th>Recibe</th><th>Motivo</th><th></th></tr></thead>
-                    <tbody>${pendientes.map((p) => {
+                    <tbody>${pendientes.map((p, index) => {
             const puedeConfigurar = $('#equiv-origen').querySelector(
                 `option[value="${p.producto_id}"]`);
             return `<tr>
                 <td>${esc(p.tickets.join(', '))}</td>
-                <td>${esc(p.producto_nombre)} (${esc(p.producto_unidad || 'unidad')}) — ${esc(p.proveedor_nombre)}</td>
+                <td>${esc(p.producto_nombre)} (${esc(p.producto_unidad || 'unidad')}) · ${esc(p.producto_categoria || 'Sin categoría')} — ${esc(p.proveedor_nombre)}</td>
                 <td>${esc(p.sucursal_receptora_nombre)}</td>
                 <td>${esc(p.motivo)}</td>
                 <td>${puedeConfigurar
-                    ? `<button class="btn btn-sm" type="button" data-configurar-equivalencia-origen="${p.producto_id}" data-configurar-equivalencia-sucursal="${p.sucursal_receptora_id}">Configurar ficha</button>`
+                    ? `<button class="btn btn-sm" type="button" data-configurar-equivalencia="${index}">Resolver ficha</button>`
                     : 'Revisar ficha proveedor inactiva'}</td>
             </tr>`;
         }).join('')}</tbody>
                 </table>
             </div>`;
-        $$('[data-configurar-equivalencia-origen]').forEach((button) => {
+        $$('[data-configurar-equivalencia]').forEach((button) => {
             button.addEventListener('click', () => {
-                $('#equiv-origen').value = button.dataset.configurarEquivalenciaOrigen;
-                $('#equiv-sucursal').value = button.dataset.configurarEquivalenciaSucursal;
-                $('#equiv-sucursal').dispatchEvent(new Event('change'));
-                $('#equiv-destino').focus();
-                $('#form-equivalencia').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                iniciarRevisionEquivalencia(
+                    pendientes[Number(button.dataset.configurarEquivalencia)]);
             });
         });
     } catch (e) {
@@ -1301,6 +1431,9 @@ $('#form-equivalencia')?.addEventListener('submit', async (event) => {
             },
         });
         toast('Equivalencia guardada');
+        pedidoEquivalenciaActual = null;
+        $('#equiv-crear-panel').style.display = 'none';
+        $('#equiv-crear-abrir').style.display = 'none';
         equivalenciasCargadas = false;
         await loadEquivalencias();
         equivalenciasCargadas = true;
