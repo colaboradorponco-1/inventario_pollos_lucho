@@ -11,6 +11,29 @@ from .util import (ok, login_requerido, sucursal_actual, sucursal_operativa, es_
 dashboard_bp = Blueprint("dashboard", __name__)
 
 
+def _datos_dashboard_sasonador(datos):
+    """Devuelve solo indicadores operativos, sin datos comerciales."""
+    campos_visibles = (
+        "rol", "total_productos", "stock_total", "top_entrada",
+        "top_salida", "por_vencer_hoy", "total_alertas", "stock_bajo",
+        "por_vencer", "mov_recientes",
+    )
+    resultado = {campo: datos[campo] for campo in campos_visibles}
+    resultado["stock_bajo"] = [
+        {campo: producto[campo] for campo in (
+            "id", "nombre", "codigo", "stock_minimo", "unidad", "stock"
+        )}
+        for producto in resultado["stock_bajo"]
+    ]
+    resultado["mov_recientes"] = [
+        {campo: movimiento[campo] for campo in (
+            "fecha", "tipo", "cantidad", "nota", "producto_nombre", "unidad"
+        )}
+        for movimiento in resultado["mov_recientes"]
+    ]
+    return resultado
+
+
 def _cls(col, conn=None):
     """Devuelve (condición SQL, params) para filtrar por la sucursal del usuario.
     Quien ve todo (sin sucursal asignada) puede restringir por ciudad si el
@@ -298,7 +321,7 @@ def dashboard():
     total_alertas = len(stock_bajo) + len(por_vencer)
 
     conn.close()
-    return ok({
+    datos = {
         "rol": session.get("rol"),
         "total_productos": total_productos,
         "stock_total": stock_total,
@@ -328,7 +351,10 @@ def dashboard():
         "por_vencer": [dict(r) for r in por_vencer],
         "mov_recientes": [dict(r) for r in mov_recientes],
         "sesiones_recientes": [dict(r) for r in sesiones_recientes],
-    })
+    }
+    if session.get("rol") == "sasonador":
+        datos = _datos_dashboard_sasonador(datos)
+    return ok(datos)
 
 
 @dashboard_bp.route("/api/dashboard/graficos")

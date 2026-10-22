@@ -18,6 +18,14 @@ from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movi
 productos_bp = Blueprint("productos", __name__)
 
 
+def _ocultar_datos_comerciales_productos(rows):
+    for row in rows:
+        for campo in ("costo_promedio", "precio_venta", "proveedor_id",
+                      "proveedor_nombre"):
+            row.pop(campo, None)
+    return rows
+
+
 def norm_nombre(texto):
     """Normaliza un texto (sin acentos, sin símbolos) para comparar nombres."""
     s = unicodedata.normalize("NFKD", str(texto or ""))
@@ -149,7 +157,7 @@ def _stock_sucursal_permitido(conn, ver_todo, sid):
     return pedido, None
 
 
-def scope_productos(ver_todo, sid, scope):
+def scope_productos(ver_todo, sid, scope, solo_sucursal_ids=None, para_pedido=False):
     """(condición_sql, params) para filtrar productos por ámbito de visibilidad.
 
     - ver_todo (admin/superadmin/encargado de almacén principal):
@@ -161,6 +169,12 @@ def scope_productos(ver_todo, sid, scope):
         o cualquier encargado se ve en todas las sucursales; cada una maneja
         su propio stock según la sucursal del usuario que consulta.
     """
+    if session.get("rol") == "sasonador" and not para_pedido:
+        ids = list(solo_sucursal_ids or [])
+        if not ids:
+            return " AND 1=0", []
+        return (" AND p.sucursal_id IN (" + ",".join(["%s"] * len(ids)) + ")",
+                ids)
     if ver_todo:
         if scope == "mio":
             if sid:
@@ -371,7 +385,14 @@ def productos():
         params.append(1)
     # Filtro por ámbito: admin/almacén principal alternan entre mi almacén y las sucursales;
     # las filiales ven globales (almacenes principales) + sus productos.
-    scope_sql, scope_params = scope_productos(ver_todo, sucursal_operativa(), request.args.get("scope", "").strip())
+    sasonador_ids = (
+        ids_sucursal_consolidada(conn, sid)
+        if session.get("rol") == "sasonador" and not para_pedido and sid
+        else []
+    )
+    scope_sql, scope_params = scope_productos(
+        ver_todo, sucursal_operativa(), request.args.get("scope", "").strip(),
+        solo_sucursal_ids=sasonador_ids, para_pedido=para_pedido)
     q += scope_sql
     params += scope_params
     if filtro:
@@ -450,6 +471,8 @@ def productos():
     q += " LIMIT ? OFFSET ?"
     params += [limit, offset]
     rows = [dict(r) for r in conn.execute(q, params).fetchall()]
+    if session.get("rol") == "sasonador":
+        rows = _ocultar_datos_comerciales_productos(rows)
     dest = request.args.get("destino_id", "").strip()
     destino = int(dest) if dest.isdigit() else None
     prov = _stock_disponible(conn, destino_id=destino)

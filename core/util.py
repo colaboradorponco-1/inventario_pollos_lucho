@@ -195,7 +195,7 @@ def ruta_bloqueada_logistica(path, method="GET"):
 
 
 def ruta_bloqueada_sasonador(path, method="GET"):
-    """Limita al rol sasonador a crear y consultar pedidos de su sucursal."""
+    """Limita al rol sasonador a pedidos, su panel y su inventario diario."""
     if session.get("rol") != "sasonador":
         return False
     metodo = (method or "GET").upper()
@@ -208,6 +208,19 @@ def ruta_bloqueada_sasonador(path, method="GET"):
     if path in ("/api/sesion", "/api/catalogos", "/api/productos",
                 "/api/perfil/avatar/imagen"):
         return metodo not in lectura
+    if path == "/api/dashboard":
+        return metodo not in lectura
+    if path == "/api/inventario-diario":
+        return metodo not in ("GET", "HEAD", "OPTIONS", "POST")
+    if re.fullmatch(r"/api/inventario-diario/\d+", path):
+        return metodo not in ("GET", "HEAD", "OPTIONS", "PUT")
+    if re.fullmatch(r"/api/inventario-diario/\d+/cerrar", path):
+        return metodo != "POST"
+    if (re.fullmatch(r"/api/inventario-diario/\d+/(excel)", path)
+            or re.fullmatch(r"/inventario-diario/\d+/imprimir", path)):
+        return metodo not in lectura
+    if re.fullmatch(r"/api/inventario-diario/rebasar-referencia/\d+", path):
+        return metodo != "POST"
     if path == "/api/logout":
         return metodo != "POST"
     if path == "/api/pedidos":

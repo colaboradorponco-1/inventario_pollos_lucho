@@ -989,6 +989,11 @@ let _prodSuc = '';
 async function pintarProdScope() {
     const row = $('#prod-scope-tabs');
     if (!row) return;
+    if (window.ROL === 'sasonador') {
+        _prodSuc = window.SUCURSAL_ID ? String(window.SUCURSAL_ID) : '';
+        row.style.display = 'none';
+        return;
+    }
     if (!catalogos || !catalogos.sucursales) await loadCatalogos();
     // Cada sucursal es un almacén independiente (America, as_america, Simon
     // Lopez, as_simon_lopez, el AS de La Paz, ...): todas figuran como pestaña
@@ -1019,6 +1024,14 @@ async function loadProductos() {
         if (btnRevisarDuplicados) btnRevisarDuplicados.style.display = esAdmin() ? '' : 'none';
         const panelRepararStock = $('#panel-reparar-stock');
         if (panelRepararStock) panelRepararStock.style.display = esCentral() ? '' : 'none';
+        const soloLecturaSasonador = window.ROL === 'sasonador';
+        if (soloLecturaSasonador) {
+            ['btn-nuevo-producto', 'btn-exportar-productos', 'btn-importar-prod',
+                'btn-etiquetas', 'btn-revisar-duplicados'].forEach((id) => {
+                const btn = document.getElementById(id);
+                if (btn) btn.style.display = 'none';
+            });
+        }
         const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
         const categoria = ($('#prod-categoria') || {}).value || '';
         const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
@@ -1089,7 +1102,8 @@ async function loadProductos() {
                 else if (stockN <= (p.stock_minimo || 10)) { stockColor = '#d97706'; stockIcon = '🟡'; }
                 else { stockColor = '#16a34a'; stockIcon = '🟢'; }
                 const puedeEditar = esGestion || esPropio;
-                const acciones = estado === 'inactivos'
+                const acciones = soloLecturaSasonador ? ''
+                    : estado === 'inactivos'
                     ? (esAdmin() ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar" aria-label="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
                     : `<button class="btn btn-icon" data-hist-prod="${p.id}" title="Historial" aria-label="Historial"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>${
                         puedeEditar
@@ -1102,9 +1116,9 @@ async function loadProductos() {
                     <td style="color:${stockColor};font-weight:700">${stockIcon} ${fmtNum(stockN)} ${p.unidad}${provVista ? ' <small style="color:var(--muted)">disp.</small>' : ''}</td>
                     <td>${p.stock_minimo} ${p.unidad}</td>
                     <td>${p.unidad}</td>
-                    <td>Bs ${fmtNum(p.costo_promedio)}</td>
+                    ${soloLecturaSasonador ? '' : `<td>Bs ${fmtNum(p.costo_promedio)}</td>
                     <td>Bs ${fmtNum(p.precio_venta)}</td>
-                    <td>${p.proveedor_nombre || '—'}</td>
+                    <td>${p.proveedor_nombre || '—'}</td>`}
                     <td>${p.vencimiento ? fmtDate(p.vencimiento) : '—'}</td>
                     <td>${acciones}
                     </td>
@@ -1126,8 +1140,9 @@ async function loadProductos() {
                                     <thead>
                                         <tr>
                                             <th>Producto</th><th>Almacén</th><th>Stock</th>
-                                            <th>Mínimo</th><th>Unidad</th><th>Costo (Bs)</th><th>Precio (Bs)</th>
-                                            <th>Proveedor</th><th>Vence</th><th></th>
+                                            <th>Mínimo</th><th>Unidad</th>
+                                            ${soloLecturaSasonador ? '' : '<th>Costo (Bs)</th><th>Precio (Bs)</th><th>Proveedor</th>'}
+                                            <th>Vence</th><th></th>
                                         </tr>
                                     </thead>
                                     <tbody>${filas(b.items)}</tbody>
@@ -3925,7 +3940,7 @@ async function listarInventario() {
                 <td>${f.total_items || 0}${(f.estado !== 'cerrado' && (f.contados || 0) > 0) ? ` <small style="color:var(--muted)">${f.contados} contados</small>` : ''}</td>
                 <td>${f.total_faltantes || 0}</td>
                 <td>${f.total_sobrantes || 0}</td>
-                <td>Bs ${esc(fmtNum(f.valor_diferencia || 0))}</td>
+                ${window.ROL === 'sasonador' ? '' : `<td class="inv-finance">Bs ${esc(fmtNum(f.valor_diferencia || 0))}</td>`}
                 <td>${esc(f.cerrado_por || f.usuario || '')}</td>
                 <td><button class="btn" data-inv-abrir="${f.id}">Abrir</button></td>
             </tr>`).join('');
@@ -4046,7 +4061,8 @@ async function abrirInventario(invId) {
         `<span class="tb-tag">Total utilizada: <strong>${esc(fmtInvQ(r.total_utilizada || 0))}</strong></span>` +
         `<span class="tb-tag" style="color:#dc2626">Faltantes: <strong>${r.total_faltantes || 0}</strong> (${esc(fmtInvQ(r.cantidad_faltante || 0))})</span>` +
         `<span class="tb-tag" style="color:#0F3D2E">Sobrantes: <strong>${r.total_sobrantes || 0}</strong> (${esc(fmtInvQ(r.cantidad_sobrante || 0))})</span>` +
-        `<span class="tb-tag">Valor diferencia: <strong>Bs ${esc(fmtNum(r.valor_diferencia || 0))}</strong></span>`;
+        (window.ROL === 'sasonador' ? '' :
+            `<span class="tb-tag">Valor diferencia: <strong>Bs ${esc(fmtNum(r.valor_diferencia || 0))}</strong></span>`);
 
     const tb = $('#inv-tbody');
     let catActual = null;
@@ -4116,7 +4132,8 @@ async function abrirInventario(invId) {
 
     $('#btn-inv-guardar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-cerrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
-    $('#btn-inv-borrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
+    $('#btn-inv-borrar').style.display =
+        (INV_CERRADA || INV_SOLO_LECTURA || window.ROL === 'sasonador') ? 'none' : '';
     $('#btn-inv-excel').style.display = '';
     $('#btn-inv-print').style.display = '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
@@ -6039,17 +6056,43 @@ async function init() {
             if (btnPedidos) btnPedidos.click();
         } else if (s.rol === 'sasonador') {
             document.querySelectorAll('.menu-btn[data-view]').forEach((btn) => {
-                if (btn.dataset.view !== 'pedidos') btn.style.display = 'none';
+                if (!['dashboard', 'productos', 'inventario', 'pedidos'].includes(btn.dataset.view)) {
+                    btn.style.display = 'none';
+                }
             });
-            document.querySelectorAll('.menu-grupo').forEach((grupo) => { grupo.style.display = 'none'; });
+            document.querySelectorAll('.menu-grupo').forEach((grupo) => {
+                if (![...grupo.querySelectorAll('.menu-btn')].some((btn) => btn.style.display !== 'none')) {
+                    grupo.style.display = 'none';
+                }
+            });
+            document.querySelectorAll('.kpi-finance, .panel-finance').forEach((elemento) => {
+                elemento.style.display = 'none';
+            });
+            document.querySelectorAll('#view-inventario .inv-finance').forEach((elemento) => {
+                elemento.style.display = 'none';
+            });
+            ['stat-num-ventas-hoy', 'stat-num-ventas-mes', 'stat-num-ventas-anio',
+                'stat-repartos-hoy', 'stat-repartos', 'stat-repartos-anio',
+                'graf-top-productos', 'graf-top-repartos'].forEach((id) => {
+                const elemento = document.getElementById(id);
+                if (elemento) {
+                    const tarjeta = elemento.closest('.kpi') || elemento.closest('.panel');
+                    if (tarjeta) tarjeta.style.display = 'none';
+                }
+            });
+            document.querySelectorAll('#view-dashboard .kpi-grid').forEach((grid) => {
+                if (![...grid.querySelectorAll('.kpi')].some((tarjeta) => tarjeta.style.display !== 'none')) {
+                    grid.style.display = 'none';
+                    const titulo = grid.previousElementSibling;
+                    if (titulo && titulo.tagName === 'H3') titulo.style.display = 'none';
+                }
+            });
             const btnConfig = document.querySelector('[data-abrir-config]');
             if (btnConfig) btnConfig.style.display = 'none';
             ['btn-refrescar-top', 'btn-config-top'].forEach((id) => {
                 const btn = document.getElementById(id);
                 if (btn) btn.style.display = 'none';
             });
-            const btnPedidos = $('.menu-btn[data-view="pedidos"]');
-            if (btnPedidos) btnPedidos.click();
         }
         // Encargado: operación de su sucursal, pero ve SUS propios reportes
         if (s.rol === 'encargado') {
@@ -6094,7 +6137,7 @@ async function init() {
     // El ALMACÉN RECEPTOR (p. ej. "AS America"/"AS Simon Lopez") aterriza
     // directo en su bandeja de pedidos: su trabajo es recibir/despachar lo que
     // le piden a su sucursal. No abre en el dashboard.
-    if (window.RECEPTOR || window.ROL === 'sasonador') {
+    if (window.RECEPTOR) {
         const bP = $('.menu-btn[data-view="pedidos"]');
         if (bP) bP.click();
     } else {

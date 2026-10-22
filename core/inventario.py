@@ -34,6 +34,18 @@ from .util import (ok, err, login_requerido, responder_excel, sucursal_actual,
 
 inventario_bp = Blueprint("inventario", __name__)
 
+
+def _ocultar_valores_inventario_sasonador(datos):
+    if session.get("rol") != "sasonador":
+        return datos
+    datos.pop("valor_diferencia", None)
+    if isinstance(datos.get("resumen"), dict):
+        datos["resumen"].pop("valor_diferencia", None)
+    for linea in datos.get("lineas", []):
+        linea.pop("costo_promedio", None)
+        linea.pop("precio_venta", None)
+    return datos
+
 # Un día no puede tener más de 2 años hacia atrás ni 1 día hacia delante.
 # Ojo: replace(year=...) falla el 29 de febrero en año bisiesto; por eso se
 # construye desde timedelta en vez de replace.
@@ -679,7 +691,7 @@ def inventario_detalle(inv_id):
 
     faltantes = [l for l in lineas if l["diferencia"] < 0]
     sobrantes = [l for l in lineas if l["diferencia"] > 0]
-    return ok({
+    return ok(_ocultar_valores_inventario_sasonador({
         "id": inv["id"],
         "fecha": _fecha_iso(inv["fecha"]),
         "hora_corte": inv["hora_corte"] or "",
@@ -704,7 +716,7 @@ def inventario_detalle(inv_id):
             "valor_diferencia": round(sum(l["diferencia"] * l["costo_promedio"] for l in lineas), 2),
             "total_utilizada": round(sum(l["utilizada"] for l in lineas), 3),
         },
-    })
+    }))
 
 
 # --------------------------------------------------------------------------
@@ -1278,10 +1290,11 @@ def inventario_cerrar(inv_id):
     registrar_auditoria("Planilla de inventario cerrada",
                         f"ID {inv_id} - {total_items} ítems - {ajustes} ajustes - "
                         f"dif. Bs {round(valor_dif, 2)}")
-    return ok({"ajustes": ajustes, "total_items": total_items,
-               "total_faltantes": faltantes, "total_sobrantes": sobrantes,
-               "valor_diferencia": round(valor_dif, 2),
-               "avisos": avisos_cierre},
+    return ok(_ocultar_valores_inventario_sasonador({
+              "ajustes": ajustes, "total_items": total_items,
+              "total_faltantes": faltantes, "total_sobrantes": sobrantes,
+              "valor_diferencia": round(valor_dif, 2),
+              "avisos": avisos_cierre}),
               message=f"Planilla cerrada con {ajustes} ajuste(s) de stock")
 
 
@@ -1397,7 +1410,7 @@ def inventario_lista():
             d["contados"] = contados
         else:
             d["contados"] = d["total_items"] or 0
-        lista.append(d)
+        lista.append(_ocultar_valores_inventario_sasonador(d))
     return ok(lista)
 
 
