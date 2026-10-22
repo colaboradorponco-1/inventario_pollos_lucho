@@ -1374,6 +1374,10 @@ async function revisarPedidosEquivalenciasPendientes() {
     const resultado = $('#equivalencias-pendientes-resultado');
     resultado.textContent = 'Revisando pedidos pendientes y en camino...';
     try {
+        if (!equivalenciasCargadas) {
+            await loadEquivalencias();
+            equivalenciasCargadas = true;
+        }
         const data = await request(API + '/pedidos/equivalencias-pendientes');
         const pendientes = data.pendientes || [];
         const badge = $('#badge-equivalencias');
@@ -5515,6 +5519,26 @@ $('#form-pedido').addEventListener('submit', async (e) => {
     }
 });
 
+const pedidosBandejaExpandida = new Set();
+
+on('#bandeja-contenido', 'click', (event) => {
+    const boton = event.target.closest('[data-toggle-ticket]');
+    if (!boton) return;
+    const pedido = boton.closest('.bandeja-pedido');
+    const detalle = pedido?.querySelector('.bandeja-items');
+    if (!detalle) return;
+
+    const expandido = detalle.hidden;
+    detalle.hidden = !expandido;
+    pedido.classList.toggle('bandeja-expandido', expandido);
+    boton.setAttribute('aria-expanded', String(expandido));
+    boton.setAttribute(
+        'aria-label',
+        `${expandido ? 'Ocultar' : 'Mostrar'} productos del ticket ${boton.dataset.ticket}`);
+    if (expandido) pedidosBandejaExpandida.add(String(boton.dataset.toggleTicket));
+    else pedidosBandejaExpandida.delete(String(boton.dataset.toggleTicket));
+});
+
 async function cargarBandeja() {
     const panel = $('#panel-hist-realizados');
     if (!panel) return;
@@ -5587,13 +5611,29 @@ async function cargarBandeja() {
                 <h3>${esc(nomGrupo)} <span class="ciudad-tag">${ciudadSucursal(g.nombre)}</span> <span class="respaldo-txt">${g.pedidos.length} pedido(s)</span></h3>
                 ${g.pedidos.map((p) => {
                     const etapa = p.etapa || p.estado || 'pendiente';
+                    const pedidoId = String(p.id);
+                    const itemsAbiertos = pedidosBandejaExpandida.has(pedidoId);
                     // Un solo tag: etapa y estado ahora comparten el flujo, así
                     // que no hay dos etiquetas que parezcan contradictorias.
                     const chipEstado = `<span class="${({ pendiente: 'badge-pendiente', en_camino: 'badge-despachado', entregado: 'badge-cumplido', rechazado: 'badge-rechazado' })[etapa] || 'badge-pendiente'}">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
                     return `
-                    <div class="bandeja-pedido">
+                    <div class="bandeja-pedido ${itemsAbiertos ? 'bandeja-expandido' : ''}">
                         <div class="bandeja-cab">
                             <strong>${esc(p.nro_ticket)}</strong>
+                            <button class="btn btn-icon bandeja-toggle-items" type="button"
+                                data-toggle-ticket="${esc(pedidoId)}"
+                                data-ticket="${esc(p.nro_ticket)}"
+                                aria-expanded="${itemsAbiertos}"
+                                aria-controls="bandeja-items-${esc(pedidoId)}"
+                                aria-label="${itemsAbiertos ? 'Ocultar' : 'Mostrar'} productos del ticket ${esc(p.nro_ticket)}"
+                                title="${itemsAbiertos ? 'Ocultar' : 'Mostrar'} productos">
+                                <svg class="bandeja-flecha" viewBox="0 0 24 24" width="16" height="16"
+                                     fill="none" stroke="currentColor" stroke-width="2"
+                                     stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </button>
+                            <span class="respaldo-txt">${p.items.length} producto(s)</span>
                             <span>${fmtDate(p.fecha)}</span>
                             <span>${esc(p.usuario || '—')}</span>
                             ${chipEstado}
@@ -5607,17 +5647,19 @@ async function cargarBandeja() {
                             <button class="btn btn-sm" onclick="window.open('/pedidos/ticket/${p.id}', '_blank')">Imprimir</button>
                             <button class="btn btn-icon" onclick="verPedido(${p.id}, true)" title="Ver detalle y gestionar estado" aria-label="Ver detalle y gestionar estado">${eyeSvg}</button>
                         </div>
-                        <table class="data-table compact">
-                            <tbody>${p.items.map((it) => `
-                                <tr>
-                                    <td>${esc(it.producto_nombre)}</td>
-                                    <td class="td-unidad">${esc(it.unidad || 'unidad')}</td>
-                                    <td class="td-cant">${it.cantidad}</td>
-                                    <td class="td-medida">${tachoEtiqueta(it) || '—'}</td>
-                                    <td class="td-prov" title="Proveedor que despacha esta línea">${it.destino_nombre ? 'de ' + esc(it.destino_nombre) : '—'}</td>
-                                </tr>`).join('') || '<tr><td class="empty">Sin líneas</td></tr>'}
-                            </tbody>
-                        </table>
+                        <div class="bandeja-items" id="bandeja-items-${esc(pedidoId)}" ${itemsAbiertos ? '' : 'hidden'}>
+                            <table class="data-table compact">
+                                <tbody>${p.items.map((it) => `
+                                    <tr>
+                                        <td>${esc(it.producto_nombre)}</td>
+                                        <td class="td-unidad">${esc(it.unidad || 'unidad')}</td>
+                                        <td class="td-cant">${it.cantidad}</td>
+                                        <td class="td-medida">${tachoEtiqueta(it) || '—'}</td>
+                                        <td class="td-prov" title="Proveedor que despacha esta línea">${it.destino_nombre ? 'de ' + esc(it.destino_nombre) : '—'}</td>
+                                    </tr>`).join('') || '<tr><td class="empty">Sin líneas</td></tr>'}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>`;}).join('')}
             </div>`;
         }).join('');

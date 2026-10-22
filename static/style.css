@@ -1126,6 +1126,7 @@ body.rol-encargado .panel-finance {
     border-bottom: 1px dashed var(--border, #e4e1d9);
 }
 .bandeja-pedido:last-child { border-bottom: none; }
+.bandeja-pedido:not(.bandeja-expandido) .bandeja-cab { margin-bottom: 0; }
 .bandeja-cab {
     display: flex;
     align-items: center;
@@ -1134,6 +1135,11 @@ body.rol-encargado .panel-finance {
     font-size: 13px;
     margin-bottom: 6px;
 }
+.bandeja-items { margin-top: 8px; }
+.bandeja-items[hidden] { display: none !important; }
+.bandeja-toggle-items { min-width: 32px; min-height: 32px; padding: 6px; margin-right: 0; }
+.bandeja-flecha { transition: transform .18s ease; }
+.bandeja-toggle-items[aria-expanded="true"] .bandeja-flecha { transform: rotate(180deg); }
 .bandeja-cab .btn-sm {
     padding: 4px 10px;
     font-size: 12px;

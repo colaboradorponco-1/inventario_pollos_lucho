@@ -64,7 +64,7 @@ def _leer(rel):
 
 def _fn(src, nombre):
     """Devuelve el cuerpo de una funcion del fuente."""
-    m = re.search(r"function %s\([^)]*\)\s*\{" % re.escape(nombre), src)
+    m = re.search(r"(?:async\s+)?function %s\([^)]*\)\s*\{" % re.escape(nombre), src)
     if not m:
         return ""
     i, nivel = m.end(), 1
@@ -106,6 +106,28 @@ def prueba_bandeja_ordenada():
     fn = m.group(0) if m else ""
     _check("la bandeja ordena el detalle por categoria",
            "categoria_nombre, d.producto_nombre" in fn)
+
+
+def prueba_bandeja_tickets_plegables():
+    js = _leer(os.path.join("static", "app.js"))
+    cargar = _fn(js, "cargarBandeja")
+    _check("cada ticket tiene un boton accesible para desplegar sus productos",
+           'data-toggle-ticket="${esc(pedidoId)}"' in cargar
+           and 'aria-controls="bandeja-items-${esc(pedidoId)}"' in cargar
+           and "aria-expanded=\"${itemsAbiertos}\"" in cargar)
+    _check("los productos del ticket empiezan ocultos y la flecha conserva su estado",
+           "itemsAbiertos ? '' : 'hidden'" in cargar
+           and "pedidosBandejaExpandida.has(pedidoId)" in cargar
+           and "detalle.hidden = !expandido;" in js)
+
+
+def prueba_as_carga_productos_al_revisar_equivalencias():
+    js = _leer(os.path.join("static", "app.js"))
+    revisar = _fn(js, "revisarPedidosEquivalenciasPendientes")
+    _check("la revisión carga los productos del AS antes de habilitar Resolver",
+           "if (!equivalenciasCargadas)" in revisar
+           and "await loadEquivalencias();" in revisar
+           and "equivalenciasCargadas = true;" in revisar)
 
 
 def prueba_catalogo_provee_coincide_con_backend():
@@ -614,6 +636,8 @@ def main():
     prueba_detalle_ordenado()
     prueba_ticket_conserva_orden()
     prueba_bandeja_ordenada()
+    prueba_bandeja_tickets_plegables()
+    prueba_as_carga_productos_al_revisar_equivalencias()
     prueba_catalogo_provee_coincide_con_backend()
     prueba_el_destino_no_se_elige_por_stock()
     prueba_el_destino_no_se_elige_por_stock_en_el_codigo()
