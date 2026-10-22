@@ -1553,6 +1553,8 @@ body.sidebar-collapsed main {
 .segment-tab.active {
     box-shadow: 0 1px 3px rgba(30,24,14,.1);
 }
+#view-pedidos.pedidos-revision-activa > :not(#panel-equivalencias) { display: none !important; }
+#view-pedidos.pedidos-revision-activa > #panel-equivalencias { display: block !important; }
 .hist-sucursal-tabs, .tabs-log { gap: 8px; }
 .hist-tab, .tab-log { min-height: 38px; border-radius: 9px; }
 
