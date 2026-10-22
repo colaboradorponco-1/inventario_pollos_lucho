@@ -169,6 +169,8 @@ def scope_productos(ver_todo, sid, scope, solo_sucursal_ids=None, para_pedido=Fa
         o cualquier encargado se ve en todas las sucursales; cada una maneja
         su propio stock según la sucursal del usuario que consulta.
     """
+    if session.get("rol") == "sasonador" and not sid:
+        return " AND 1=0", []
     if session.get("rol") == "sasonador" and not para_pedido:
         ids = list(solo_sucursal_ids or [])
         if not ids:
@@ -242,7 +244,8 @@ def productos():
                 f"Ya existe '{duplicado['nombre']}' ({duplicado['codigo']}) en "
                 f"{sucursal_dup}. Usa la misma ficha para mantener un solo producto.",
                 409)
-        para_proveer = _para_proveer(data)
+        para_proveer = (0 if session.get("rol") == "sasonador"
+                        else _para_proveer(data))
         if para_proveer and not _sucursal_puede_proveer(conn, sid):
             conn.close()
             return err("Solo los almacenes proveedores pueden ofrecer productos en pedidos", 400)

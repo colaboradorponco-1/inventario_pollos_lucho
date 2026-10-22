@@ -4,7 +4,7 @@ from flask import Blueprint, g, request, session
 
 from database import get_conn
 from .lotes import destinos_validos
-from .util import (ok, login_requerido, sucursal_actual, sucursal_operativa, es_gestion,
+from .util import (ok, err, login_requerido, sucursal_actual, sucursal_operativa, es_gestion,
                    es_encargado_almacen, ids_ciudad_permitidos, sucursal_filtro_permitida,
                    cond_ciudad, ids_sucursal_consolidada)
 
@@ -62,6 +62,9 @@ def dashboard():
     conn = get_conn()
     hoy = date.today().isoformat()
     sid = sucursal_actual()
+    if session.get("rol") == "sasonador" and sid is None:
+        conn.close()
+        return err("El usuario Sazonador debe tener una sucursal asignada", 403)
     g.ciudad_ids = ids_ciudad_permitidos(conn, request.args.get("ciudad"))
     # Filtro opcional por UNA sucursal individual (?sucursal=<id>): reduce el scope
     # a esa sucursal puntual (además de/independiente del filtro por ciudad).

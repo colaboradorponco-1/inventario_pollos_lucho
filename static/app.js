@@ -1026,11 +1026,13 @@ async function loadProductos() {
         if (panelRepararStock) panelRepararStock.style.display = esCentral() ? '' : 'none';
         const soloLecturaSasonador = window.ROL === 'sasonador';
         if (soloLecturaSasonador) {
-            ['btn-nuevo-producto', 'btn-exportar-productos', 'btn-importar-prod',
+            ['btn-exportar-productos', 'btn-importar-prod',
                 'btn-etiquetas', 'btn-revisar-duplicados'].forEach((id) => {
                 const btn = document.getElementById(id);
                 if (btn) btn.style.display = 'none';
             });
+            const btnNuevo = $('#btn-nuevo-producto');
+            if (btnNuevo) btnNuevo.style.display = '';
         }
         const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
         const categoria = ($('#prod-categoria') || {}).value || '';
@@ -1741,8 +1743,8 @@ function actualizarControlProductoPedido(sucursalId, ofrecer = false) {
     const hint = $('#prod-para-proveer-hint');
     const checkbox = $('#prod-para-proveer');
     const permitido = sucursalPermiteOfrecerProductos(sucursalId);
-    if (wrap) wrap.style.display = permitido ? 'flex' : 'none';
-    if (hint) hint.style.display = permitido ? 'block' : 'none';
+    if (wrap) wrap.style.display = permitido && window.ROL !== 'sasonador' ? 'flex' : 'none';
+    if (hint) hint.style.display = permitido && window.ROL !== 'sasonador' ? 'block' : 'none';
     if (checkbox) checkbox.checked = permitido && ofrecer;
 }
 
@@ -6065,7 +6067,13 @@ async function init() {
                     grupo.style.display = 'none';
                 }
             });
-            document.querySelectorAll('.kpi-finance, .panel-finance').forEach((elemento) => {
+            const dashboard = $('#view-dashboard');
+            const tituloDashboard = dashboard && dashboard.querySelector('.dash-head h1');
+            if (tituloDashboard) tituloDashboard.textContent = 'Mi dashboard';
+            document.querySelectorAll('.kpi-finance, .panel-finance, #view-dashboard .dash-charts').forEach((elemento) => {
+                elemento.style.display = 'none';
+            });
+            document.querySelectorAll('#view-dashboard > h3').forEach((elemento) => {
                 elemento.style.display = 'none';
             });
             document.querySelectorAll('#view-inventario .inv-finance').forEach((elemento) => {

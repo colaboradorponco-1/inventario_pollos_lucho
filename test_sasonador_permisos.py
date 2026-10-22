@@ -4,6 +4,7 @@ from unittest.mock import patch
 from flask import Flask, session
 
 from core.inventario import _ocultar_valores_inventario_sasonador
+import core.dashboard as dashboard_module
 import core.pedidos as pedidos_module
 from core.dashboard import _datos_dashboard_sasonador
 from core.productos import _ocultar_datos_comerciales_productos, scope_productos
@@ -54,7 +55,8 @@ class SasonadorPermisosTests(unittest.TestCase):
         self.assertFalse(ruta_bloqueada_sasonador("/api/logout", "POST"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/pedidos/15/etapa", "PUT"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/pedidos/bandeja", "GET"))
-        self.assertTrue(ruta_bloqueada_sasonador("/api/productos", "POST"))
+        self.assertFalse(ruta_bloqueada_sasonador("/api/productos", "POST"))
+        self.assertTrue(ruta_bloqueada_sasonador("/api/productos/15", "PUT"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/usuarios", "GET"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/sucursales", "GET"))
 
@@ -99,12 +101,22 @@ class SasonadorPermisosTests(unittest.TestCase):
         self.assertNotIn("costo_promedio", resultado["stock_bajo"][0])
         self.assertNotIn("precio_unitario", resultado["mov_recientes"][0])
 
+    def test_dashboard_sasonador_sin_sucursal_no_muestra_datos_globales(self):
+        session["user_id"] = 7
+        session.pop("sucursal_id")
+        with patch.object(dashboard_module, "get_conn", return_value=FakeConn()):
+            _, status = dashboard_module.dashboard()
+        self.assertEqual(status, 403)
+
     def test_catalogo_sasonador_solo_sucursal_asignada(self):
         condicion, parametros = scope_productos(
             False, 42, "", solo_sucursal_ids=[42, 43])
         self.assertEqual(condicion, " AND p.sucursal_id IN (%s,%s)")
         self.assertEqual(parametros, [42, 43])
         condicion, parametros = scope_productos(False, None, "")
+        self.assertEqual(condicion, " AND 1=0")
+        self.assertEqual(parametros, [])
+        condicion, parametros = scope_productos(False, None, "", para_pedido=True)
         self.assertEqual(condicion, " AND 1=0")
         self.assertEqual(parametros, [])
 

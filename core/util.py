@@ -205,9 +205,11 @@ def ruta_bloqueada_sasonador(path, method="GET"):
         return metodo not in lectura
     if path in ("/", "/login"):
         return metodo not in lectura
-    if path in ("/api/sesion", "/api/catalogos", "/api/productos",
+    if path in ("/api/sesion", "/api/catalogos",
                 "/api/perfil/avatar/imagen"):
         return metodo not in lectura
+    if path == "/api/productos":
+        return metodo not in lectura and metodo != "POST"
     if path == "/api/dashboard":
         return metodo not in lectura
     if path == "/api/inventario-diario":
