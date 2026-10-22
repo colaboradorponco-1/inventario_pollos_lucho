@@ -882,28 +882,38 @@
                     <p>El AS puede avanzar todos los estados de los pedidos que abastece su almacén. El preparador solo los marca «En camino» y el repartidor de la sucursal solicitante solo confirma «Entregado». Administración y encargados de almacenes principales también gestionan los pedidos que abastece su almacén. Ninguno crea solicitudes; las sucursales las envían desde «Mis pedidos».</p>
                 </div>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <button class="btn btn-primary" id="btn-abrir-equivalencias" type="button" style="display:none">
+                        Revisar pedidos bloqueados
+                        <span class="badge-alerta" id="badge-equivalencias" style="display:none"></span>
+                    </button>
                     <span class="respaldo-txt" id="pedidos-info"></span>
                 </div>
             </div>
+            <div class="segment-tabs" id="tabs-historial-pedidos">
+                <button class="segment-tab active" data-tab="realizados" id="tab-hist-realizados" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 1. Pedidos que nos hicieron (Bandeja)</button>
+                <button class="segment-tab" data-tab="mis-pedidos" id="tab-hist-mis-pedidos" type="button" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg> 2. Pedidos que hicimos (Mis Solicitudes)</button>
+            </div>
             <div class="panel" id="panel-equivalencias" style="display:none">
-                <h2>Fichas que necesitan revisión</h2>
-                <p class="scan-hint">Si un pedido no puede recibirse porque falta la ficha correcta o está inactiva, resuélvelo aquí antes de marcarlo «Entregado». El sistema no moverá stock hasta que el pedido se entregue.</p>
-                <button class="btn" id="btn-revisar-equivalencias-pendientes" type="button">Actualizar pedidos por revisar</button>
+                <button class="btn" id="btn-volver-pedidos" type="button">← Volver a Pedidos</button>
+                <h2>Pedidos que necesitan una ficha</h2>
+                <p class="scan-hint">Solo aparecen pedidos abiertos con este problema. Si solo ves America, no hay otros pedidos pendientes de resolver.</p>
+                <button class="btn" id="btn-revisar-equivalencias-pendientes" type="button">Actualizar lista</button>
                 <div id="equivalencias-pendientes-resultado" aria-live="polite"></div>
                 <details id="equiv-configuracion-manual" style="margin-top:14px">
-                    <summary>Resolver ficha seleccionada</summary>
-                    <p class="scan-hint">Elige la ficha del proveedor y la sucursal receptora. Revisa nombre, categoría y unidad: una coincidencia de nombre no confirma que sean el mismo producto.</p>
+                    <summary>Elegir la ficha para este pedido</summary>
+                    <p class="scan-hint">Selecciona la ficha correcta y confirma. La unidad debe coincidir.</p>
                     <form id="form-equivalencia" class="toolbar">
+                        <p id="equiv-revision-contexto" class="scan-hint" style="width:100%"></p>
                         <select id="equiv-origen" required aria-label="Producto del proveedor"></select>
                         <select id="equiv-sucursal" required aria-label="Sucursal receptora"></select>
                         <input type="search" id="equiv-buscar-destino" placeholder="Buscar ficha receptora..."
                                aria-label="Buscar producto en la sucursal receptora">
                         <select id="equiv-destino" required aria-label="Producto de la sucursal receptora"></select>
-                        <button class="btn btn-primary" type="submit">Confirmar ficha correcta</button>
+                        <button class="btn btn-primary" type="submit">Confirmar</button>
                     </form>
                     <p class="scan-hint" id="equiv-candidatos-ayuda" aria-live="polite"></p>
                     <button class="btn" id="equiv-crear-abrir" type="button" style="display:none">
-                        No existe la ficha: crearla y vincular
+                        No existe: crear ficha nueva
                     </button>
                     <div id="equiv-crear-panel" class="panel" style="display:none">
                         <h3>Crear ficha nueva en la sucursal receptora</h3>
@@ -938,10 +948,6 @@
                         </table>
                     </div>
                 </details>
-            </div>
-            <div class="segment-tabs" id="tabs-historial-pedidos">
-                <button class="segment-tab active" data-tab="realizados" id="tab-hist-realizados" type="button"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 1. Pedidos que nos hicieron (Bandeja)</button>
-                <button class="segment-tab" data-tab="mis-pedidos" id="tab-hist-mis-pedidos" type="button" style="display:none"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg> 2. Pedidos que hicimos (Mis Solicitudes)</button>
             </div>
             <div id="panel-hist-mis-pedidos">
                 <div class="panel">

@@ -13,7 +13,7 @@ from .lotes import (destinos_validos, elegir_destino, stock_por_destino,
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    ok_paginado, paginar_params, sucursal_actual, sucursal_operativa,
                    clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen,
-                   ids_sucursal_consolidada, es_superadmin)
+                   ids_sucursal_consolidada, es_superadmin, es_receptor)
 
 productos_bp = Blueprint("productos", __name__)
 
@@ -1141,13 +1141,18 @@ def producto_historial(prod_id):
 @login_requerido
 def equivalencias_productos():
     conn = get_conn()
-    if not (es_gestion() or es_encargado_almacen(conn)):
+    puede_gestionar_todos = es_gestion() or es_encargado_almacen(conn)
+    es_as_limitado = es_receptor() and not puede_gestionar_todos
+    sucursal_as = sucursal_actual() if es_as_limitado else None
+    if not (puede_gestionar_todos or (es_as_limitado and sucursal_as)):
         conn.close()
         return err(
-            "Solo administración y encargados de Almacén Principal 1 o 2 "
-            "pueden confirmar equivalencias", 403)
+            "Solo administración, Almacenes Principales y usuarios AS "
+            "autorizados pueden confirmar equivalencias", 403)
 
     if request.method == "GET":
+        filtro_as = " WHERE origen.sucursal_id = ?" if es_as_limitado else ""
+        parametros_as = (sucursal_as,) if es_as_limitado else ()
         equivalencias = conn.execute("""
             SELECT e.id, e.producto_origen_id, e.sucursal_destino_id,
                    e.producto_destino_id, origen.nombre AS origen_nombre,
@@ -1165,8 +1170,26 @@ def equivalencias_productos():
             JOIN productos destino ON destino.id = e.producto_destino_id
             LEFT JOIN categorias destino_categoria ON destino_categoria.id = destino.categoria_id
             JOIN sucursales destino_sucursal ON destino_sucursal.id = e.sucursal_destino_id
+        """ + filtro_as + """
             ORDER BY origen_sucursal.nombre, origen.nombre, destino_sucursal.nombre
-        """).fetchall()
+        """, parametros_as).fetchall()
+        filtro_productos_as = """
+            AND (
+                p.sucursal_id = ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM pedidos pedido
+                    JOIN pedido_detalle detalle ON detalle.pedido_id = pedido.id
+                    WHERE pedido.sucursal_id = p.sucursal_id
+                      AND COALESCE(detalle.destino_id, pedido.destino_id) = ?
+                      AND detalle.producto_id = p.id
+                      AND pedido.estado IN ('pendiente', 'en_camino')
+                      AND pedido.sucursal_id <> ?
+                )
+            )
+        """ if es_as_limitado else ""
+        parametros_productos_as = (
+            (sucursal_as, sucursal_as, sucursal_as) if es_as_limitado else ())
         productos = conn.execute("""
             SELECT p.id, p.nombre, p.unidad, p.sucursal_id, p.categoria_id,
                    c.nombre AS categoria_nombre,
@@ -1175,10 +1198,26 @@ def equivalencias_productos():
             LEFT JOIN categorias c ON c.id = p.categoria_id
             LEFT JOIN sucursales s ON s.id = p.sucursal_id
             WHERE p.activo = 1
+        """ + filtro_productos_as + """
             ORDER BY s.nombre, p.nombre
-        """).fetchall()
-        sucursales = conn.execute(
-            "SELECT id, nombre FROM sucursales ORDER BY nombre").fetchall()
+        """, parametros_productos_as).fetchall()
+        if es_as_limitado:
+            sucursales = conn.execute("""
+                SELECT DISTINCT s.id, s.nombre
+                FROM sucursales s
+                JOIN pedidos pedido ON pedido.sucursal_id = s.id
+                JOIN pedido_detalle detalle ON detalle.pedido_id = pedido.id
+                WHERE COALESCE(detalle.destino_id, pedido.destino_id) = ?
+                  AND detalle.producto_id IN (
+                      SELECT id FROM productos WHERE sucursal_id = ? AND activo = 1
+                  )
+                  AND pedido.estado IN ('pendiente', 'en_camino')
+                  AND pedido.sucursal_id <> ?
+                ORDER BY s.nombre
+            """, (sucursal_as, sucursal_as, sucursal_as)).fetchall()
+        else:
+            sucursales = conn.execute(
+                "SELECT id, nombre FROM sucursales ORDER BY nombre").fetchall()
         conn.close()
         return ok({
             "equivalencias": [dict(fila) for fila in equivalencias],
@@ -1196,7 +1235,7 @@ def equivalencias_productos():
         return err("Selecciona los productos y la sucursal receptora", 400)
 
     origen = conn.execute(
-        "SELECT id, unidad FROM productos WHERE id = ? AND activo = 1",
+        "SELECT id, unidad, sucursal_id FROM productos WHERE id = ? AND activo = 1",
         (producto_origen_id,)).fetchone()
     destino = conn.execute(
         "SELECT id, sucursal_id, unidad FROM productos WHERE id = ? AND activo = 1",
@@ -1206,6 +1245,25 @@ def equivalencias_productos():
     if not origen or not destino or not sucursal:
         conn.close()
         return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
+    if es_as_limitado:
+        if origen["sucursal_id"] != sucursal_as:
+            conn.close()
+            return err("Solo puedes revisar productos de tu propio almacén AS", 403)
+        pedido_abierto = conn.execute("""
+            SELECT 1
+            FROM pedidos p
+            JOIN pedido_detalle d ON d.pedido_id = p.id
+            WHERE p.sucursal_id = ?
+              AND COALESCE(d.destino_id, p.destino_id) = ?
+              AND d.producto_id = ?
+              AND p.estado IN ('pendiente', 'en_camino')
+            LIMIT 1
+        """, (sucursal_destino_id, sucursal_as, producto_origen_id)).fetchone()
+        if not pedido_abierto:
+            conn.close()
+            return err(
+                "Solo puedes confirmar fichas para pedidos abiertos de tu almacén AS",
+                403)
     if destino["sucursal_id"] != sucursal_destino_id:
         conn.close()
         return err("El producto receptor debe pertenecer a la sucursal seleccionada", 400)
@@ -1236,11 +1294,14 @@ def equivalencias_productos():
 def equivalencia_producto_crear_ficha():
     """Crea una ficha receptora sin stock y la vincula en una sola transacción."""
     conn = get_conn()
-    if not (es_gestion() or es_encargado_almacen(conn)):
+    puede_gestionar_todos = es_gestion() or es_encargado_almacen(conn)
+    es_as_limitado = es_receptor() and not puede_gestionar_todos
+    sucursal_as = sucursal_actual() if es_as_limitado else None
+    if not (puede_gestionar_todos or (es_as_limitado and sucursal_as)):
         conn.close()
         return err(
-            "Solo administración y encargados de Almacén Principal 1 o 2 "
-            "pueden crear fichas receptoras", 403)
+            "Solo administración, Almacenes Principales y usuarios AS "
+            "autorizados pueden crear fichas receptoras", 403)
 
     data = request.get_json() or {}
     try:
@@ -1271,13 +1332,22 @@ def equivalencia_producto_crear_ficha():
         (sucursal_destino_id,)).fetchone()
     origen = conn.execute("""
         SELECT id, nombre, unidad, categoria_id, marca, costo_promedio,
-               precio_venta, unidad_tacho, pide_tacho
+               sucursal_id, precio_venta, unidad_tacho, pide_tacho
         FROM productos WHERE id = ? AND activo = 1
     """, (producto_origen_id,)).fetchone()
     if not sucursal or not origen:
         conn.close()
         return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
+    if es_as_limitado and origen["sucursal_id"] != sucursal_as:
+        conn.close()
+        return err("Solo puedes resolver pedidos de productos de tu propio almacén AS", 403)
 
+    filtro_proveedor_as = (
+        " AND COALESCE(d.destino_id, p.destino_id) = ?"
+        if es_as_limitado else "")
+    parametros_solicitud = (sucursal_destino_id, producto_origen_id)
+    if es_as_limitado:
+        parametros_solicitud += (sucursal_as,)
     solicitud = conn.execute("""
         SELECT 1
         FROM pedidos p
@@ -1286,8 +1356,9 @@ def equivalencia_producto_crear_ficha():
           AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
           AND d.producto_id = ?
           AND p.estado IN ('pendiente', 'en_camino')
+    """ + filtro_proveedor_as + """
         LIMIT 1
-    """, (sucursal_destino_id, producto_origen_id)).fetchone()
+    """, parametros_solicitud).fetchone()
     if not solicitud:
         conn.close()
         return err("Este producto no tiene un pedido abierto para esa sucursal", 409)

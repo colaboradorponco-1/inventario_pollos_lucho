@@ -1499,12 +1499,19 @@ def pedido_reparar_stock_equivalencias():
 def pedidos_equivalencias_pendientes():
     """Lista líneas de pedidos abiertos que todavía no pueden recibirse."""
     conn = get_conn()
-    if not (es_gestion() or es_encargado_almacen(conn)):
+    puede_gestionar_todos = es_gestion() or es_encargado_almacen(conn)
+    es_as_limitado = es_receptor() and not puede_gestionar_todos
+    if not (puede_gestionar_todos or
+            (es_as_limitado and sucursal_actual())):
         conn.close()
         return err(
-            "Solo administración y encargados de Almacén Principal 1 o 2 "
-            "pueden revisar equivalencias", 403)
+            "Solo administración, Almacenes Principales y usuarios AS "
+            "autorizados pueden revisar equivalencias", 403)
 
+    filtro_proveedor = (
+        " AND COALESCE(d.destino_id, p.destino_id) = ?"
+        if es_as_limitado else "")
+    params = (sucursal_actual(),) if es_as_limitado else ()
     filas = conn.execute("""
         SELECT p.nro_ticket, p.estado,
                d.producto_id, pr.nombre AS producto_nombre,
@@ -1524,8 +1531,9 @@ def pedidos_equivalencias_pendientes():
         JOIN sucursales receptora ON receptora.id = p.sucursal_id
         WHERE p.estado IN ('pendiente', 'en_camino')
           AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
+    """ + filtro_proveedor + """
         ORDER BY p.nro_ticket, pr.nombre
-    """).fetchall()
+    """, params).fetchall()
 
     pendientes = {}
     resoluciones = {}

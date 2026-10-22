@@ -90,16 +90,22 @@ class _EtapaPedidoConn:
 
 
 class _EquivalenciaApiConn:
-    def __init__(self, unidad_destino="unidad", sucursal_destino=35):
+    def __init__(self, unidad_destino="unidad", sucursal_destino=35,
+                 sucursal_origen=49, pedido_abierto=True):
         self.unidad_destino = unidad_destino
         self.sucursal_destino = sucursal_destino
+        self.sucursal_origen = sucursal_origen
+        self.pedido_abierto = pedido_abierto
         self.inserts = []
         self.commits = 0
         self.closed = False
 
     def execute(self, sql, params=None):
-        if "SELECT id, unidad FROM productos" in sql:
-            self.fila = {"id": params[0], "unidad": "unidad"}
+        if "SELECT id, unidad, sucursal_id FROM productos" in sql:
+            self.fila = {
+                "id": params[0], "unidad": "unidad",
+                "sucursal_id": self.sucursal_origen,
+            }
         elif "SELECT id, sucursal_id, unidad FROM productos" in sql:
             self.fila = {
                 "id": params[0],
@@ -108,6 +114,8 @@ class _EquivalenciaApiConn:
             }
         elif "SELECT id FROM sucursales" in sql:
             self.fila = {"id": params[0]}
+        elif "FROM pedidos p" in sql and "JOIN pedido_detalle d" in sql:
+            self.fila = {"1": 1} if self.pedido_abierto else None
         else:
             self.inserts.append((sql, params))
             self.fila = None
@@ -124,9 +132,11 @@ class _EquivalenciaApiConn:
 
 
 class _CrearFichaEquivalenciaConn:
-    def __init__(self, duplicado=None, falla_equivalencia=False):
+    def __init__(self, duplicado=None, falla_equivalencia=False,
+                 sucursal_origen=49):
         self.duplicado = duplicado
         self.falla_equivalencia = falla_equivalencia
+        self.sucursal_origen = sucursal_origen
         self.sql = ""
         self.params = ()
         self.inserts = []
@@ -153,6 +163,7 @@ class _CrearFichaEquivalenciaConn:
             return {
                 "id": 661, "nombre": "Aceite Grisol", "unidad": "litro",
                 "categoria_id": 8, "marca": "Grisol", "costo_promedio": 12,
+                "sucursal_id": self.sucursal_origen,
                 "precio_venta": 14, "unidad_tacho": 0, "pide_tacho": 0,
             }
         if "FROM pedidos p" in self.sql and "JOIN pedido_detalle d" in self.sql:
@@ -240,8 +251,12 @@ class _PendientesConn:
     def __init__(self, filas):
         self.filas = filas
         self.closed = False
+        self.sql = ""
+        self.params = ()
 
-    def execute(self, _sql, _params=None):
+    def execute(self, sql, params=None):
+        self.sql = " ".join(str(sql).split())
+        self.params = params or ()
         return self
 
     def fetchall(self):
@@ -564,6 +579,25 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertTrue(conn.closed)
 
+    def test_as_solo_ve_pedidos_bloqueados_de_su_propio_almacen(self):
+        app = Flask(__name__)
+        app.secret_key = "test"
+        conn = _PendientesConn([])
+        with app.test_request_context("/api/pedidos/equivalencias-pendientes"):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(pedidos, "get_conn", return_value=conn), \
+                    patch.object(pedidos, "es_gestion", return_value=False), \
+                    patch.object(pedidos, "es_encargado_almacen", return_value=False), \
+                    patch.object(pedidos, "es_receptor", return_value=True), \
+                    patch.object(pedidos, "sucursal_actual", return_value=49):
+                respuesta = pedidos.pedidos_equivalencias_pendientes()
+
+        self.assertIn("COALESCE(d.destino_id, p.destino_id) = ?", conn.sql)
+        self.assertEqual(conn.params, (49,))
+        self.assertEqual(respuesta.get_json()["data"]["total"], 0)
+        self.assertTrue(conn.closed)
+
     def test_despacho_registra_salida_origen_y_entrada_receptor_sin_duplicar(self):
         conn = _DespachoConn()
         movimientos = []
@@ -647,6 +681,49 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         self.assertEqual(conn.inserts, [])
         self.assertTrue(conn.closed)
 
+    def test_as_puede_confirmar_equivalencia_solo_para_pedido_de_su_almacen(self):
+        conn = _EquivalenciaApiConn(sucursal_origen=49)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos", method="POST",
+                json={"producto_origen_id": 661, "sucursal_destino_id": 35,
+                      "producto_destino_id": 662}):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=True), \
+                    patch.object(productos, "sucursal_actual", return_value=49), \
+                    patch.object(productos, "registrar_auditoria"):
+                respuesta = productos.equivalencias_productos()
+
+        self.assertTrue(respuesta.get_json()["ok"])
+        self.assertEqual(conn.inserts[-1][1][:3], (661, 35, 662))
+        self.assertTrue(conn.closed)
+
+    def test_as_no_puede_confirmar_equivalencia_de_otro_almacen(self):
+        conn = _EquivalenciaApiConn(sucursal_origen=88)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos", method="POST",
+                json={"producto_origen_id": 661, "sucursal_destino_id": 35,
+                      "producto_destino_id": 662}):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=True), \
+                    patch.object(productos, "sucursal_actual", return_value=49):
+                respuesta, status = productos.equivalencias_productos()
+
+        self.assertEqual(status, 403)
+        self.assertEqual(conn.inserts, [])
+        self.assertTrue(conn.closed)
+
     def test_crear_ficha_receptora_crea_stock_cero_y_equivalencia_juntos(self):
         conn = _CrearFichaEquivalenciaConn()
         app = Flask(__name__)
@@ -677,6 +754,58 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         self.assertEqual(alta[1][6:9], (14, 9, 35))
         self.assertEqual(equivalencia[1][:3], (661, 35, 801))
         movimiento.assert_not_called()
+        self.assertTrue(conn.closed)
+
+    def test_as_puede_crear_ficha_cero_para_pedido_de_su_almacen(self):
+        conn = _CrearFichaEquivalenciaConn(sucursal_origen=49)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Grisol", "categoria_id": "sin",
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=True), \
+                    patch.object(productos, "sucursal_actual", return_value=49), \
+                    patch.object(productos, "registrar_auditoria"), \
+                    patch.object(productos, "registrar_movimiento"):
+                respuesta = productos.equivalencia_producto_crear_ficha()
+
+        self.assertTrue(respuesta.get_json()["ok"])
+        self.assertEqual(conn.commits, 1)
+        self.assertEqual(len(conn.inserts), 2)
+        self.assertTrue(conn.closed)
+
+    def test_as_no_puede_crear_ficha_para_producto_de_otro_almacen(self):
+        conn = _CrearFichaEquivalenciaConn(sucursal_origen=88)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Grisol", "categoria_id": "sin",
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=True), \
+                    patch.object(productos, "sucursal_actual", return_value=49):
+                respuesta, status = productos.equivalencia_producto_crear_ficha()
+
+        self.assertEqual(status, 403)
+        self.assertEqual(conn.inserts, [])
+        self.assertEqual(conn.commits, 0)
         self.assertTrue(conn.closed)
 
     def test_crear_ficha_receptora_exige_confirmacion_de_no_existencia(self):

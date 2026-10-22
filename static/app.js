@@ -1193,8 +1193,8 @@ function actualizarProductosEquivalenciaDestino() {
     const ayuda = $('#equiv-candidatos-ayuda');
     if (ayuda) {
         ayuda.textContent = candidatos.length
-            ? 'Revisa nombre, categoría y unidad. Las sugerencias no se vinculan automáticamente; puedes borrar la búsqueda para ver todas las fichas de la sucursal.'
-            : 'No hay fichas que coincidan con la búsqueda. Borra el texto para revisar todas antes de crear una nueva.';
+            ? 'Elige la ficha correcta y confirma que la unidad coincida.'
+            : 'No se encontró. Borra la búsqueda para ver todas las fichas antes de crear otra.';
     }
 }
 
@@ -1257,6 +1257,9 @@ async function loadEquivalencias() {
 function iniciarRevisionEquivalencia(pendiente) {
     pedidoEquivalenciaActual = pendiente;
     $('#equiv-configuracion-manual').open = true;
+    $('#equiv-revision-contexto').textContent =
+        `Pedido ${pendiente.tickets.join(', ')}: ${pendiente.producto_nombre} ` +
+        `para ${pendiente.sucursal_receptora_nombre}. Elige la ficha correcta y confirma.`;
     $('#equiv-origen').value = String(pendiente.producto_id);
     $('#equiv-sucursal').value = String(pendiente.sucursal_receptora_id);
     $('#equiv-destino').value = '';
@@ -1373,26 +1376,30 @@ async function revisarPedidosEquivalenciasPendientes() {
     try {
         const data = await request(API + '/pedidos/equivalencias-pendientes');
         const pendientes = data.pendientes || [];
+        const badge = $('#badge-equivalencias');
+        if (badge) {
+            badge.textContent = pendientes.length ? String(pendientes.length) : '';
+            badge.style.display = pendientes.length ? 'inline-flex' : 'none';
+        }
         if (!pendientes.length) {
-            resultado.innerHTML = '<p class="empty">No hay pedidos abiertos con equivalencias pendientes.</p>';
+            resultado.innerHTML = '<p class="empty">No hay pedidos abiertos que necesiten una ficha.</p>';
             return;
         }
         resultado.innerHTML = `
-            <p>${pendientes.length} combinación(es) de producto y sucursal necesitan revisión.</p>
+            <p>${pendientes.length} pedido(s) necesitan una ficha correcta.</p>
             <div class="table-scroll">
                 <table class="data-table">
-                    <thead><tr><th>Ticket(s)</th><th>Producto proveedor</th><th>Recibe</th><th>Motivo</th><th></th></tr></thead>
+                    <thead><tr><th>Pedido</th><th>Producto</th><th>Recibe</th><th>Qué hacer</th></tr></thead>
                     <tbody>${pendientes.map((p, index) => {
             const puedeConfigurar = $('#equiv-origen').querySelector(
                 `option[value="${p.producto_id}"]`);
             return `<tr>
                 <td>${esc(p.tickets.join(', '))}</td>
-                <td>${esc(p.producto_nombre)} (${esc(p.producto_unidad || 'unidad')}) · ${esc(p.producto_categoria || 'Sin categoría')} — ${esc(p.proveedor_nombre)}</td>
+                <td>${esc(p.producto_nombre)} (${esc(p.producto_unidad || 'unidad')})</td>
                 <td>${esc(p.sucursal_receptora_nombre)}</td>
-                <td>${esc(p.motivo)}</td>
                 <td>${puedeConfigurar
-                    ? `<button class="btn btn-sm" type="button" data-configurar-equivalencia="${index}">Resolver ficha</button>`
-                    : 'Revisar ficha proveedor inactiva'}</td>
+                    ? `<button class="btn btn-primary btn-sm" type="button" data-configurar-equivalencia="${index}">Resolver</button>`
+                    : 'Pedir a administración revisar el producto proveedor'}</td>
             </tr>`;
         }).join('')}</tbody>
                 </table>
@@ -1823,7 +1830,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
 
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
-    if (esCentral()) {
+    if (puedeRevisarEquivalencias()) {
         body.sucursal_id = +$('#prod-sucursal').value || null;
     }
     if (id) body.stock = +$('#prod-stock-actual').value || 0;
@@ -5248,8 +5255,6 @@ function provDeProducto(p) {
 async function loadPedidos() {
     try {
         await loadCatalogos();
-        const panelEquivalencias = $('#panel-equivalencias');
-        if (panelEquivalencias) panelEquivalencias.style.display = esCentral() ? '' : 'none';
         if (esCentral()) {
             try {
                 if (!equivalenciasCargadas) {
@@ -5326,6 +5331,7 @@ async function loadPedidos() {
 let pestanaPedidos = puedeVerBandeja() ? 'realizados' : 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
+function puedeRevisarEquivalencias() { return esCentral() || !!window.RECEPTOR; }
 
 // ¿Esta sucursal abastece a otras? Se respeta la configuración guardada; los
 // almacenes AS y principales son proveedores por su tipo.
@@ -5360,8 +5366,11 @@ function puedeVerBandeja() {
 function inicializarPestanasPedidos() {
     const tabMis = $('#tab-hist-mis-pedidos');
     const tabReal = $('#tab-hist-realizados');
+    const btnEquiv = $('#btn-abrir-equivalencias');
     const panelMis = $('#panel-hist-mis-pedidos');
     const panelReal = $('#panel-hist-realizados');
+    const panelEquiv = $('#panel-equivalencias');
+    const puedeRevisarEquivalenciasActual = puedeRevisarEquivalencias();
     // Administración, almacenes principales, AS y roles logísticos reciben
     // pedidos; solo las sucursales solicitantes usan «Mis pedidos».
     const soloBandeja = (typeof esAdmin === 'function' && esAdmin())
@@ -5369,12 +5378,14 @@ function inicializarPestanasPedidos() {
         || !!window.RECEPTOR
         || (typeof esAlmacenPpal === 'function' && esAlmacenPpal());
 
+    if (btnEquiv) btnEquiv.style.display = puedeRevisarEquivalenciasActual ? '' : 'none';
+
     if (soloBandeja) {
         if (tabMis) tabMis.style.display = 'none';
         if (panelMis) panelMis.style.display = 'none';
         if (tabReal) tabReal.style.display = '';
-        if (panelReal) panelReal.style.display = '';
         pestanaPedidos = 'realizados';
+        if (panelReal) panelReal.style.display = pestanaPedidos === 'realizados' ? '' : 'none';
     } else {
         const puedeBandeja = puedeVerBandeja();
         if (!puedeBandeja && pestanaPedidos === 'realizados') pestanaPedidos = 'mis-pedidos';
@@ -5382,6 +5393,9 @@ function inicializarPestanasPedidos() {
         if (tabReal) tabReal.style.display = puedeBandeja ? '' : 'none';
         if (panelMis) panelMis.style.display = pestanaPedidos === 'mis-pedidos' ? '' : 'none';
         if (panelReal) panelReal.style.display = (puedeBandeja && pestanaPedidos === 'realizados') ? '' : 'none';
+    }
+    if (panelEquiv && !$('#view-pedidos').classList.contains('pedidos-revision-activa')) {
+        panelEquiv.style.display = 'none';
     }
     $$('#tabs-historial-pedidos .segment-tab').forEach((b) =>
         b.classList.toggle('active', b.dataset.tab === pestanaPedidos));
@@ -5401,6 +5415,22 @@ function cargarPestanaActiva() {
 
 on('#tab-hist-mis-pedidos', 'click', () => activarPestanaPedidos('mis-pedidos'));
 on('#tab-hist-realizados', 'click', () => activarPestanaPedidos('realizados'));
+on('#btn-abrir-equivalencias', 'click', () => {
+    if (!puedeRevisarEquivalencias()) return;
+    const vistaPedidos = $('#view-pedidos');
+    const panel = $('#panel-equivalencias');
+    vistaPedidos.classList.add('pedidos-revision-activa');
+    panel.style.display = '';
+    revisarPedidosEquivalenciasPendientes();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+on('#btn-volver-pedidos', 'click', () => {
+    const vistaPedidos = $('#view-pedidos');
+    vistaPedidos.classList.remove('pedidos-revision-activa');
+    $('#panel-equivalencias').style.display = 'none';
+    inicializarPestanasPedidos();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+});
 
 $('#form-pedido').addEventListener('submit', async (e) => {
     e.preventDefault();
