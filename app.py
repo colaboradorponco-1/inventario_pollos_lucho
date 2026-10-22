@@ -23,7 +23,7 @@ from core.pedidos import pedidos_bp
 from core.reportes import reportes_bp
 from core.sucursales import sucursales_bp
 from core.usuarios import usuarios_bp
-from core.util import ruta_bloqueada_logistica
+from core.util import ruta_bloqueada_logistica, ruta_bloqueada_sasonador
 from core.ventas import ventas_bp
 
 # Duración de la sesión: expire tras 8 horas de inactividad (se refresca en
@@ -84,7 +84,8 @@ def create_app():
         """Limita preparador/repartidor a sus pedidos y lectura de repartos autorizada."""
         if "user_id" not in session:
             return None
-        if ruta_bloqueada_logistica(flask_request.path, flask_request.method):
+        if (ruta_bloqueada_logistica(flask_request.path, flask_request.method)
+                or ruta_bloqueada_sasonador(flask_request.path, flask_request.method)):
             if flask_request.path.startswith("/api/"):
                 return jsonify({"ok": False,
                                 "message": "Tu rol solo permite trabajar con los "

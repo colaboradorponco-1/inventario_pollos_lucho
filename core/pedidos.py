@@ -195,6 +195,8 @@ def _puede_ver_pedido(conn, pedido, detalle, permitir_solicitante=False):
             return True
         return any((d.get("destino_id") or pedido.get("destino_id")) == sid
                    for d in detalle)
+    if session.get("rol") == "sasonador":
+        return pedido["sucursal_id"] == sid
     if pedido["sucursal_id"] == sid or pedido.get("destino_id") == sid:
         return True
     return any((d.get("destino_id") or pedido.get("destino_id")) == sid for d in detalle)
@@ -229,7 +231,7 @@ def pedidos():
             conn.close()
             return err("El pedido no tiene productos")
         sid = sucursal_actual()
-        if session.get("rol") == "encargado":
+        if session.get("rol") in ("encargado", "sasonador"):
             sucursal_id = sid
         else:
             sucursal_id = data.get("sucursal_id") or sid
@@ -473,6 +475,9 @@ def pedidos():
             q += (" AND EXISTS (SELECT 1 FROM pedido_detalle d4 "
                   "WHERE d4.pedido_id = p.id "
                   "AND COALESCE(d4.destino_id, p.destino_id) = ?)")
+    elif session.get("rol") == "sasonador":
+        if sid:
+            q += " AND p.sucursal_id = ?"
             params.append(sid)
         else:
             q += " AND 1 = 0"
@@ -539,6 +544,11 @@ def pedidos():
             count_q += (" AND EXISTS (SELECT 1 FROM pedido_detalle d4 "
                         "WHERE d4.pedido_id = p.id "
                         "AND COALESCE(d4.destino_id, p.destino_id) = ?)")
+        else:
+            count_q += " AND 1 = 0"
+    elif session.get("rol") == "sasonador":
+        if sid:
+            count_q += " AND p.sucursal_id = ?"
         else:
             count_q += " AND 1 = 0"
     elif not es_superadmin():

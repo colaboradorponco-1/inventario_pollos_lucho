@@ -3414,7 +3414,7 @@ async function loadUsuarios() {
             <tr>
                 <td><strong>${u.usuario}</strong></td>
                 <td>${u.nombre || '—'}</td>
-                <td><span class="badge ${u.rol === 'superadmin' ? 'badge-info' : u.rol === 'admin' ? 'badge-bajo' : 'badge-entrada'}">${u.receptor ? 'Receptor' : u.rol === 'superadmin' ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : u.rol === 'preparador' ? 'Preparador' : u.rol === 'repartidor' ? 'Repartidor' : 'Encargado'}</span></td>
+                <td><span class="badge ${u.rol === 'superadmin' ? 'badge-info' : u.rol === 'admin' ? 'badge-bajo' : 'badge-entrada'}">${u.receptor ? 'Receptor' : u.rol === 'superadmin' ? 'Superadministrador' : u.rol === 'admin' ? 'Administrador' : u.rol === 'preparador' ? 'Preparador' : u.rol === 'repartidor' ? 'Repartidor' : u.rol === 'sasonador' ? 'Sazonador' : 'Encargado'}</span></td>
                 <td>${u.sucursal_nombre ? `<span class="badge badge-ciudad">${esc(u.sucursal_nombre)}</span>` : '—'}</td>
                 <td><span class="badge ${u.activo ? 'badge-entrada' : 'badge-salida'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
                 <td>
@@ -4650,7 +4650,7 @@ let pedidoTacho = {};          // producto_id -> fracción de tacho elegida (¼,
 let pedidoSucursal = null;     // sucursal que hace el pedido
 let pedidoProvFiltro = '';     // filtrar el paso 2 por proveedor ('' = todos)
 let bandejaSucF = '';          // filtrar la bandeja por sucursal ('' = todas)
-const esEncargadoPed = () => window.ROL === 'encargado';
+const esEncargadoPed = () => window.ROL === 'encargado' || window.ROL === 'sasonador';
 // UN SOLO vocabulario de estados para TODOS los roles:
 //   Pendiente -> En camino -> Entregado (+ Rechazado desde pendiente)
 // Antes había DOS (ESTADO_LAB y ETAPA_LAB) y un mismo pedido se veía con
@@ -5274,7 +5274,7 @@ async function loadPedidos() {
             }
         }
         await cargarProductosPedido();
-        let sucursales = await request(API + '/sucursales');
+        let sucursales = catalogos.sucursales || [];
         // La cola de pedidos de un encargado se arma contra su propia ciudad
         // (Cochabamba o La Paz): los Principales siempre, el resto solo de la
         // misma ciudad. El admin ve todo y elige la sucursal que pide en el
@@ -5748,10 +5748,10 @@ async function listarPedidos() {
             <td>${celdaEstado}</td>
             <td>${esc(p.nota) || '—'}</td>
             <td>
-                ${window.SUCURSAL_ID && ['entregado', 'rechazado'].includes(estado)
+                ${window.ROL !== 'sasonador' && window.SUCURSAL_ID && ['entregado', 'rechazado'].includes(estado)
                     ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaPropios !== 'archivados'})">${vistaPropios === 'archivados' ? 'Restaurar' : 'Archivar'}</button>`
                     : ''}
-                ${window.SUCURSAL_ID && vistaPropios === 'archivados' && ['entregado', 'rechazado'].includes(estado)
+                ${window.ROL !== 'sasonador' && window.SUCURSAL_ID && vistaPropios === 'archivados' && ['entregado', 'rechazado'].includes(estado)
                     ? `<button class="btn btn-sm btn-danger" onclick="eliminarPedidoArchivado(${p.id})">Eliminar</button>`
                     : ''}
                 <button class="btn btn-icon" onclick="verPedido(${p.id}, false)" title="Ver detalle" aria-label="Ver detalle"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
@@ -6037,6 +6037,19 @@ async function init() {
             if (btnLog) btnLog.style.display = '';
             const btnPedidos = $('.menu-btn[data-view="pedidos"]');
             if (btnPedidos) btnPedidos.click();
+        } else if (s.rol === 'sasonador') {
+            document.querySelectorAll('.menu-btn[data-view]').forEach((btn) => {
+                if (btn.dataset.view !== 'pedidos') btn.style.display = 'none';
+            });
+            document.querySelectorAll('.menu-grupo').forEach((grupo) => { grupo.style.display = 'none'; });
+            const btnConfig = document.querySelector('[data-abrir-config]');
+            if (btnConfig) btnConfig.style.display = 'none';
+            ['btn-refrescar-top', 'btn-config-top'].forEach((id) => {
+                const btn = document.getElementById(id);
+                if (btn) btn.style.display = 'none';
+            });
+            const btnPedidos = $('.menu-btn[data-view="pedidos"]');
+            if (btnPedidos) btnPedidos.click();
         }
         // Encargado: operación de su sucursal, pero ve SUS propios reportes
         if (s.rol === 'encargado') {
@@ -6058,6 +6071,7 @@ async function init() {
             let rol;
             if (s.rol === 'superadmin') rol = 'Superadministrador';
             else if (s.rol === 'admin') rol = 'Administrador';
+            else if (s.rol === 'sasonador') rol = 'Sazonador';
             else if (window.RECEPTOR) rol = 'Almacén receptor';
             else rol = 'Encargado';
             window.USUARIO = s.usuario || '';
@@ -6080,7 +6094,7 @@ async function init() {
     // El ALMACÉN RECEPTOR (p. ej. "AS America"/"AS Simon Lopez") aterriza
     // directo en su bandeja de pedidos: su trabajo es recibir/despachar lo que
     // le piden a su sucursal. No abre en el dashboard.
-    if (window.RECEPTOR) {
+    if (window.RECEPTOR || window.ROL === 'sasonador') {
         const bP = $('.menu-btn[data-view="pedidos"]');
         if (bP) bP.click();
     } else {

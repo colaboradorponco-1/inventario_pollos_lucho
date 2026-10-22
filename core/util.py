@@ -2,6 +2,7 @@
 from datetime import datetime
 from functools import wraps
 from io import BytesIO, StringIO
+import re
 import socket
 import sys
 import unicodedata
@@ -193,6 +194,31 @@ def ruta_bloqueada_logistica(path, method="GET"):
     return False
 
 
+def ruta_bloqueada_sasonador(path, method="GET"):
+    """Limita al rol sasonador a crear y consultar pedidos de su sucursal."""
+    if session.get("rol") != "sasonador":
+        return False
+    metodo = (method or "GET").upper()
+    lectura = ("GET", "HEAD", "OPTIONS")
+
+    if path.startswith("/static/"):
+        return metodo not in lectura
+    if path in ("/", "/login"):
+        return metodo not in lectura
+    if path in ("/api/sesion", "/api/catalogos", "/api/productos",
+                "/api/perfil/avatar/imagen"):
+        return metodo not in lectura
+    if path == "/api/logout":
+        return metodo != "POST"
+    if path == "/api/pedidos":
+        return metodo not in lectura and metodo != "POST"
+    if (re.fullmatch(r"/api/pedidos/\d+", path)
+            or re.fullmatch(r"/api/pedidos/\d+/ticket", path)
+            or re.fullmatch(r"/pedidos/ticket/\d+", path)):
+        return metodo not in lectura
+    return True
+
+
 
 def es_encargado_almacen(conn):
     """True si el rol es encargado y su sucursal es un almacén principal.
@@ -219,7 +245,7 @@ def puede_ver_repartos(conn):
 
 def sucursal_actual():
     """Devuelve el id de la sucursal del usuario logueado.
-    superadmin ve todo (devuelve None). admin/encargado devuelven su sucursal."""
+    superadmin ve todo (devuelve None); los demás usuarios usan su sucursal asignada."""
     if session.get("rol") == "superadmin":
         return None
     return session.get("sucursal_id") or None

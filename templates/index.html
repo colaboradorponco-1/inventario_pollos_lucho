@@ -879,7 +879,7 @@
             <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap;">
                 <div>
                     <h2>Gestión de Pedidos y Despachos</h2>
-                    <p>El AS puede avanzar todos los estados de los pedidos que abastece su almacén. El preparador solo los marca «En camino» y el repartidor de la sucursal solicitante solo confirma «Entregado». Administración y encargados de almacenes principales también gestionan los pedidos que abastece su almacén. Ninguno crea solicitudes; las sucursales las envían desde «Mis pedidos».</p>
+                    <p>El AS puede avanzar todos los estados de los pedidos que abastece su almacén. El preparador solo los marca «En camino» y el repartidor de la sucursal solicitante solo confirma «Entregado». Administración y encargados de almacenes principales también gestionan los pedidos que abastece su almacén. Ninguno crea solicitudes; las sucursales las envían desde «Mis pedidos». El rol Sazonador puede crear pedidos y consultar los de su sucursal.</p>
                 </div>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     <button class="btn btn-primary" id="btn-abrir-equivalencias" type="button" style="display:none">
@@ -1317,6 +1317,7 @@
                         <option value="preparador" data-sobreadmin>Preparador</option>
                         <option value="repartidor" data-sobreadmin>Repartidor</option>
                         <option value="receptor" data-sobreadmin>Receptor</option>
+                        <option value="sasonador" data-sobreadmin>Sazonador</option>
                         <option value="admin" data-sobreadmin>Administrador</option>
                         <option value="superadmin" data-sobreadmin>Superadministrador</option>
                     </select></label>

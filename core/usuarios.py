@@ -34,7 +34,8 @@ def usuarios():
         receptor = rol == "receptor"
         if receptor:
             rol = "encargado"
-        if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor"):
+        if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor",
+                       "sasonador"):
             rol = "encargado"
             receptor = False
         if not es_superadmin() and rol != "encargado":
@@ -112,7 +113,8 @@ def usuario(user_id):
     receptor = rol == "receptor"
     if receptor:
         rol = "encargado"
-    if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor"):
+    if rol not in ("encargado", "admin", "superadmin", "preparador", "repartidor",
+                   "sasonador"):
         rol = "encargado"
         receptor = False
     target = conn.execute("SELECT rol, receptor FROM usuarios WHERE id = ?", (user_id,)).fetchone()
