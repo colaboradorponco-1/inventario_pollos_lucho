@@ -1017,16 +1017,8 @@ async function loadProductos() {
     try {
         const btnRevisarDuplicados = $('#btn-revisar-duplicados');
         if (btnRevisarDuplicados) btnRevisarDuplicados.style.display = esAdmin() ? '' : 'none';
-        const panelEquivalencias = $('#panel-equivalencias');
-        if (panelEquivalencias) panelEquivalencias.style.display = esCentral() ? '' : 'none';
-        if (esCentral() && !equivalenciasCargadas) {
-            try {
-                await loadEquivalencias();
-                equivalenciasCargadas = true;
-            } catch (e) {
-                toast(e.message, 'err');
-            }
-        }
+        const panelRepararStock = $('#panel-reparar-stock');
+        if (panelRepararStock) panelRepararStock.style.display = esCentral() ? '' : 'none';
         const filtro = ($('#prod-filtro') || {}).value?.trim() || '';
         const categoria = ($('#prod-categoria') || {}).value || '';
         const proveedor = ($('#prod-filtro-proveedor') || {}).value || '';
@@ -1264,6 +1256,7 @@ async function loadEquivalencias() {
 
 function iniciarRevisionEquivalencia(pendiente) {
     pedidoEquivalenciaActual = pendiente;
+    $('#equiv-configuracion-manual').open = true;
     $('#equiv-origen').value = String(pendiente.producto_id);
     $('#equiv-sucursal').value = String(pendiente.sucursal_receptora_id);
     $('#equiv-destino').value = '';
@@ -5255,6 +5248,22 @@ function provDeProducto(p) {
 async function loadPedidos() {
     try {
         await loadCatalogos();
+        const panelEquivalencias = $('#panel-equivalencias');
+        if (panelEquivalencias) panelEquivalencias.style.display = esCentral() ? '' : 'none';
+        if (esCentral()) {
+            try {
+                if (!equivalenciasCargadas) {
+                    await loadEquivalencias();
+                    equivalenciasCargadas = true;
+                }
+                await revisarPedidosEquivalenciasPendientes();
+            } catch (e) {
+                const resultado = $('#equivalencias-pendientes-resultado');
+                if (resultado) resultado.textContent =
+                    'No se pudieron cargar las fichas pendientes. Actualiza la lista o inténtalo de nuevo.';
+                toast(e.message, 'err');
+            }
+        }
         await cargarProductosPedido();
         let sucursales = await request(API + '/sucursales');
         // La cola de pedidos de un encargado se arma contra su propia ciudad
