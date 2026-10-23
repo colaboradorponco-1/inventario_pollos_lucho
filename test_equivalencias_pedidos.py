@@ -13,7 +13,13 @@ import core.productos as productos  # noqa: E402
 
 class _FilaConn:
     def __init__(self, fila, filas=None):
-        self.fila = fila
+        self.fila = dict(fila) if fila else fila
+        if self.fila is not None:
+            self.fila.setdefault("equivalencia_sazonador_id", None)
+            self.fila.setdefault("producto_sazonador_id", None)
+            self.fila.setdefault("sucursal_producto_sazonador", None)
+            self.fila.setdefault("unidad_sazonador", None)
+            self.fila.setdefault("sazonador_activo", None)
         self.filas = filas or []
 
     def execute(self, _sql, _params=None):
@@ -91,11 +97,13 @@ class _EtapaPedidoConn:
 
 class _EquivalenciaApiConn:
     def __init__(self, unidad_destino="unidad", sucursal_destino=35,
-                 sucursal_origen=49, pedido_abierto=True):
+                 sucursal_origen=49, pedido_abierto=True,
+                 destino_tipo="normal"):
         self.unidad_destino = unidad_destino
         self.sucursal_destino = sucursal_destino
         self.sucursal_origen = sucursal_origen
         self.pedido_abierto = pedido_abierto
+        self.destino_tipo = destino_tipo
         self.inserts = []
         self.commits = 0
         self.closed = False
@@ -112,6 +120,14 @@ class _EquivalenciaApiConn:
                 "sucursal_id": self.sucursal_destino,
                 "unidad": self.unidad_destino,
             }
+        elif "FROM sazonador_productos" in sql:
+            self.fila = {
+                "id": params[0],
+                "sucursal_id": self.sucursal_destino,
+                "unidad": self.unidad_destino,
+            }
+        elif "FROM usuarios" in sql and "rol = 'sasonador'" in sql:
+            self.fila = {"1": 1} if self.destino_tipo == "sazonador" else None
         elif "SELECT id FROM sucursales" in sql:
             self.fila = {"id": params[0]}
         elif "FROM pedidos p" in sql and "JOIN pedido_detalle d" in sql:
@@ -126,6 +142,32 @@ class _EquivalenciaApiConn:
 
     def commit(self):
         self.commits += 1
+
+    def close(self):
+        self.closed = True
+
+
+class _EquivalenciaListadoConn:
+    def __init__(self):
+        self.sql = ""
+        self.closed = False
+
+    def execute(self, sql, _params=None):
+        self.sql = " ".join(str(sql).split())
+        return self
+
+    def fetchall(self):
+        if "FROM sazonador_productos p" in self.sql:
+            return [{
+                "id": 22, "nombre": "Adobo", "unidad": "kg",
+                "sucursal_id": 42, "categoria_id": 8,
+                "categoria_nombre": "Insumos", "sucursal_nombre": "Sazonador",
+            }]
+        if "FROM usuarios" in self.sql:
+            return [{"sucursal_id": 42}]
+        if "SELECT id, nombre FROM sucursales" in self.sql:
+            return [{"id": 42, "nombre": "Sazonador"}]
+        return []
 
     def close(self):
         self.closed = True
@@ -299,6 +341,22 @@ class _PedidoSinEquivalenciaConn:
 
 
 class EquivalenciasPedidosTest(unittest.TestCase):
+    def test_listado_equivalencias_incluye_destinos_de_inventario_sazonador(self):
+        conn = _EquivalenciaListadoConn()
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context("/api/equivalencias-productos"):
+            session["user_id"] = 1
+            session["rol"] = "admin"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=True):
+                respuesta = productos.equivalencias_productos()
+
+        datos = respuesta.get_json()["data"]
+        self.assertEqual(datos["productos_sazonador"][0]["id"], 22)
+        self.assertEqual(datos["sucursales_sazonador"], [42])
+        self.assertTrue(conn.closed)
+
     def test_receptor_resuelve_equivalencia_661_a_662(self):
         conn = _FilaConn({
             "sucursal_origen_id": 49,
@@ -701,6 +759,29 @@ class EquivalenciasPedidosTest(unittest.TestCase):
 
         self.assertTrue(respuesta.get_json()["ok"])
         self.assertEqual(conn.inserts[-1][1][:3], (661, 35, 662))
+        self.assertTrue(conn.closed)
+
+    def test_as_puede_validar_destino_sazonador_con_la_misma_equivalencia(self):
+        conn = _EquivalenciaApiConn(destino_tipo="sazonador")
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos", method="POST",
+                json={"producto_origen_id": 661, "sucursal_destino_id": 35,
+                      "producto_destino_tipo": "sazonador",
+                      "producto_destino_id": 662}):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=True), \
+                    patch.object(productos, "sucursal_actual", return_value=49), \
+                    patch.object(productos, "registrar_auditoria"):
+                respuesta = productos.equivalencias_productos()
+
+        self.assertTrue(respuesta.get_json()["ok"])
+        self.assertEqual(conn.inserts[-1][1][:4], (661, 35, None, 662))
         self.assertTrue(conn.closed)
 
     def test_as_no_puede_confirmar_equivalencia_de_otro_almacen(self):

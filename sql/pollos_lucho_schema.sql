@@ -256,6 +256,21 @@ CREATE TABLE IF NOT EXISTS `sazonador_productos` (
   CONSTRAINT `fk_sazonador_producto_pedido` FOREIGN KEY (`producto_pedido_id`) REFERENCES `productos`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `equivalencias_productos` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `producto_origen_id` INT NOT NULL,
+  `sucursal_destino_id` INT NOT NULL,
+  `producto_destino_id` INT,
+  `producto_sazonador_destino_id` INT,
+  `creado_por` VARCHAR(255) DEFAULT '',
+  `creado_en` VARCHAR(50) NOT NULL,
+  UNIQUE KEY `uq_equiv_origen_destino` (`producto_origen_id`, `sucursal_destino_id`),
+  CONSTRAINT `fk_equiv_producto_origen` FOREIGN KEY (`producto_origen_id`) REFERENCES `productos`(`id`),
+  CONSTRAINT `fk_equiv_sucursal_destino` FOREIGN KEY (`sucursal_destino_id`) REFERENCES `sucursales`(`id`),
+  CONSTRAINT `fk_equiv_producto_destino` FOREIGN KEY (`producto_destino_id`) REFERENCES `productos`(`id`),
+  CONSTRAINT `fk_equiv_sazonador_destino` FOREIGN KEY (`producto_sazonador_destino_id`) REFERENCES `sazonador_productos`(`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS `sazonador_inventarios` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `sucursal_id` INT NOT NULL,

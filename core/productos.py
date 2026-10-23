@@ -1251,14 +1251,18 @@ def equivalencias_productos():
                    destino.nombre AS destino_nombre,
                    destino.unidad AS destino_unidad,
                    destino_categoria.nombre AS destino_categoria_nombre,
-                   destino_sucursal.nombre AS destino_sucursal_nombre
+                   destino_sucursal.nombre AS destino_sucursal_nombre,
+                   saz_destino.nombre AS destino_sazonador_nombre,
+                   saz_destino.unidad AS destino_sazonador_unidad
             FROM equivalencias_productos e
             JOIN productos origen ON origen.id = e.producto_origen_id
             LEFT JOIN categorias origen_categoria ON origen_categoria.id = origen.categoria_id
             LEFT JOIN sucursales origen_sucursal ON origen_sucursal.id = origen.sucursal_id
-            JOIN productos destino ON destino.id = e.producto_destino_id
+            LEFT JOIN productos destino ON destino.id = e.producto_destino_id
             LEFT JOIN categorias destino_categoria ON destino_categoria.id = destino.categoria_id
             JOIN sucursales destino_sucursal ON destino_sucursal.id = e.sucursal_destino_id
+            LEFT JOIN sazonador_productos saz_destino
+              ON saz_destino.id = e.producto_sazonador_destino_id
         """ + filtro_as + """
             ORDER BY origen_sucursal.nombre, origen.nombre, destino_sucursal.nombre
         """, parametros_as).fetchall()
@@ -1290,6 +1294,25 @@ def equivalencias_productos():
         """ + filtro_productos_as + """
             ORDER BY s.nombre, p.nombre
         """, parametros_productos_as).fetchall()
+        productos_sazonador = conn.execute("""
+            SELECT p.id, p.nombre, p.unidad, p.sucursal_id, p.categoria_id,
+                   c.nombre AS categoria_nombre, s.nombre AS sucursal_nombre
+            FROM sazonador_productos p
+            LEFT JOIN categorias c ON c.id = p.categoria_id
+            JOIN sucursales s ON s.id = p.sucursal_id
+            WHERE p.activo = 1 AND p.almacen_id = (
+                SELECT a.id FROM almacenes a
+                WHERE a.sucursal_id = p.sucursal_id
+                  AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+                ORDER BY a.id LIMIT 1
+            )
+            ORDER BY s.nombre, p.nombre
+        """).fetchall()
+        sucursales_sazonador = conn.execute("""
+            SELECT DISTINCT sucursal_id
+            FROM usuarios
+            WHERE rol = 'sasonador' AND activo = 1 AND sucursal_id IS NOT NULL
+        """).fetchall()
         if es_as_limitado:
             sucursales = conn.execute("""
                 SELECT DISTINCT s.id, s.nombre
@@ -1311,6 +1334,8 @@ def equivalencias_productos():
         return ok({
             "equivalencias": [dict(fila) for fila in equivalencias],
             "productos": [dict(fila) for fila in productos],
+            "productos_sazonador": [dict(fila) for fila in productos_sazonador],
+            "sucursales_sazonador": [fila["sucursal_id"] for fila in sucursales_sazonador],
             "sucursales": [dict(fila) for fila in sucursales],
         })
 
@@ -1319,21 +1344,48 @@ def equivalencias_productos():
         producto_origen_id = int(data.get("producto_origen_id"))
         sucursal_destino_id = int(data.get("sucursal_destino_id"))
         producto_destino_id = int(data.get("producto_destino_id"))
+        destino_tipo = data.get("producto_destino_tipo", "normal")
     except (TypeError, ValueError):
         conn.close()
         return err("Selecciona los productos y la sucursal receptora", 400)
 
+    if destino_tipo not in ("normal", "sazonador"):
+        conn.close()
+        return err("El tipo de ficha receptora no es válido", 400)
     origen = conn.execute(
         "SELECT id, unidad, sucursal_id FROM productos WHERE id = ? AND activo = 1",
         (producto_origen_id,)).fetchone()
-    destino = conn.execute(
-        "SELECT id, sucursal_id, unidad FROM productos WHERE id = ? AND activo = 1",
-        (producto_destino_id,)).fetchone()
+    if destino_tipo == "sazonador":
+        destino = conn.execute("""
+            SELECT id, sucursal_id, unidad
+            FROM sazonador_productos
+            WHERE id = ? AND activo = 1 AND almacen_id = (
+                SELECT a.id FROM almacenes a
+                JOIN sucursales s ON s.id = a.sucursal_id
+                WHERE a.sucursal_id = sazonador_productos.sucursal_id
+                  AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+                ORDER BY a.id LIMIT 1
+            )
+        """, (producto_destino_id,)).fetchone()
+    else:
+        destino = conn.execute(
+            "SELECT id, sucursal_id, unidad FROM productos WHERE id = ? AND activo = 1",
+            (producto_destino_id,)).fetchone()
     sucursal = conn.execute(
         "SELECT id FROM sucursales WHERE id = ?", (sucursal_destino_id,)).fetchone()
+    sucursal_sazonador = conn.execute("""
+        SELECT 1 FROM usuarios
+        WHERE sucursal_id = ? AND rol = 'sasonador' AND activo = 1
+        LIMIT 1
+    """, (sucursal_destino_id,)).fetchone()
     if not origen or not destino or not sucursal:
         conn.close()
         return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
+    if bool(sucursal_sazonador) != (destino_tipo == "sazonador"):
+        conn.close()
+        return err(
+            "La sucursal Sazonador debe usar su inventario independiente como ficha receptora",
+            400)
     if es_as_limitado:
         if origen["sucursal_id"] != sucursal_as:
             conn.close()
@@ -1364,17 +1416,22 @@ def equivalencias_productos():
 
     conn.execute("""
         INSERT INTO equivalencias_productos
-            (producto_origen_id, sucursal_destino_id, producto_destino_id, creado_por, creado_en)
-        VALUES (?, ?, ?, ?, ?)
+            (producto_origen_id, sucursal_destino_id, producto_destino_id,
+             producto_sazonador_destino_id, creado_por, creado_en)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE producto_destino_id = VALUES(producto_destino_id),
+                                producto_sazonador_destino_id = VALUES(producto_sazonador_destino_id),
                                 creado_por = VALUES(creado_por), creado_en = VALUES(creado_en)
-    """, (producto_origen_id, sucursal_destino_id, producto_destino_id,
+    """, (producto_origen_id, sucursal_destino_id,
+          producto_destino_id if destino_tipo == "normal" else None,
+          producto_destino_id if destino_tipo == "sazonador" else None,
           session.get("usuario", ""), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
     registrar_auditoria(
         "Equivalencia de producto configurada",
-        f"{producto_origen_id} -> {producto_destino_id} en sucursal {sucursal_destino_id}")
+        f"{producto_origen_id} -> {destino_tipo}:{producto_destino_id} "
+        f"en sucursal {sucursal_destino_id}")
     return ok(message="Equivalencia guardada")
 
 
@@ -1419,6 +1476,11 @@ def equivalencia_producto_crear_ficha():
     sucursal = conn.execute(
         "SELECT id, nombre FROM sucursales WHERE id = ? FOR UPDATE",
         (sucursal_destino_id,)).fetchone()
+    es_sucursal_sazonador = conn.execute("""
+        SELECT 1 FROM usuarios
+        WHERE sucursal_id = ? AND rol = 'sasonador' AND activo = 1
+        LIMIT 1
+    """, (sucursal_destino_id,)).fetchone()
     origen = conn.execute("""
         SELECT id, nombre, unidad, categoria_id, marca, costo_promedio,
                sucursal_id, precio_venta, unidad_tacho, pide_tacho
@@ -1427,6 +1489,11 @@ def equivalencia_producto_crear_ficha():
     if not sucursal or not origen:
         conn.close()
         return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
+    if es_sucursal_sazonador:
+        conn.close()
+        return err(
+            "Crea primero el producto en el inventario independiente del Sazonador "
+            "y luego selecciónalo como ficha receptora", 409)
     if es_as_limitado and origen["sucursal_id"] != sucursal_as:
         conn.close()
         return err("Solo puedes resolver pedidos de productos de tu propio almacén AS", 403)
@@ -1453,7 +1520,7 @@ def equivalencia_producto_crear_ficha():
         return err("Este producto no tiene un pedido abierto para esa sucursal", 409)
 
     equivalencia = conn.execute("""
-        SELECT producto_destino_id
+        SELECT producto_destino_id, producto_sazonador_destino_id
         FROM equivalencias_productos
         WHERE producto_origen_id = ? AND sucursal_destino_id = ?
         FOR UPDATE
@@ -1521,8 +1588,9 @@ def equivalencia_producto_crear_ficha():
         conn.execute("""
             INSERT INTO equivalencias_productos
                 (producto_origen_id, sucursal_destino_id, producto_destino_id,
+                 producto_sazonador_destino_id,
                  creado_por, creado_en)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, NULL, ?, ?)
         """, (producto_origen_id, sucursal_destino_id, producto_destino_id,
               session.get("usuario", ""),
               datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -1551,7 +1619,8 @@ def equivalencia_producto_eliminar(equivalencia_id):
         return err("Solo el superadministrador puede gestionar equivalencias", 403)
     conn = get_conn()
     equivalencia = conn.execute(
-        "SELECT producto_origen_id, sucursal_destino_id, producto_destino_id "
+        "SELECT producto_origen_id, sucursal_destino_id, producto_destino_id, "
+        "producto_sazonador_destino_id "
         "FROM equivalencias_productos WHERE id = ?", (equivalencia_id,)).fetchone()
     if not equivalencia:
         conn.close()

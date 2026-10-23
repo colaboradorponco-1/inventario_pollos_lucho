@@ -462,13 +462,16 @@ def init_db():
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "producto_origen_id INT NOT NULL,"
                     "sucursal_destino_id INT NOT NULL,"
-                    "producto_destino_id INT NOT NULL,"
+                    "producto_destino_id INT,"
+                    "producto_sazonador_destino_id INT,"
                     "creado_por VARCHAR(255) DEFAULT '',"
                     "creado_en VARCHAR(50) NOT NULL,"
                     "UNIQUE KEY uq_equiv_origen_destino (producto_origen_id, sucursal_destino_id),"
                     "FOREIGN KEY (producto_origen_id) REFERENCES productos(id),"
                     "FOREIGN KEY (sucursal_destino_id) REFERENCES sucursales(id),"
-                    "FOREIGN KEY (producto_destino_id) REFERENCES productos(id))")
+                    "FOREIGN KEY (producto_destino_id) REFERENCES productos(id),"
+                    "CONSTRAINT fk_equiv_sazonador_destino "
+                    "FOREIGN KEY (producto_sazonador_destino_id) REFERENCES sazonador_productos(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS pedido_stock_reparaciones ("
                     "pedido_id INT NOT NULL PRIMARY KEY,"
                     "fecha VARCHAR(50) NOT NULL,"
@@ -911,6 +914,23 @@ def migrar_esquema():
                 "REFERENCES productos(id)")
         if not _col_existe(cur, "pedido_detalle", "producto_sazonador_id"):
             _add_columna(cur, "pedido_detalle", "producto_sazonador_id INT")
+        if not _col_existe(
+                cur, "equivalencias_productos", "producto_sazonador_destino_id"):
+            _add_columna(
+                cur, "equivalencias_productos", "producto_sazonador_destino_id INT")
+        cur.execute(
+            "ALTER TABLE equivalencias_productos "
+            "MODIFY COLUMN producto_destino_id INT NULL")
+        cur.execute(
+            "SELECT COUNT(*) c FROM information_schema.TABLE_CONSTRAINTS "
+            "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+            "AND CONSTRAINT_NAME = %s AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
+            (MYSQL_DB, "equivalencias_productos", "fk_equiv_sazonador_destino"))
+        if not cur.fetchone()["c"]:
+            cur.execute(
+                "ALTER TABLE equivalencias_productos ADD CONSTRAINT "
+                "fk_equiv_sazonador_destino FOREIGN KEY "
+                "(producto_sazonador_destino_id) REFERENCES sazonador_productos(id)")
         cur.execute("CREATE TABLE IF NOT EXISTS pedido_ticket_secuencia ("
                     "id TINYINT NOT NULL PRIMARY KEY,"
                     "ultimo_id BIGINT NOT NULL)")

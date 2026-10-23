@@ -34,6 +34,8 @@ const fmtDate = (d) => {
 let catalogos = { almacenes: [], categorias: [], proveedores: [] };
 let equivalenciasCargadas = false;
 let productosEquivalencia = [];
+let productosEquivalenciaSazonador = [];
+let sucursalesSazonador = new Set();
 let pedidoEquivalenciaActual = null;
 let reparacionStockSimulada = null;
 
@@ -1200,8 +1202,14 @@ function actualizarProductosEquivalenciaDestino() {
     const unidadOrigen = _nombreNormalizado(productoOrigen?.unidad || 'unidad');
     const terminos = _nombreNormalizado($('#equiv-buscar-destino')?.value || '')
         .split(/\s+/).filter(Boolean);
-    const candidatos = productosEquivalencia
-        .filter((p) => String(p.sucursal_id) === String(sucursal.value))
+    const candidatos = [
+        ...productosEquivalencia
+            .filter((p) => String(p.sucursal_id) === String(sucursal.value))
+            .map((producto) => ({ ...producto, destino_tipo: 'normal' })),
+        ...productosEquivalenciaSazonador
+            .filter((p) => String(p.sucursal_id) === String(sucursal.value))
+            .map((producto) => ({ ...producto, destino_tipo: 'sazonador' })),
+    ]
         .map((p) => {
             const texto = _nombreNormalizado(
                 `${p.nombre} ${p.categoria_nombre || ''} ${p.unidad || 'unidad'}`);
@@ -1219,16 +1227,24 @@ function actualizarProductosEquivalenciaDestino() {
             const unidadDistinta = unidad !== unidadOrigen;
             const etiqueta = `${p.nombre} (${p.unidad || 'unidad'}) · ` +
                 `${p.categoria_nombre || 'Sin categoría'}` +
+                (p.destino_tipo === 'sazonador' ? ' · Inventario Sazonador' : '') +
                 (terminos.length && puntos ? ` · coincide en ${puntos} término(s)` : '');
-            return `<option value="${p.id}" ${unidadDistinta ? 'disabled' : ''}>` +
+            return `<option value="${p.destino_tipo}:${p.id}" ${unidadDistinta ? 'disabled' : ''}>` +
                 `${esc(etiqueta)}${unidadDistinta ? ' — unidad distinta' : ''}</option>`;
         }).join('');
-    if (candidatos.some(({ producto: p }) => String(p.id) === seleccionado)) {
+    if (candidatos.some(({ producto: p }) =>
+        `${p.destino_tipo}:${p.id}` === seleccionado)) {
         destino.value = seleccionado;
     }
     const ayuda = $('#equiv-candidatos-ayuda');
+    const sucursalEsSazonador = sucursalesSazonador.has(Number(sucursal.value));
+    const crearFicha = $('#equiv-crear-abrir');
+    if (crearFicha) crearFicha.style.display =
+        sucursalEsSazonador ? 'none' : (pedidoEquivalenciaActual ? '' : 'none');
     if (ayuda) {
-        ayuda.textContent = candidatos.length
+        ayuda.textContent = sucursalEsSazonador
+            ? 'Elige un producto del inventario Sazonador. Si no existe, créalo primero desde Productos Sazonador.'
+            : candidatos.length
             ? 'Elige la ficha correcta y confirma que la unidad coincida.'
             : 'No se encontró. Borra la búsqueda para ver todas las fichas antes de crear otra.';
     }
@@ -1251,6 +1267,8 @@ async function loadEquivalencias() {
     const data = await request(API + '/equivalencias-productos');
     const productos = data.productos || [];
     productosEquivalencia = productos;
+    productosEquivalenciaSazonador = data.productos_sazonador || [];
+    sucursalesSazonador = new Set(data.sucursales_sazonador || []);
     const sucursales = data.sucursales || [];
     const origen = $('#equiv-origen');
     const sucursal = $('#equiv-sucursal');
@@ -1270,7 +1288,7 @@ async function loadEquivalencias() {
     $('#equivalencias-tbody').innerHTML = (data.equivalencias || []).map((e) => `
         <tr>
             <td>${esc(e.origen_nombre)} (${esc(e.origen_unidad || 'unidad')}) · ${esc(e.origen_categoria_nombre || 'Sin categoría')} — ${esc(e.origen_sucursal_nombre)}</td>
-            <td>${esc(e.destino_nombre)} (${esc(e.destino_unidad || 'unidad')}) · ${esc(e.destino_categoria_nombre || 'Sin categoría')} — ${esc(e.destino_sucursal_nombre)}</td>
+            <td>${esc(e.destino_nombre || e.destino_sazonador_nombre)} (${esc(e.destino_unidad || e.destino_sazonador_unidad || 'unidad')}) · ${esc(e.destino_categoria_nombre || 'Sin categoría')} — ${esc(e.destino_sucursal_nombre)}</td>
             <td>${window.ROL === 'superadmin'
                 ? `<button class="btn btn-icon btn-danger" data-eliminar-equivalencia="${e.id}">Eliminar</button>`
                 : ''}</td>
@@ -1462,12 +1480,15 @@ $('#btn-revisar-equivalencias-pendientes')?.addEventListener(
 $('#form-equivalencia')?.addEventListener('submit', async (event) => {
     event.preventDefault();
     try {
+        const [producto_destino_tipo, producto_destino_id] =
+            $('#equiv-destino').value.split(':');
         await request(API + '/equivalencias-productos', {
             method: 'POST',
             body: {
                 producto_origen_id: Number($('#equiv-origen').value),
                 sucursal_destino_id: Number($('#equiv-sucursal').value),
-                producto_destino_id: Number($('#equiv-destino').value),
+                producto_destino_tipo,
+                producto_destino_id: Number(producto_destino_id),
             },
         });
         toast('Equivalencia guardada');
@@ -1781,28 +1802,6 @@ async function openProductoModal(id, lista) {
     const esAdminDlg = esAdmin();
     const esSazonador = window.ROL === 'sasonador';
     editaProductoSazonador = false;
-    const mapeoSazonador = $('#prod-sazonador-mapeo-wrap');
-    if (mapeoSazonador) mapeoSazonador.style.display = esSazonador ? 'block' : 'none';
-    const productoPedidoSelect = $('#prod-sazonador-producto-pedido');
-    if (esSazonador && productoPedidoSelect) {
-        try {
-            const qs = new URLSearchParams({
-                para_pedido: '1',
-                desde: String(window.SUCURSAL_ID || ''),
-                por_pagina: '1000',
-            });
-            const resp = await request(API + '/productos?' + qs.toString());
-            const productosPedido = resp.data || resp;
-            productoPedidoSelect.innerHTML = '<option value="">Sin vincular</option>' +
-                productosPedido.map((producto) =>
-                    `<option value="${producto.id}">${esc(producto.nombre)} ` +
-                    `(${esc(producto.unidad || 'unidad')}) · ` +
-                    `${esc(producto.sucursal_nombre || 'almacén')}</option>`).join('');
-        } catch (error) {
-            toast('No se pudo cargar el catálogo disponible para pedidos: ' + error.message, 'err');
-            return;
-        }
-    }
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
     ['prod-almacen', 'prod-costo', 'prod-precio-venta',
@@ -1863,18 +1862,6 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-precio-venta').value = p.precio_venta;
         $('#prod-vencimiento').value = p.vencimiento || '';
         $('#prod-proveedor').value = p.proveedor_id || '';
-        if (editaProductoSazonador && p.producto_pedido_id && productoPedidoSelect) {
-            const idVinculado = String(p.producto_pedido_id);
-            if (!Array.from(productoPedidoSelect.options).some((option) => option.value === idVinculado)) {
-                const option = document.createElement('option');
-                option.value = idVinculado;
-                option.textContent = `${p.producto_pedido_nombre || 'Producto vinculado'} ` +
-                    `(${p.producto_pedido_unidad || 'unidad'}) · ` +
-                    `${p.producto_pedido_sucursal_nombre || 'proveedor'}`;
-                productoPedidoSelect.appendChild(option);
-            }
-            productoPedidoSelect.value = idVinculado;
-        }
     
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
         // Mostrar también el almacén actual del producto si no es el principal
@@ -1919,9 +1906,6 @@ $('#form-producto').addEventListener('submit', async (e) => {
 
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
-    if (window.ROL === 'sasonador') {
-        body.producto_pedido_id = +$('#prod-sazonador-producto-pedido').value || null;
-    }
     if (puedeRevisarEquivalencias()) {
         body.sucursal_id = +$('#prod-sucursal').value || null;
     }
@@ -1939,7 +1923,6 @@ $('#form-producto').addEventListener('submit', async (e) => {
                     unidad: body.unidad,
                     stock_minimo: body.stock_minimo,
                     vencimiento: body.vencimiento,
-                    producto_pedido_id: body.producto_pedido_id,
                 }),
             }), '#form-producto button[type="submit"]');
         } else if (id) {
@@ -5364,14 +5347,6 @@ async function cargarProductosPedido() {
     const respP = await request(API + '/productos?' + qs.toString());
     pedidoProdsAll = (respP.data || respP)
         .map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
-    if (window.ROL === 'sasonador') {
-        const productosSazonador = await request(API + '/sazonador/productos');
-        const vinculados = new Set((productosSazonador.data || productosSazonador)
-            .map((producto) => Number(producto.producto_pedido_id))
-            .filter((id) => id > 0));
-        pedidoProdsAll = pedidoProdsAll.filter((producto) =>
-            vinculados.has(Number(producto.id)));
-    }
 }
 
 // Sucursal por la que se pediría este producto. Si el servidor ya la resolvió

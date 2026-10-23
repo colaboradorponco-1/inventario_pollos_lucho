@@ -274,6 +274,15 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
                 producto_nombre TEXT, cantidad REAL, destino_id INTEGER,
                 producto_sazonador_id INTEGER
             );
+            CREATE TABLE equivalencias_productos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                producto_origen_id INTEGER NOT NULL,
+                sucursal_destino_id INTEGER NOT NULL,
+                producto_destino_id INTEGER,
+                producto_sazonador_destino_id INTEGER,
+                creado_por TEXT, creado_en TEXT,
+                UNIQUE (producto_origen_id, sucursal_destino_id)
+            );
             CREATE TABLE repartos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, sucursal_id INTEGER,
                 origen_sucursal_id INTEGER, total REAL, usuario TEXT, nota TEXT,
@@ -398,7 +407,6 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
             "nombre": "Producto actualizado", "codigo": "SAZ-EDIT-2",
             "marca": "Marca nueva", "categoria_id": 1, "unidad": "kg",
             "stock_minimo": 4, "vencimiento": "2027-01-15",
-            "producto_pedido_id": 2,
         })
         self.assertEqual(respuesta.status_code, 200)
 
@@ -408,8 +416,7 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         self.assertEqual(producto["codigo"], "SAZ-EDIT-2")
         self.assertEqual(producto["marca"], "Marca nueva")
         self.assertEqual(producto["stock_minimo"], 4)
-        self.assertEqual(producto["producto_pedido_id"], 2)
-        self.assertEqual(producto["producto_pedido_nombre"], "Producto proveedor")
+        self.assertNotIn("producto_pedido_id", producto)
         self.assertEqual(producto["stock"], 7)
 
         with self.client.session_transaction() as state:
@@ -419,30 +426,34 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         })
         self.assertEqual(prohibido.status_code, 403)
 
-    def test_entrega_pedido_suma_stock_al_producto_sazonador_vinculado(self):
+    def test_entrega_pedido_suma_stock_al_destino_sazonador_validado(self):
         with self.client.session_transaction() as state:
             state.update({
                 "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
                 "usuario": "sazonador_prueba",
             })
         creado = self.client.post("/api/sazonador/productos", json={
-            "nombre": "Adobo Sazonador", "unidad": "kg",
-            "stock_inicial": 4, "producto_pedido_id": 2,
+            "nombre": "Adobo Sazonador", "unidad": "kg", "stock_inicial": 4,
         })
         self.assertEqual(creado.status_code, 200)
         producto_sazonador_id = creado.json["data"]["id"]
 
         conn = sqlite3.connect(self.db_path)
         conn.execute("INSERT INTO usuarios (sucursal_id, rol, activo) VALUES (42, 'sasonador', 1)")
+        conn.execute("""
+            INSERT INTO equivalencias_productos
+                (producto_origen_id, sucursal_destino_id, producto_sazonador_destino_id)
+            VALUES (2, 42, ?)
+        """, (producto_sazonador_id,))
         conn.execute(
             "INSERT INTO pedidos (id, nro_ticket, sucursal_id, destino_id) "
             "VALUES (1, 'TKT-00001', 42, 30)")
         conn.execute("""
             INSERT INTO pedido_detalle
                 (id, pedido_id, producto_id, producto_nombre, cantidad,
-                 destino_id, producto_sazonador_id)
-            VALUES (1, 1, 2, 'Producto proveedor', 3, 30, ?)
-        """, (producto_sazonador_id,))
+                 destino_id)
+            VALUES (1, 1, 2, 'Producto proveedor', 3, 30)
+        """)
         conn.commit()
         conn.close()
 
@@ -479,6 +490,12 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         conn.close()
         self.assertEqual(stock_sazonador, 7)
         self.assertEqual(stock_producto_normal, 12)
+        inventario = self.client.post("/api/sazonador/inventario-diario")
+        self.assertEqual(inventario.status_code, 200)
+        detalle = self.client.get(
+            f"/api/sazonador/inventario-diario/{inventario.json['data']['id']}")
+        self.assertEqual(detalle.status_code, 200)
+        self.assertEqual(detalle.json["data"]["lineas"][0]["stock_sistema"], 7)
 
     def test_exige_el_almacen_especifico_de_la_sucursal_sazonador(self):
         with self.client.session_transaction() as state:
