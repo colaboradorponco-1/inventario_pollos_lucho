@@ -11,7 +11,11 @@ import core.dashboard as dashboard_module
 import core.pedidos as pedidos_module
 import core.sazonador as sazonador_module
 from core.dashboard import _datos_dashboard_sasonador
-from core.productos import _ocultar_datos_comerciales_productos, scope_productos
+from core.productos import (
+    _ocultar_datos_comerciales_productos,
+    _productos_sazonador_visibles,
+    scope_productos,
+)
 from core.pedidos import _puede_ver_pedido
 from core.util import ruta_bloqueada_sasonador
 
@@ -351,6 +355,36 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
             "nombre": "No debe guardarse", "stock_inicial": 1,
         })
         self.assertEqual(response.status_code, 409)
+
+    def test_producto_sazonador_aparece_en_filtro_de_sucursal(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            INSERT INTO sazonador_productos
+                (sucursal_id, almacen_id, codigo, nombre, categoria_id, unidad,
+                 stock_minimo, stock_actual, activo)
+            VALUES (42, 91, 'SAZ-42-000001', 'Adobo', 1, 'kg', 2, 5, 1)
+        """)
+        conn.commit()
+        with self.app.test_request_context("/api/productos"):
+            session["rol"] = "admin"
+            productos, total = _productos_sazonador_visibles(
+                conn, 42, "", None, None, "", True, False, 0, 10)
+            self.assertEqual(total, 1)
+            self.assertEqual(len(productos), 1)
+            self.assertEqual(productos[0]["stock"], 5)
+            self.assertEqual(productos[0]["sucursal_id"], 42)
+            self.assertEqual(productos[0]["almacen_nombre"], "Sazonador Simon Lopez")
+            self.assertTrue(productos[0]["es_inventario_sazonador"])
+            no_pedibles, total_no_pedibles = _productos_sazonador_visibles(
+                conn, 42, "", None, None, "", True, True, 0, 10)
+            self.assertEqual(no_pedibles, [])
+            self.assertEqual(total_no_pedibles, 0)
+            otra_sucursal, total_otra_sucursal = _productos_sazonador_visibles(
+                conn, 43, "", None, None, "", True, False, 0, 10)
+            self.assertEqual(otra_sucursal, [])
+            self.assertEqual(total_otra_sucursal, 0)
+        conn.close()
 
 
 if __name__ == "__main__":

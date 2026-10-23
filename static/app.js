@@ -1014,7 +1014,8 @@ async function pintarProdScope() {
     const ctr = {};
     for (const b of botones) {
         try {
-            const r = await request(API + '/productos?por_pagina=1' + (b.v ? '&sucursal=' + b.v : ''));
+            const r = await request(API + '/productos?por_pagina=1&incluir_sazonador=1' +
+                (b.v ? '&sucursal=' + b.v : ''));
             ctr[b.v] = r.total != null ? r.total : (r.data || r).length || 0;
         } catch (_) { ctr[b.v] = 0; }
     }
@@ -1053,6 +1054,7 @@ async function loadProductos() {
         if (proveedor) qs.set('proveedor', proveedor);
         if (estado) qs.set('estado', estado);
         if (_prodSuc !== '') qs.set('sucursal', _prodSuc);
+        if (window.ROL !== 'sasonador') qs.set('incluir_sazonador', '1');
         qs.set('por_pagina', 1000);
         const resp = await request(apiProductos() + '?' + qs.toString());
         const prods = resp.data || resp;
@@ -1096,6 +1098,7 @@ async function loadProductos() {
                 .filter((b) => b.items.length);
 
             const filas = (it) => it.map(p => {
+                const esProductoSazonador = !!p.es_inventario_sazonador;
                 const esFilial = window.ROL === 'encargado' && !esGestion && !esAlmacenPpal();
                 // Es "propio" si el producto es de la sucursal del usuario tal
                 // cual (el usuario del AS, p. ej. "AS America", edita SUS propios
@@ -1106,14 +1109,16 @@ async function loadProductos() {
                         || Number(p.sucursal_id || 0) === Number(window.SUCURSAL_ID || 0));
                 // En una filial, los productos que no son de su sucursal muestran el
                 // "disponible" del proveedor (lo real, no 0) con el nombre de quién lo tiene.
-                const provVista = esFilial && !esPropio;
-                const stockN = provVista ? (p.stock_prov ?? 0) : (p.stock ?? 0);
+                const provVista = !esProductoSazonador && esFilial && !esPropio;
+                const stockN = esProductoSazonador
+                    ? (p.stock ?? 0) : (provVista ? (p.stock_prov ?? 0) : (p.stock ?? 0));
                 let stockColor, stockIcon;
                 if (stockN === 0) { stockColor = '#dc2626'; stockIcon = '🔴'; }
                 else if (stockN <= (p.stock_minimo || 10)) { stockColor = '#d97706'; stockIcon = '🟡'; }
                 else { stockColor = '#16a34a'; stockIcon = '🟢'; }
-                const puedeEditar = esGestion || esPropio;
-                const acciones = soloLecturaSasonador ? ''
+                const puedeEditar = !esProductoSazonador && (esGestion || esPropio);
+                const acciones = esProductoSazonador ? ''
+                    : soloLecturaSasonador ? ''
                     : estado === 'inactivos'
                     ? (esAdmin() ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar" aria-label="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
                     : `<button class="btn btn-icon" data-hist-prod="${p.id}" title="Historial" aria-label="Historial"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>${
@@ -1122,14 +1127,14 @@ async function loadProductos() {
                         <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Eliminar" aria-label="Eliminar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
                             : ''}`;
                 return `<tr>
-                    <td><strong>${nomProd(p)}</strong>${provVista ? `<small style="color:var(--muted)"> · devuelto por ${esc(p.sucursal_nombre || 'almacén')}</small>` : ''}<br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
+                    <td><strong>${nomProd(p)}</strong>${esProductoSazonador ? '<small style="color:var(--muted)"> · inventario del Sazonador</small>' : provVista ? `<small style="color:var(--muted)"> · devuelto por ${esc(p.sucursal_nombre || 'almacén')}</small>` : ''}<br><small style="color:var(--muted)">${esc(p.codigo || '')}</small></td>
                     <td>${esc(p.almacen_nombre || '—')}</td>
                     <td style="color:${stockColor};font-weight:700">${stockIcon} ${fmtNum(stockN)} ${p.unidad}${provVista ? ' <small style="color:var(--muted)">disp.</small>' : ''}</td>
                     <td>${p.stock_minimo} ${p.unidad}</td>
                     <td>${p.unidad}</td>
-                    ${soloLecturaSasonador ? '' : `<td>Bs ${fmtNum(p.costo_promedio)}</td>
-                    <td>Bs ${fmtNum(p.precio_venta)}</td>
-                    <td>${p.proveedor_nombre || '—'}</td>`}
+                    ${soloLecturaSasonador ? '' : `<td>${esProductoSazonador ? '—' : `Bs ${fmtNum(p.costo_promedio)}`}</td>
+                    <td>${esProductoSazonador ? '—' : `Bs ${fmtNum(p.precio_venta)}`}</td>
+                    <td>${esProductoSazonador ? '—' : (p.proveedor_nombre || '—')}</td>`}
                     <td>${p.vencimiento ? fmtDate(p.vencimiento) : '—'}</td>
                     <td>${acciones}
                     </td>

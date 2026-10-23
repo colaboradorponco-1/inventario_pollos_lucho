@@ -26,6 +26,63 @@ def _ocultar_datos_comerciales_productos(rows):
     return rows
 
 
+def _productos_sazonador_visibles(conn, sucursal, filtro, categoria, proveedor,
+                                  estado, incluir, para_pedido, offset, limite):
+    if (not incluir or para_pedido
+            or session.get("rol") not in ("admin", "superadmin", "encargado")
+            or proveedor is not None or estado == "inactivos"):
+        return [], 0
+
+    condiciones = ["p.activo = 1"]
+    params = []
+    if sucursal is not None:
+        if sucursal == 0:
+            return [], 0
+        condiciones.append("p.sucursal_id = ?")
+        params.append(sucursal)
+    if filtro:
+        condiciones.append("(p.nombre LIKE ? OR p.codigo LIKE ? OR c.nombre LIKE ?)")
+        params.extend([f"%{filtro}%"] * 3)
+    if categoria is not None:
+        condiciones.append("p.categoria_id = ?")
+        params.append(categoria)
+    if estado == "con-stock":
+        condiciones.append("p.stock_actual > 0")
+    elif estado == "agotado":
+        condiciones.append("p.stock_actual <= 0")
+    elif estado == "stock-bajo":
+        condiciones.append("p.stock_minimo > 0 AND p.stock_actual <= p.stock_minimo")
+    elif estado == "por-vencer":
+        condiciones.append(
+            "p.vencimiento IS NOT NULL "
+            "AND p.vencimiento <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)")
+    where = " AND ".join(condiciones)
+    total = conn.execute("""
+        SELECT COUNT(*) AS total
+        FROM sazonador_productos p
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+        WHERE """ + where, params).fetchone()["total"]
+    if not total or offset >= total:
+        return [], total
+    filas = conn.execute("""
+        SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad,
+               p.stock_minimo, p.stock_actual AS stock, p.sucursal_id,
+               p.almacen_id, p.vencimiento, c.nombre AS categoria_nombre,
+               s.nombre AS sucursal_nombre, a.nombre AS almacen_nombre,
+               NULL AS costo_promedio, NULL AS precio_venta,
+               NULL AS proveedor_id, NULL AS proveedor_nombre,
+               0 AS stock_prov, 1 AS es_inventario_sazonador
+        FROM sazonador_productos p
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+        JOIN sucursales s ON s.id = p.sucursal_id
+        JOIN almacenes a ON a.id = p.almacen_id
+        WHERE """ + where + """
+        ORDER BY p.nombre
+        LIMIT ? OFFSET ?
+    """, params + [limite, offset]).fetchall()
+    return [dict(fila) for fila in filas], total
+
+
 def norm_nombre(texto):
     """Normaliza un texto (sin acentos, sin símbolos) para comparar nombres."""
     s = unicodedata.normalize("NFKD", str(texto or ""))
@@ -551,6 +608,12 @@ def productos():
             # Con "Todo a X" el destino es el elegido, así que también se
             # muestra ese nombre y no el del catálogo.
             r["destino_nombre"] = nombres.get(destino, "") if para_pedido else ""
+    productos_sazonador, total_sazonador = _productos_sazonador_visibles(
+        conn, sucursal, filtro, categoria, proveedor, estado,
+        request.args.get("incluir_sazonador") == "1", para_pedido,
+        max(0, offset - total), max(0, limit - len(rows)))
+    rows.extend(productos_sazonador)
+    total += total_sazonador
     conn.close()
     return ok_paginado(rows, total, pagina, por_pagina)
 
