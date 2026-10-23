@@ -3615,8 +3615,7 @@ $('#inv-fecha')?.addEventListener('change', revisarHoraCorte);
 $('#btn-inv-guardar')?.addEventListener('click', invClick(guardarInventario));
 $('#btn-inv-cerrar')?.addEventListener('click', invClick(cerrarInventario));
 $('#btn-inv-excel')?.addEventListener('click', () => {
-    if (window.ROL === 'sasonador') return;
-    if (INV_ID) window.open(API + '/inventario-diario/' + INV_ID + '/excel', '_blank');
+    if (INV_ID) window.open(apiInventarioDiario() + '/' + INV_ID + '/excel', '_blank');
 });
 $('#btn-inv-print')?.addEventListener('click', () => {
     if (window.ROL === 'sasonador') return;
@@ -4215,8 +4214,8 @@ async function abrirInventario(invId) {
     $('#btn-inv-guardar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-cerrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-borrar').style.display =
-        (INV_CERRADA || INV_SOLO_LECTURA || window.ROL === 'sasonador') ? 'none' : '';
-    $('#btn-inv-excel').style.display = window.ROL === 'sasonador' ? 'none' : '';
+        (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
+    $('#btn-inv-excel').style.display = '';
     $('#btn-inv-print').style.display = window.ROL === 'sasonador' ? 'none' : '';
     $('#btn-inv-refrescar').style.display = window.ROL === 'sasonador' ? 'none' : '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
@@ -4448,7 +4447,7 @@ async function borrarInventario() {
     if (!confirm('Borrar esta planilla abierta?\n\n' +
         'Se elimina el conteo que hiciste. El stock NO se toca, porque solo se ' +
         'ajusta al cerrar.\n\nSolo se puede borrar si sigue abierta.')) return;
-    const r = await request(API + '/inventario-diario/' + INV_ID, { method: 'DELETE' });
+    const r = await request(apiInventarioDiario() + '/' + INV_ID, { method: 'DELETE' });
     toast(r.message || 'Planilla borrada', 'ok');
     $('#inv-panel-conteo').style.display = 'none';
     INV_ID = null;

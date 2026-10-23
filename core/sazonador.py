@@ -4,7 +4,7 @@ from datetime import date, datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
-from .util import err, login_requerido, ok, sucursal_actual
+from .util import err, login_requerido, ok, responder_excel, sucursal_actual
 
 sazonador_bp = Blueprint("sazonador", __name__)
 
@@ -352,17 +352,38 @@ def inventario_sazonador():
 
 
 @sazonador_bp.route("/api/sazonador/inventario-diario/<int:inv_id>",
-                    methods=["GET", "PUT"])
+                    methods=["GET", "PUT", "DELETE"])
 @login_requerido
 def detalle_inventario_sazonador(inv_id):
     if not _sesion_sazonador():
         return err("Esta operación es exclusiva del rol Sazonador con sucursal asignada", 403)
     sid = sucursal_actual()
     conn = get_conn()
-    inv = _inventario_por_id(conn, inv_id, sid, bloquear=request.method == "PUT")
+    inv = _inventario_por_id(
+        conn, inv_id, sid, bloquear=request.method in ("PUT", "DELETE"))
     if not inv:
         conn.close()
         return err("Inventario no encontrado", 404)
+    if request.method == "DELETE":
+        if inv["estado"] == "cerrado":
+            conn.rollback()
+            conn.close()
+            return err(
+                "La planilla está cerrada. No se puede borrar porque ya actualizó "
+                "el inventario del Sazonador.", 400)
+        lineas = conn.execute(
+            "SELECT COUNT(*) AS n FROM sazonador_inventario_detalle "
+            "WHERE inventario_id = ?", (inv_id,)).fetchone()["n"]
+        conn.execute(
+            "DELETE FROM sazonador_inventario_detalle WHERE inventario_id = ?",
+            (inv_id,))
+        conn.execute(
+            "DELETE FROM sazonador_inventarios WHERE id = ? AND sucursal_id = ?",
+            (inv_id, sid))
+        conn.commit()
+        conn.close()
+        return ok({"id": inv_id, "lineas": lineas},
+                  message=f"Planilla abierta borrada ({lineas} productos)")
     if request.method == "PUT":
         if inv["estado"] == "cerrado":
             conn.close()
@@ -463,6 +484,64 @@ def detalle_inventario_sazonador(inv_id):
             "total_utilizada": round(sum(l["utilizada"] for l in lineas), 3),
         },
     })
+
+
+@sazonador_bp.route("/api/sazonador/inventario-diario/<int:inv_id>/excel")
+@login_requerido
+def inventario_sazonador_excel(inv_id):
+    if not _sesion_sazonador():
+        return err("Esta operación es exclusiva del rol Sazonador con sucursal asignada", 403)
+    sid = sucursal_actual()
+    conn = get_conn()
+    inv = _inventario_por_id(conn, inv_id, sid)
+    if not inv:
+        conn.close()
+        return err("Inventario no encontrado", 404)
+    filas = _inventario_detalle(conn, inv_id)
+    sucursal = conn.execute(
+        "SELECT nombre FROM sucursales WHERE id = ?", (sid,)).fetchone()
+    almacen = conn.execute(
+        "SELECT nombre FROM almacenes WHERE id = ?", (inv["almacen_id"],)).fetchone()
+    categoria = conn.execute(
+        "SELECT nombre FROM categorias WHERE id = ?",
+        (inv["categoria_id"],)).fetchone() if inv["categoria_id"] else None
+    conn.close()
+
+    encabezados = [
+        "Categoría", "Producto", "Código", "Unidad", "Inventario inicial",
+        "Disponible del día", "Inventario final", "Cantidad utilizada",
+        "Diferencia", "Observaciones",
+    ]
+    filas_excel = [
+        (
+            fila["categoria_nombre"] or "Sin categoría",
+            fila["producto_nombre"] or "",
+            fila["codigo"] or "",
+            fila["unidad"] or "",
+            fila["inicial"] or 0,
+            fila["disponible"] or 0,
+            fila["final"] or 0,
+            fila["utilizada"] or 0,
+            fila["diferencia"] or 0,
+            fila["observaciones"] or "",
+        )
+        for fila in filas
+    ]
+    fecha = str(inv["fecha"])[:10]
+    nombre_categoria = categoria["nombre"] if categoria else "Todas las categorías"
+    return responder_excel(
+        f"inventario_sazonador_{fecha}.xlsx", encabezados, filas_excel,
+        [22, 32, 16, 12, 18, 18, 18, 18, 12, 40],
+        titulo="PLANILLA DE INVENTARIO DIARIO DEL SAZONADOR",
+        subtitulos=[
+            sucursal["nombre"] if sucursal else "",
+            almacen["nombre"] if almacen else "",
+            f"Categoría: {nombre_categoria}",
+            f"Fecha: {fecha}",
+            f"Hora de corte: {inv['hora_corte'] or ''}",
+            f"Estado: {'CERRADA' if inv['estado'] == 'cerrado' else 'ABIERTA'}",
+        ],
+    )
 
 
 @sazonador_bp.route("/api/sazonador/inventario-diario/<int:inv_id>/cerrar",

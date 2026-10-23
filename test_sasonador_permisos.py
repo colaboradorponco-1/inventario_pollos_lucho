@@ -98,6 +98,10 @@ class SasonadorPermisosTests(unittest.TestCase):
         self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/inventario-diario/15", "PUT"))
         self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/inventario-diario/15", "DELETE"))
+        self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/inventario-diario/15/excel", "GET"))
+        self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/inventario-diario/15/cerrar", "POST"))
 
     def test_dashboard_productos_e_inventario_diario(self):
@@ -376,19 +380,68 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         cierre = self.client.post(
             f"/api/sazonador/inventario-diario/{inventario_id}/cerrar")
         self.assertEqual(cierre.status_code, 200)
+        excel = self.client.get(
+            f"/api/sazonador/inventario-diario/{inventario_id}/excel")
+        self.assertEqual(excel.status_code, 200)
+        self.assertIn(
+            "inventario_sazonador_", excel.headers["Content-Disposition"])
+        borrar_cerrado = self.client.delete(
+            f"/api/sazonador/inventario-diario/{inventario_id}")
+        self.assertEqual(borrar_cerrado.status_code, 400)
 
         conn = sqlite3.connect(self.db_path)
+        inventario_conservado = conn.execute(
+            "SELECT estado FROM sazonador_inventarios WHERE id = ?",
+            (inventario_id,)).fetchone()[0]
         stock_sazonador = conn.execute(
             "SELECT stock_actual FROM sazonador_productos WHERE id = ?",
             (product_id,)).fetchone()[0]
         stock_encargado = conn.execute(
             "SELECT stock_actual FROM productos WHERE sucursal_id = 42").fetchone()[0]
         conn.close()
+        self.assertEqual(inventario_conservado, "cerrado")
         self.assertEqual(stock_sazonador, 3)
         self.assertEqual(stock_encargado, 18)
         inventario_duplicado = self.client.post(
             "/api/sazonador/inventario-diario?categoria_id=1")
         self.assertEqual(inventario_duplicado.status_code, 409)
+
+    def test_sazonador_puede_borrar_planilla_abierta_sin_tocar_stock(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        creado = self.client.post("/api/sazonador/productos", json={
+            "nombre": "Producto para borrar planilla",
+            "unidad": "kg",
+            "stock_inicial": 7,
+        })
+        self.assertEqual(creado.status_code, 200)
+        producto_id = creado.json["data"]["id"]
+        inventario = self.client.post("/api/sazonador/inventario-diario")
+        self.assertEqual(inventario.status_code, 200)
+        inventario_id = inventario.json["data"]["id"]
+
+        borrado = self.client.delete(
+            f"/api/sazonador/inventario-diario/{inventario_id}")
+        self.assertEqual(borrado.status_code, 200)
+        self.assertEqual(borrado.json["data"]["lineas"], 1)
+
+        conn = sqlite3.connect(self.db_path)
+        fila_inventario = conn.execute(
+            "SELECT COUNT(*) FROM sazonador_inventarios WHERE id = ?",
+            (inventario_id,)).fetchone()[0]
+        fila_detalle = conn.execute(
+            "SELECT COUNT(*) FROM sazonador_inventario_detalle WHERE inventario_id = ?",
+            (inventario_id,)).fetchone()[0]
+        stock = conn.execute(
+            "SELECT stock_actual FROM sazonador_productos WHERE id = ?",
+            (producto_id,)).fetchone()[0]
+        conn.close()
+        self.assertEqual(fila_inventario, 0)
+        self.assertEqual(fila_detalle, 0)
+        self.assertEqual(stock, 7)
 
     def test_sazonador_puede_editar_sus_productos_sin_cambiar_stock(self):
         with self.client.session_transaction() as state:
