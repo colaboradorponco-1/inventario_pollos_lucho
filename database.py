@@ -657,6 +657,15 @@ def _indice_existe(cur, tabla, indice):
     return cur.fetchone()["c"] > 0
 
 
+def _foreign_key_existe(cur, tabla, constraint):
+    cur.execute(
+        "SELECT COUNT(*) c FROM information_schema.TABLE_CONSTRAINTS "
+        "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s "
+        "AND CONSTRAINT_NAME = %s AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
+        (MYSQL_DB, tabla, constraint))
+    return cur.fetchone()["c"] > 0
+
+
 # Firmas de los movimientos que dejaron las pruebas de la feature de merma, que se
 # revirtió. Son filas basura: el tipo 'merma' ya no existe en el código, así que ni
 # el FEFO ni el cálculo de stock las cuentan bien.
