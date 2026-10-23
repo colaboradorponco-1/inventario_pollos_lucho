@@ -1116,9 +1116,14 @@ async function loadProductos() {
                 if (stockN === 0) { stockColor = '#dc2626'; stockIcon = '🔴'; }
                 else if (stockN <= (p.stock_minimo || 10)) { stockColor = '#d97706'; stockIcon = '🟡'; }
                 else { stockColor = '#16a34a'; stockIcon = '🟢'; }
-                const puedeEditar = !esProductoSazonador && (esGestion || esPropio);
-                const acciones = esProductoSazonador ? ''
-                    : soloLecturaSasonador ? ''
+                const puedeEditar = window.ROL === 'sasonador'
+                    ? esProductoSazonador
+                    : !esProductoSazonador && (esGestion || esPropio);
+                const acciones = soloLecturaSasonador
+                    ? (puedeEditar
+                        ? `<button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>`
+                        : '')
+                    : esProductoSazonador ? ''
                     : estado === 'inactivos'
                     ? (esAdmin() ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar" aria-label="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>` : '')
                     : `<button class="btn btn-icon" data-hist-prod="${p.id}" title="Historial" aria-label="Historial"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></button>${
@@ -1762,6 +1767,7 @@ function actualizarControlProductoPedido(sucursalId, ofrecer = false) {
     if (checkbox) checkbox.checked = permitido && ofrecer;
 }
 
+let editaProductoSazonador = false;
 async function openProductoModal(id, lista) {
     await loadCatalogos();
     const form = $('#form-producto');
@@ -1774,6 +1780,29 @@ async function openProductoModal(id, lista) {
     const esGestionDlg = esCentral();
     const esAdminDlg = esAdmin();
     const esSazonador = window.ROL === 'sasonador';
+    editaProductoSazonador = false;
+    const mapeoSazonador = $('#prod-sazonador-mapeo-wrap');
+    if (mapeoSazonador) mapeoSazonador.style.display = esSazonador ? 'block' : 'none';
+    const productoPedidoSelect = $('#prod-sazonador-producto-pedido');
+    if (esSazonador && productoPedidoSelect) {
+        try {
+            const qs = new URLSearchParams({
+                para_pedido: '1',
+                desde: String(window.SUCURSAL_ID || ''),
+                por_pagina: '1000',
+            });
+            const resp = await request(API + '/productos?' + qs.toString());
+            const productosPedido = resp.data || resp;
+            productoPedidoSelect.innerHTML = '<option value="">Sin vincular</option>' +
+                productosPedido.map((producto) =>
+                    `<option value="${producto.id}">${esc(producto.nombre)} ` +
+                    `(${esc(producto.unidad || 'unidad')}) · ` +
+                    `${esc(producto.sucursal_nombre || 'almacén')}</option>`).join('');
+        } catch (error) {
+            toast('No se pudo cargar el catálogo disponible para pedidos: ' + error.message, 'err');
+            return;
+        }
+    }
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
     ['prod-almacen', 'prod-costo', 'prod-precio-venta',
@@ -1815,6 +1844,7 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
 
     if (id) {
         const p = lista.find((x) => x.id === id);
+        editaProductoSazonador = esSazonador && !!p.es_inventario_sazonador;
         $('#modal-producto-title').textContent = 'Editar producto';
         $('#prod-id').value = p.id;
         $('#prod-codigo').value = p.codigo || '';
@@ -1833,6 +1863,18 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         $('#prod-precio-venta').value = p.precio_venta;
         $('#prod-vencimiento').value = p.vencimiento || '';
         $('#prod-proveedor').value = p.proveedor_id || '';
+        if (editaProductoSazonador && p.producto_pedido_id && productoPedidoSelect) {
+            const idVinculado = String(p.producto_pedido_id);
+            if (!Array.from(productoPedidoSelect.options).some((option) => option.value === idVinculado)) {
+                const option = document.createElement('option');
+                option.value = idVinculado;
+                option.textContent = `${p.producto_pedido_nombre || 'Producto vinculado'} ` +
+                    `(${p.producto_pedido_unidad || 'unidad'}) · ` +
+                    `${p.producto_pedido_sucursal_nombre || 'proveedor'}`;
+                productoPedidoSelect.appendChild(option);
+            }
+            productoPedidoSelect.value = idVinculado;
+        }
     
         if (esGestionDlg) $('#prod-sucursal').value = p.sucursal_id || '';
         // Mostrar también el almacén actual del producto si no es el principal
@@ -1846,8 +1888,8 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         }
         actualizarControlProductoPedido($('#prod-sucursal').value, !!p.para_proveer);
         $('#campo-stock-inicial').style.display = 'none';
-        $('#campo-stock-actual').style.display = 'flex';
-        $('#prod-stock-hint').style.display = 'block';
+        $('#campo-stock-actual').style.display = editaProductoSazonador ? 'none' : 'flex';
+        $('#prod-stock-hint').style.display = editaProductoSazonador ? 'none' : 'block';
         $('#prod-stock-actual').value = p.stock;
     }
     openModal('modal-producto');
@@ -1877,13 +1919,30 @@ $('#form-producto').addEventListener('submit', async (e) => {
 
         stock_inicial: +$('#prod-stock-inicial').value || 0,
     };
+    if (window.ROL === 'sasonador') {
+        body.producto_pedido_id = +$('#prod-sazonador-producto-pedido').value || null;
+    }
     if (puedeRevisarEquivalencias()) {
         body.sucursal_id = +$('#prod-sucursal').value || null;
     }
-    if (id) body.stock = +$('#prod-stock-actual').value || 0;
+    if (id && !editaProductoSazonador) body.stock = +$('#prod-stock-actual').value || 0;
     try {
         let resp = null;
-        if (id) {
+        if (id && editaProductoSazonador) {
+            resp = await conSubmit(() => request(API + '/sazonador/productos/' + id, {
+                method: 'PUT',
+                body: JSON.stringify({
+                    codigo: body.codigo,
+                    nombre: body.nombre,
+                    marca: body.marca,
+                    categoria_id: body.categoria_id,
+                    unidad: body.unidad,
+                    stock_minimo: body.stock_minimo,
+                    vencimiento: body.vencimiento,
+                    producto_pedido_id: body.producto_pedido_id,
+                }),
+            }), '#form-producto button[type="submit"]');
+        } else if (id) {
             resp = await conSubmit(() => request(API + '/productos/' + id, { method: 'PUT', body: JSON.stringify(body) }),
                 '#form-producto button[type="submit"]');
         } else {
@@ -5303,7 +5362,16 @@ async function cargarProductosPedido() {
     if (desdePed) qs.set('desde', desdePed);
     if (dest) qs.set('destino_id', String(dest));
     const respP = await request(API + '/productos?' + qs.toString());
-    pedidoProdsAll = (respP.data || respP).map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
+    pedidoProdsAll = (respP.data || respP)
+        .map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
+    if (window.ROL === 'sasonador') {
+        const productosSazonador = await request(API + '/sazonador/productos');
+        const vinculados = new Set((productosSazonador.data || productosSazonador)
+            .map((producto) => Number(producto.producto_pedido_id))
+            .filter((id) => id > 0));
+        pedidoProdsAll = pedidoProdsAll.filter((producto) =>
+            vinculados.has(Number(producto.id)));
+    }
 }
 
 // Sucursal por la que se pediría este producto. Si el servidor ya la resolvió

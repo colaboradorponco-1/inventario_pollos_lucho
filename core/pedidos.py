@@ -302,6 +302,24 @@ def pedidos():
             if not fila["para_proveer"]:
                 conn.close()
                 return err(f"'{fila['nombre']}' es solo de inventario y no se puede pedir")
+            producto_sazonador_id = None
+            if session.get("rol") == "sasonador":
+                producto_sazonador = conn.execute("""
+                    SELECT sp.id
+                    FROM sazonador_productos sp
+                    JOIN sucursales s ON s.id = sp.sucursal_id
+                    JOIN almacenes a ON a.id = sp.almacen_id
+                    WHERE sp.sucursal_id = ? AND sp.producto_pedido_id = ?
+                      AND sp.activo = 1
+                      AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+                    LIMIT 1
+                """, (sucursal_id, prod_id)).fetchone()
+                if not producto_sazonador:
+                    conn.close()
+                    return err(
+                        f"Vincula '{fila['nombre']}' con un producto de tu inventario "
+                        "Sazonador antes de pedirlo")
+                producto_sazonador_id = producto_sazonador["id"]
             # Pedido por tachos: la medida (¼, ½, ¾, entero) viene en la línea del
             # pedido y quien pide escribe a cuánto equivale un tacho (1 tacho = N
             # kg/unidades). Si no lo escribe, se toma el valor configurado del
@@ -340,11 +358,12 @@ def pedidos():
             if proveedor not in proveedores_validos:
                 destinos_malos.setdefault(proveedor, []).append(fila["nombre"])
                 continue
-            _, error_recepcion = _producto_receptor(conn, prod_id, sucursal_id)
-            if error_recepcion:
-                equivalencias_pendientes.append(
-                    f"{fila['nombre']} ({_nombre_sucursal(conn, proveedor)} → "
-                    f"{_nombre_sucursal(conn, sucursal_id)})")
+            if session.get("rol") != "sasonador":
+                _, error_recepcion = _producto_receptor(conn, prod_id, sucursal_id)
+                if error_recepcion:
+                    equivalencias_pendientes.append(
+                        f"{fila['nombre']} ({_nombre_sucursal(conn, proveedor)} → "
+                        f"{_nombre_sucursal(conn, sucursal_id)})")
             # Si a quien le toca despachar no tiene de esto, se avisa y se sigue:
             # el pedido se guarda igual y la persona ve donde hay. Bloquear
             # acá seria peor, porque el problema real es el stock, no el pedido.
@@ -355,7 +374,7 @@ def pedidos():
             items.append((prod_id, fila["nombre"], cantidad, proveedor,
                           fila["unidad"] or "unidad", fraccion if por_tacho else 0,
                           texto_tacho, tacho_unidad if por_tacho else 0,
-                          1 if falta else 0))
+                          1 if falta else 0, producto_sazonador_id))
         if destinos_malos:
             # Se informan TODOS los destinos invalidos de una vez. Antes se
             # devolvia en la primera linea mala, asi que un pedido de 24
@@ -392,12 +411,15 @@ def pedidos():
         # La linea guarda la marca sin_stock (1 = al proveedor le falta stock)
         # para que el ticket y el detalle muestren el faltante, no solo el aviso.
         _faltantes = sin_stock
-        for prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad, sin_stock in items:
+        for (prod_id, nombre, cantidad, proveedor, unidad, fraccion,
+             texto_tacho, tacho_unidad, sin_stock, producto_sazonador_id) in items:
             conn.execute("""
                 INSERT INTO pedido_detalle (pedido_id, producto_id, producto_nombre, cantidad,
-                                            destino_id, unidad, tacho_fraccion, tacho_texto, tacho_unidad, sin_stock)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion, texto_tacho, tacho_unidad, sin_stock))
+                                            destino_id, unidad, tacho_fraccion, tacho_texto,
+                                            tacho_unidad, sin_stock, producto_sazonador_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (pedido_id, prod_id, nombre, cantidad, proveedor, unidad, fraccion,
+                  texto_tacho, tacho_unidad, sin_stock, producto_sazonador_id))
         sin_stock = _faltantes
         conn.commit()
         # Aviso (no bloquea) por producto: a quien le toca despachar no tiene
@@ -861,6 +883,13 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
                        (pedido["sucursal_id"],)).fetchone()
     if not suc:
         return "error", "Sucursal solicitante no encontrada"
+    sucursal_sazonador = conn.execute("""
+        SELECT 1 FROM usuarios
+        WHERE sucursal_id = ? AND rol = 'sasonador'
+        UNION ALL
+        SELECT 1 FROM sazonador_productos WHERE sucursal_id = ?
+        LIMIT 1
+    """, (pedido["sucursal_id"], pedido["sucursal_id"])).fetchone() is not None
 
     # Validar el total por producto y proveedor antes de despachar. Las líneas
     # repetidas no deben validar cada una contra el mismo stock disponible.
@@ -890,12 +919,48 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
             clave = (origen_id, d["producto_id"])
             if clave in productos_recepcion:
                 continue
-            producto_destino_id, error_equivalencia = _validar_producto_receptor(
-                conn, d["producto_id"], d["producto_nombre"], origen_id,
-                pedido["sucursal_id"])
-            if error_equivalencia:
-                return "error", f"{error_equivalencia} No se modificó stock."
-            productos_recepcion[clave] = producto_destino_id
+            try:
+                producto_sazonador_id = d["producto_sazonador_id"]
+            except (KeyError, IndexError):
+                producto_sazonador_id = None
+            if producto_sazonador_id is None and sucursal_sazonador:
+                producto_sazonador = conn.execute("""
+                    SELECT sp.id
+                    FROM sazonador_productos sp
+                    JOIN sucursales s ON s.id = sp.sucursal_id
+                    JOIN almacenes a ON a.id = sp.almacen_id
+                    WHERE sp.sucursal_id = ? AND sp.producto_pedido_id = ?
+                      AND sp.activo = 1
+                      AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+                """, (pedido["sucursal_id"], d["producto_id"])).fetchone()
+                producto_sazonador_id = (
+                    producto_sazonador["id"] if producto_sazonador else None)
+            if producto_sazonador_id:
+                producto_sazonador = conn.execute("""
+                    SELECT sp.id
+                    FROM sazonador_productos sp
+                    JOIN sucursales s ON s.id = sp.sucursal_id
+                    JOIN almacenes a ON a.id = sp.almacen_id
+                    WHERE sp.id = ? AND sp.sucursal_id = ? AND sp.activo = 1
+                      AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+                """, (producto_sazonador_id, pedido["sucursal_id"])).fetchone()
+                if not producto_sazonador:
+                    return "error", (
+                        f"La equivalencia Sazonador de '{d['producto_nombre']}' "
+                        "ya no existe. No se modificó stock.")
+                productos_recepcion[clave] = ("sazonador", producto_sazonador_id)
+            else:
+                if sucursal_sazonador:
+                    return "error", (
+                        f"El pedido de Sazonador no tiene equivalencia para "
+                        f"'{d['producto_nombre']}'. Vincula el producto antes de recibir. "
+                        "No se modificó stock.")
+                producto_destino_id, error_equivalencia = _validar_producto_receptor(
+                    conn, d["producto_id"], d["producto_nombre"], origen_id,
+                    pedido["sucursal_id"])
+                if error_equivalencia:
+                    return "error", f"{error_equivalencia} No se modificó stock."
+                productos_recepcion[clave] = ("normal", producto_destino_id)
 
     # La mercadería se mueve HOY, no el día en que se hizo el pedido.
     # Si se usara `pedido["fecha"]`, un pedido del 30-sep entregado el 01-oct
@@ -943,10 +1008,23 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
                         session.get("usuario", ""), origen_id)
                 except ValueError as exc:
                     return "error", str(exc)
-                producto_receptor_id = productos_recepcion[(origen_id, d["producto_id"])]
-                registrar_movimiento(conn, producto_receptor_id, "entrada", d["cantidad"], costo, fecha_mov,
-                                      f"Recepción pedido {pedido['nro_ticket']}", session.get("usuario", ""),
-                                      pedido["sucursal_id"])
+                tipo_recepcion, producto_receptor_id = productos_recepcion[
+                    (origen_id, d["producto_id"])]
+                if tipo_recepcion == "sazonador":
+                    actualizacion = conn.execute("""
+                        UPDATE sazonador_productos
+                        SET stock_actual = stock_actual + ?
+                        WHERE id = ? AND sucursal_id = ? AND activo = 1
+                    """, (d["cantidad"], producto_receptor_id, pedido["sucursal_id"]))
+                    if actualizacion.rowcount != 1:
+                        return "error", (
+                            f"No se pudo actualizar el stock Sazonador de "
+                            f"'{d['producto_nombre']}'. No se modificó stock.")
+                else:
+                    registrar_movimiento(
+                        conn, producto_receptor_id, "entrada", d["cantidad"], costo,
+                        fecha_mov, f"Recepción pedido {pedido['nro_ticket']}",
+                        session.get("usuario", ""), pedido["sucursal_id"])
         conn.execute("UPDATE repartos SET total = ? WHERE id = ?", (subtotal_reparto, reparto_id))
     return total, reparto_ids
 

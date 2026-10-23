@@ -4,6 +4,7 @@ from datetime import date, datetime
 from flask import Blueprint, request, session
 
 from database import get_conn
+from .lotes import destinos_validos
 from .util import err, login_requerido, ok, sucursal_actual
 
 sazonador_bp = Blueprint("sazonador", __name__)
@@ -37,6 +38,33 @@ def _numero(valor, nombre, defecto=None):
     return numero
 
 
+def _producto_pedido_valido(conn, sid, valor, unidad_destino, producto_id=None):
+    if valor in (None, ""):
+        return None, None
+    try:
+        producto_pedido_id = int(valor)
+    except (TypeError, ValueError):
+        return None, "El producto del catálogo de pedidos no es válido"
+    producto = conn.execute("""
+        SELECT id, sucursal_id, unidad, IFNULL(para_proveer, 1) AS para_proveer
+        FROM productos WHERE id = ? AND activo = 1
+    """, (producto_pedido_id,)).fetchone()
+    if (not producto or not producto["para_proveer"]
+            or producto["sucursal_id"] not in destinos_validos(conn, sid)):
+        return None, "Selecciona un producto activo de un almacén que pueda atender pedidos"
+    if (producto["unidad"] or "unidad").strip().lower() != \
+            (unidad_destino or "unidad").strip().lower():
+        return None, "La unidad del producto vinculado debe coincidir con la del Sazonador"
+    duplicado = conn.execute("""
+        SELECT id FROM sazonador_productos
+        WHERE sucursal_id = ? AND producto_pedido_id = ?
+          AND (? IS NULL OR id <> ?)
+    """, (sid, producto_pedido_id, producto_id, producto_id)).fetchone()
+    if duplicado:
+        return None, "Ese producto del catálogo ya está vinculado a otro producto Sazonador"
+    return producto_pedido_id, None
+
+
 @sazonador_bp.route("/api/sazonador/productos", methods=["GET", "POST"])
 @login_requerido
 def productos_sazonador():
@@ -63,6 +91,11 @@ def productos_sazonador():
         except (TypeError, ValueError) as exc:
             conn.close()
             return err(str(exc))
+        producto_pedido_id, error_producto_pedido = _producto_pedido_valido(
+            conn, sid, data.get("producto_pedido_id"), unidad)
+        if error_producto_pedido:
+            conn.close()
+            return err(error_producto_pedido)
         if categoria_id and not conn.execute(
                 "SELECT 1 FROM categorias WHERE id = ?", (categoria_id,)).fetchone():
             conn.close()
@@ -75,11 +108,12 @@ def productos_sazonador():
         cursor = conn.execute("""
             INSERT INTO sazonador_productos
                 (sucursal_id, almacen_id, codigo, nombre, marca, categoria_id, unidad,
-                 stock_minimo, stock_actual, vencimiento, creado_por)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 stock_minimo, stock_actual, producto_pedido_id, vencimiento, creado_por)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (sid, almacen["id"], codigo, nombre, (data.get("marca") or "").strip() or None,
               categoria_id, unidad, stock_minimo, stock_inicial,
-              data.get("vencimiento") or None, session.get("usuario", "")))
+              producto_pedido_id, data.get("vencimiento") or None,
+              session.get("usuario", "")))
         product_id = cursor.lastrowid
         if not codigo:
             codigo = f"SAZ-{sid}-{product_id:06d}"
@@ -96,11 +130,16 @@ def productos_sazonador():
     consulta = """
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad,
                p.stock_minimo, p.stock_actual AS stock, p.sucursal_id, p.almacen_id,
+               p.producto_pedido_id, pp.nombre AS producto_pedido_nombre,
+               pp.unidad AS producto_pedido_unidad,
+               pps.nombre AS producto_pedido_sucursal_nombre,
                p.vencimiento, c.nombre AS categoria_nombre,
                s.nombre AS sucursal_nombre, a.nombre AS almacen_nombre,
                NULL AS proveedor_id, NULL AS proveedor_nombre
         FROM sazonador_productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
+        LEFT JOIN productos pp ON pp.id = p.producto_pedido_id
+        LEFT JOIN sucursales pps ON pps.id = pp.sucursal_id
         JOIN almacenes a ON a.id = p.almacen_id
         JOIN sucursales s ON s.id = p.sucursal_id
         WHERE p.sucursal_id = ? AND p.almacen_id = ? AND p.activo = 1
@@ -122,8 +161,81 @@ def productos_sazonador():
         consulta += " AND p.vencimiento IS NOT NULL AND p.vencimiento <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)"
     consulta += " ORDER BY p.nombre"
     filas = [dict(fila) for fila in conn.execute(consulta, params).fetchall()]
+    for fila in filas:
+        fila["es_inventario_sazonador"] = True
     conn.close()
     return ok(filas)
+
+
+@sazonador_bp.route("/api/sazonador/productos/<int:producto_id>", methods=["PUT"])
+@login_requerido
+def editar_producto_sazonador(producto_id):
+    if not _sesion_sazonador():
+        return err("Esta operación es exclusiva del rol Sazonador con sucursal asignada", 403)
+    sid = sucursal_actual()
+    conn = get_conn()
+    almacen = _almacen_sazonador(conn, sid)
+    if not almacen:
+        conn.close()
+        return err("Crea en la sucursal Sazonador el almacén con el mismo nombre de la sucursal", 409)
+    producto = conn.execute("""
+        SELECT id FROM sazonador_productos
+        WHERE id = ? AND sucursal_id = ? AND almacen_id = ? AND activo = 1
+    """, (producto_id, sid, almacen["id"])).fetchone()
+    if not producto:
+        conn.close()
+        return err("Producto Sazonador no encontrado", 404)
+
+    data = request.get_json() or {}
+    nombre = (data.get("nombre") or "").strip()
+    codigo = (data.get("codigo") or "").strip() or None
+    unidad = (data.get("unidad") or "unidad").strip() or "unidad"
+    try:
+        stock_minimo = _numero(data.get("stock_minimo"), "El stock mínimo", 0)
+        categoria_id = int(data["categoria_id"]) if data.get("categoria_id") else None
+    except (TypeError, ValueError) as exc:
+        conn.close()
+        return err(str(exc))
+    producto_pedido_id, error_producto_pedido = _producto_pedido_valido(
+        conn, sid, data.get("producto_pedido_id"), unidad, producto_id)
+    if error_producto_pedido:
+        conn.close()
+        return err(error_producto_pedido)
+    if not nombre or len(nombre) > 255:
+        conn.close()
+        return err("El nombre del producto es obligatorio y no puede superar 255 caracteres")
+    if len(unidad) > 50:
+        conn.close()
+        return err("La unidad no puede superar 50 caracteres")
+    if codigo and conn.execute("""
+            SELECT 1 FROM sazonador_productos
+            WHERE sucursal_id = ? AND codigo = ? AND id <> ?
+        """, (sid, codigo, producto_id)).fetchone():
+        conn.close()
+        return err("Ya tienes un producto con ese código en tu inventario", 409)
+    if categoria_id and not conn.execute(
+            "SELECT 1 FROM categorias WHERE id = ?", (categoria_id,)).fetchone():
+        conn.close()
+        return err("La categoría seleccionada no existe")
+    vencimiento = data.get("vencimiento") or None
+    if vencimiento:
+        try:
+            vencimiento = datetime.strptime(str(vencimiento)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            conn.close()
+            return err("La fecha de vencimiento no es válida")
+
+    conn.execute("""
+        UPDATE sazonador_productos
+        SET codigo = ?, nombre = ?, marca = ?, categoria_id = ?, unidad = ?,
+            stock_minimo = ?, vencimiento = ?, producto_pedido_id = ?
+        WHERE id = ? AND sucursal_id = ? AND almacen_id = ? AND activo = 1
+    """, (codigo, nombre, (data.get("marca") or "").strip() or None,
+          categoria_id, unidad, stock_minimo, vencimiento, producto_pedido_id,
+          producto_id, sid, almacen["id"]))
+    conn.commit()
+    conn.close()
+    return ok({"id": producto_id}, message="Producto Sazonador actualizado")
 
 
 def _inventario_por_id(conn, inv_id, sid, bloquear=False):

@@ -347,13 +347,17 @@ def init_db():
                     "unidad VARCHAR(50) NOT NULL DEFAULT 'unidad',"
                     "stock_minimo DOUBLE NOT NULL DEFAULT 0,"
                     "stock_actual DOUBLE NOT NULL DEFAULT 0,"
+                    "producto_pedido_id INT,"
                     "vencimiento DATE,"
                     "creado_por VARCHAR(255) DEFAULT '',"
                     "activo TINYINT NOT NULL DEFAULT 1,"
                     "UNIQUE KEY uq_sazonador_sucursal_codigo (sucursal_id, codigo),"
+                    "UNIQUE KEY uq_sazonador_producto_pedido (sucursal_id, producto_pedido_id),"
                     "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
                     "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
-                    "FOREIGN KEY (categoria_id) REFERENCES categorias(id))")
+                    "FOREIGN KEY (categoria_id) REFERENCES categorias(id),"
+                    "CONSTRAINT fk_sazonador_producto_pedido "
+                    "FOREIGN KEY (producto_pedido_id) REFERENCES productos(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS sazonador_inventarios ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "sucursal_id INT NOT NULL,"
@@ -496,6 +500,7 @@ def init_db():
                     "tacho_unidad DOUBLE DEFAULT 0,"
                     "sin_stock TINYINT NOT NULL DEFAULT 0,"
                     "preparado TINYINT NOT NULL DEFAULT 0,"
+                    "producto_sazonador_id INT,"
                     "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS repartos ("
@@ -882,6 +887,21 @@ def migrar_esquema():
             _add_columna(cur, "pedido_detalle", "sin_stock TINYINT NOT NULL DEFAULT 0")
         if not _col_existe(cur, "pedido_detalle", "preparado"):
             _add_columna(cur, "pedido_detalle", "preparado TINYINT NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "sazonador_productos", "producto_pedido_id"):
+            _add_columna(cur, "sazonador_productos", "producto_pedido_id INT")
+        if not _indice_existe(cur, "sazonador_productos",
+                              "uq_sazonador_producto_pedido"):
+            cur.execute(
+                "ALTER TABLE sazonador_productos ADD UNIQUE KEY "
+                "uq_sazonador_producto_pedido (sucursal_id, producto_pedido_id)")
+        if not _foreign_key_existe(
+                cur, "sazonador_productos", "fk_sazonador_producto_pedido"):
+            cur.execute(
+                "ALTER TABLE sazonador_productos ADD CONSTRAINT "
+                "fk_sazonador_producto_pedido FOREIGN KEY (producto_pedido_id) "
+                "REFERENCES productos(id)")
+        if not _col_existe(cur, "pedido_detalle", "producto_sazonador_id"):
+            _add_columna(cur, "pedido_detalle", "producto_sazonador_id INT")
         cur.execute("CREATE TABLE IF NOT EXISTS pedido_ticket_secuencia ("
                     "id TINYINT NOT NULL PRIMARY KEY,"
                     "ultimo_id BIGINT NOT NULL)")

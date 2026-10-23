@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS `pedido_detalle` (
   `tacho_fraccion` DOUBLE DEFAULT 0,
   `tacho_texto` VARCHAR(50) DEFAULT '',
   `tacho_unidad` DOUBLE DEFAULT 0,
+  `producto_sazonador_id` INT,
   CONSTRAINT `fk_pd_pedido` FOREIGN KEY (`pedido_id`) REFERENCES `pedidos`(`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_pd_producto` FOREIGN KEY (`producto_id`) REFERENCES `productos`(`id`),
   CONSTRAINT `fk_pd_destino` FOREIGN KEY (`destino_id`) REFERENCES `sucursales`(`id`)
@@ -243,13 +244,16 @@ CREATE TABLE IF NOT EXISTS `sazonador_productos` (
   `unidad` VARCHAR(50) NOT NULL DEFAULT 'unidad',
   `stock_minimo` DOUBLE NOT NULL DEFAULT 0,
   `stock_actual` DOUBLE NOT NULL DEFAULT 0,
+  `producto_pedido_id` INT,
   `vencimiento` DATE,
   `creado_por` VARCHAR(255) DEFAULT '',
   `activo` TINYINT NOT NULL DEFAULT 1,
   UNIQUE KEY `uq_sazonador_sucursal_codigo` (`sucursal_id`, `codigo`),
+  UNIQUE KEY `uq_sazonador_producto_pedido` (`sucursal_id`, `producto_pedido_id`),
   CONSTRAINT `fk_sazonador_prod_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`),
   CONSTRAINT `fk_sazonador_prod_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`),
-  CONSTRAINT `fk_sazonador_prod_categoria` FOREIGN KEY (`categoria_id`) REFERENCES `categorias`(`id`)
+  CONSTRAINT `fk_sazonador_prod_categoria` FOREIGN KEY (`categoria_id`) REFERENCES `categorias`(`id`),
+  CONSTRAINT `fk_sazonador_producto_pedido` FOREIGN KEY (`producto_pedido_id`) REFERENCES `productos`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `sazonador_inventarios` (

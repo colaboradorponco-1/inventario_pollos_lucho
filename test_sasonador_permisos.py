@@ -90,6 +90,10 @@ class SasonadorPermisosTests(unittest.TestCase):
         self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/productos", "POST"))
         self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/productos/15", "PUT"))
+        self.assertTrue(ruta_bloqueada_sasonador(
+            "/api/sazonador/productos/15", "DELETE"))
+        self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/inventario-diario", "POST"))
         self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/inventario-diario/15", "PUT"))
@@ -206,24 +210,41 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         self.db_path = os.path.join(self.temp.name, "inventario.db")
         conn = sqlite3.connect(self.db_path)
         conn.executescript("""
-            CREATE TABLE sucursales (id INTEGER PRIMARY KEY, nombre TEXT);
-            INSERT INTO sucursales VALUES (42, 'Sazonador Simon Lopez');
+            CREATE TABLE sucursales (
+                id INTEGER PRIMARY KEY, nombre TEXT, principal INTEGER DEFAULT 0,
+                provee INTEGER DEFAULT 0, es_as INTEGER DEFAULT 0
+            );
+            INSERT INTO sucursales VALUES (30, 'Almacén Principal', 1, 0, 0);
+            INSERT INTO sucursales VALUES (42, 'Sazonador Simon Lopez', 0, 0, 0);
             CREATE TABLE almacenes (
                 id INTEGER PRIMARY KEY, nombre TEXT, sucursal_id INTEGER
             );
-            INSERT INTO almacenes VALUES (90, 'Almacén Principal', 42);
+            INSERT INTO almacenes VALUES (90, 'Almacén Principal', 30);
             INSERT INTO almacenes VALUES (91, 'Sazonador Simon Lopez', 42);
+            CREATE TABLE usuarios (
+                id INTEGER PRIMARY KEY, sucursal_id INTEGER, receptor INTEGER DEFAULT 0,
+                rol TEXT, activo INTEGER DEFAULT 1
+            );
             CREATE TABLE categorias (id INTEGER PRIMARY KEY, nombre TEXT);
             INSERT INTO categorias VALUES (1, 'Insumos');
             CREATE TABLE productos (
-                id INTEGER PRIMARY KEY, sucursal_id INTEGER, nombre TEXT, stock_actual REAL
+                id INTEGER PRIMARY KEY, sucursal_id INTEGER, nombre TEXT,
+                stock_actual REAL, activo INTEGER DEFAULT 1,
+                para_proveer INTEGER DEFAULT 1, unidad TEXT DEFAULT 'unidad',
+                costo_promedio REAL DEFAULT 0
             );
-            INSERT INTO productos VALUES (1, 42, 'Producto del encargado', 18);
+            INSERT INTO productos
+                (id, sucursal_id, nombre, stock_actual, activo, para_proveer, unidad)
+            VALUES (1, 42, 'Producto del encargado', 18, 1, 0, 'kg');
+            INSERT INTO productos
+                (id, sucursal_id, nombre, stock_actual, activo, para_proveer, unidad)
+            VALUES (2, 30, 'Producto proveedor', 12, 1, 1, 'kg');
             CREATE TABLE sazonador_productos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal_id INTEGER NOT NULL,
                 almacen_id INTEGER,
                 codigo TEXT, nombre TEXT NOT NULL, marca TEXT, categoria_id INTEGER,
                 unidad TEXT NOT NULL, stock_minimo REAL NOT NULL, stock_actual REAL NOT NULL,
+                producto_pedido_id INTEGER,
                 vencimiento TEXT, creado_por TEXT, activo INTEGER NOT NULL DEFAULT 1,
                 UNIQUE (sucursal_id, codigo)
             );
@@ -243,6 +264,25 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
                 disponible REAL, conteo_fisico REAL, final REAL DEFAULT 0,
                 utilizada REAL DEFAULT 0, diferencia REAL DEFAULT 0,
                 observaciones TEXT, UNIQUE (inventario_id, producto_id)
+            );
+            CREATE TABLE pedidos (
+                id INTEGER PRIMARY KEY, nro_ticket TEXT, sucursal_id INTEGER,
+                destino_id INTEGER
+            );
+            CREATE TABLE pedido_detalle (
+                id INTEGER PRIMARY KEY, pedido_id INTEGER, producto_id INTEGER,
+                producto_nombre TEXT, cantidad REAL, destino_id INTEGER,
+                producto_sazonador_id INTEGER
+            );
+            CREATE TABLE repartos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, sucursal_id INTEGER,
+                origen_sucursal_id INTEGER, total REAL, usuario TEXT, nota TEXT,
+                pedido_id INTEGER
+            );
+            CREATE TABLE reparto_detalle (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, reparto_id INTEGER,
+                producto_id INTEGER, producto_nombre TEXT, cantidad REAL,
+                costo_unitario REAL, subtotal REAL
             );
         """)
         conn.commit()
@@ -277,6 +317,7 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         self.assertEqual(listado.json["data"][0]["almacen_id"], 91)
         self.assertEqual(
             listado.json["data"][0]["almacen_nombre"], "Sazonador Simon Lopez")
+        self.assertTrue(listado.json["data"][0]["es_inventario_sazonador"])
         inicio = self.client.post("/api/sazonador/inventario-diario")
         self.assertEqual(inicio.status_code, 200)
         inventario_id = inicio.json["data"]["id"]
@@ -339,6 +380,105 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         inventario_duplicado = self.client.post(
             "/api/sazonador/inventario-diario?categoria_id=1")
         self.assertEqual(inventario_duplicado.status_code, 409)
+
+    def test_sazonador_puede_editar_sus_productos_sin_cambiar_stock(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        crear = self.client.post("/api/sazonador/productos", json={
+            "nombre": "Producto original", "codigo": "SAZ-EDIT-1",
+            "unidad": "kg", "stock_minimo": 2, "stock_inicial": 7,
+        })
+        self.assertEqual(crear.status_code, 200)
+        producto_id = crear.json["data"]["id"]
+
+        respuesta = self.client.put(f"/api/sazonador/productos/{producto_id}", json={
+            "nombre": "Producto actualizado", "codigo": "SAZ-EDIT-2",
+            "marca": "Marca nueva", "categoria_id": 1, "unidad": "kg",
+            "stock_minimo": 4, "vencimiento": "2027-01-15",
+            "producto_pedido_id": 2,
+        })
+        self.assertEqual(respuesta.status_code, 200)
+
+        listado = self.client.get("/api/sazonador/productos")
+        producto = listado.json["data"][0]
+        self.assertEqual(producto["nombre"], "Producto actualizado")
+        self.assertEqual(producto["codigo"], "SAZ-EDIT-2")
+        self.assertEqual(producto["marca"], "Marca nueva")
+        self.assertEqual(producto["stock_minimo"], 4)
+        self.assertEqual(producto["producto_pedido_id"], 2)
+        self.assertEqual(producto["producto_pedido_nombre"], "Producto proveedor")
+        self.assertEqual(producto["stock"], 7)
+
+        with self.client.session_transaction() as state:
+            state["rol"] = "admin"
+        prohibido = self.client.put(f"/api/sazonador/productos/{producto_id}", json={
+            "nombre": "Cambio no autorizado",
+        })
+        self.assertEqual(prohibido.status_code, 403)
+
+    def test_entrega_pedido_suma_stock_al_producto_sazonador_vinculado(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        creado = self.client.post("/api/sazonador/productos", json={
+            "nombre": "Adobo Sazonador", "unidad": "kg",
+            "stock_inicial": 4, "producto_pedido_id": 2,
+        })
+        self.assertEqual(creado.status_code, 200)
+        producto_sazonador_id = creado.json["data"]["id"]
+
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("INSERT INTO usuarios (sucursal_id, rol, activo) VALUES (42, 'sasonador', 1)")
+        conn.execute(
+            "INSERT INTO pedidos (id, nro_ticket, sucursal_id, destino_id) "
+            "VALUES (1, 'TKT-00001', 42, 30)")
+        conn.execute("""
+            INSERT INTO pedido_detalle
+                (id, pedido_id, producto_id, producto_nombre, cantidad,
+                 destino_id, producto_sazonador_id)
+            VALUES (1, 1, 2, 'Producto proveedor', 3, 30, ?)
+        """, (producto_sazonador_id,))
+        conn.commit()
+        conn.close()
+
+        movimientos = []
+        with self.app.test_request_context("/"):
+            session.update({
+                "user_id": 7, "rol": "repartidor", "sucursal_id": 42,
+                "usuario": "repartidor_prueba",
+            })
+            with patch.object(pedidos_module, "stock_actual", return_value=12), \
+                    patch.object(pedidos_module, "registrar_movimiento",
+                                 side_effect=lambda *args: movimientos.append(args)):
+                conn = SqliteCompatConnection(self.db_path)
+                try:
+                    total, repartos = pedidos_module._despachar_stock(
+                        conn,
+                        {"id": 1, "nro_ticket": "TKT-00001", "sucursal_id": 42,
+                         "destino_id": 30},
+                        origen_propio=False)
+                    conn.commit()
+                finally:
+                    conn.close()
+
+        self.assertEqual(total, 0)
+        self.assertEqual(len(repartos), 1)
+        self.assertEqual(len(movimientos), 1)
+        self.assertEqual(movimientos[0][1:3], (2, "salida"))
+        conn = sqlite3.connect(self.db_path)
+        stock_sazonador = conn.execute(
+            "SELECT stock_actual FROM sazonador_productos WHERE id = ?",
+            (producto_sazonador_id,)).fetchone()[0]
+        stock_producto_normal = conn.execute(
+            "SELECT stock_actual FROM productos WHERE id = 2").fetchone()[0]
+        conn.close()
+        self.assertEqual(stock_sazonador, 7)
+        self.assertEqual(stock_producto_normal, 12)
 
     def test_exige_el_almacen_especifico_de_la_sucursal_sazonador(self):
         with self.client.session_transaction() as state:

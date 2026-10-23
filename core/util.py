@@ -212,6 +212,8 @@ def ruta_bloqueada_sasonador(path, method="GET"):
         return metodo not in lectura
     if path == "/api/sazonador/productos":
         return metodo not in ("GET", "HEAD", "OPTIONS", "POST")
+    if re.fullmatch(r"/api/sazonador/productos/\d+", path):
+        return metodo != "PUT"
     if path == "/api/sazonador/inventario-diario":
         return metodo not in ("GET", "HEAD", "OPTIONS", "POST")
     if re.fullmatch(r"/api/sazonador/inventario-diario/\d+", path):
