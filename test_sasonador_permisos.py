@@ -91,8 +91,10 @@ class SasonadorPermisosTests(unittest.TestCase):
             "/api/sazonador/productos", "POST"))
         self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/productos/15", "PUT"))
-        self.assertTrue(ruta_bloqueada_sasonador(
+        self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/productos/15", "DELETE"))
+        self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/sazonador/productos/exportar", "GET"))
         self.assertFalse(ruta_bloqueada_sasonador(
             "/api/sazonador/inventario-diario", "POST"))
         self.assertFalse(ruta_bloqueada_sasonador(
@@ -478,6 +480,43 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
             "nombre": "Cambio no autorizado",
         })
         self.assertEqual(prohibido.status_code, 403)
+
+    def test_crud_productos_sazonador_exporta_y_elimina_sin_perder_historial(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        creado = self.client.post("/api/sazonador/productos", json={
+            "nombre": "Producto CRUD Sazonador", "codigo": "SAZ-CRUD-1",
+            "marca": "Marca test", "categoria_id": 1,
+            "unidad": "kg", "stock_inicial": 7,
+        })
+        self.assertEqual(creado.status_code, 200)
+        producto_id = creado.json["data"]["id"]
+
+        exportado = self.client.get(
+            "/api/sazonador/productos/exportar?filtro=CRUD&categoria=1")
+        self.assertEqual(exportado.status_code, 200)
+        self.assertIn("productos_sazonador.xlsx",
+                      exportado.headers["Content-Disposition"])
+        self.assertIn(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            exportado.mimetype)
+
+        eliminado = self.client.delete(
+            f"/api/sazonador/productos/{producto_id}")
+        self.assertEqual(eliminado.status_code, 200)
+        self.assertEqual(
+            self.client.get("/api/sazonador/productos").json["data"], [])
+
+        conn = sqlite3.connect(self.db_path)
+        activo, stock = conn.execute(
+            "SELECT activo, stock_actual FROM sazonador_productos WHERE id = ?",
+            (producto_id,)).fetchone()
+        conn.close()
+        self.assertEqual(activo, 0)
+        self.assertEqual(stock, 7)
 
     def test_entrega_pedido_suma_stock_al_destino_sazonador_validado(self):
         with self.client.session_transaction() as state:

@@ -129,7 +129,71 @@ def productos_sazonador():
     return ok(filas)
 
 
-@sazonador_bp.route("/api/sazonador/productos/<int:producto_id>", methods=["PUT"])
+@sazonador_bp.route("/api/sazonador/productos/exportar")
+@login_requerido
+def exportar_productos_sazonador():
+    if not _sesion_sazonador():
+        return err("Esta operación es exclusiva del rol Sazonador con sucursal asignada", 403)
+    sid = sucursal_actual()
+    conn = get_conn()
+    almacen = _almacen_sazonador(conn, sid)
+    if not almacen:
+        conn.close()
+        return err("Crea en la sucursal Sazonador el almacén con el mismo nombre de la sucursal", 409)
+
+    filtros = ["p.sucursal_id = ?", "p.almacen_id = ?", "p.activo = 1"]
+    params = [sid, almacen["id"]]
+    filtro = request.args.get("filtro", "").strip()
+    categoria = request.args.get("categoria", "").strip()
+    estado = request.args.get("estado", "").strip()
+    if filtro:
+        filtros.append("(p.nombre LIKE ? OR p.codigo LIKE ? OR p.marca LIKE ?)")
+        params.extend([f"%{filtro}%"] * 3)
+    if categoria:
+        try:
+            filtros.append("p.categoria_id = ?")
+            params.append(int(categoria))
+        except ValueError:
+            conn.close()
+            return err("La categoría seleccionada no es válida")
+    if estado == "con-stock":
+        filtros.append("p.stock_actual > 0")
+    elif estado == "agotado":
+        filtros.append("p.stock_actual <= 0")
+    elif estado == "stock-bajo":
+        filtros.append("p.stock_minimo > 0 AND p.stock_actual <= p.stock_minimo")
+    elif estado == "por-vencer":
+        filtros.append(
+            "p.vencimiento IS NOT NULL AND "
+            "p.vencimiento <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)")
+    filas = conn.execute("""
+        SELECT p.codigo, p.nombre, p.marca, c.nombre AS categoria,
+               a.nombre AS almacen, p.unidad, p.stock_actual AS stock,
+               p.stock_minimo, p.vencimiento
+        FROM sazonador_productos p
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+        JOIN almacenes a ON a.id = p.almacen_id
+        WHERE """ + " AND ".join(filtros) + " ORDER BY p.nombre", params).fetchall()
+    conn.close()
+
+    return responder_excel(
+        "productos_sazonador.xlsx",
+        ["Código", "Producto", "Marca", "Categoría", "Almacén", "Unidad",
+         "Stock", "Stock mínimo", "Vencimiento"],
+        [
+            (fila["codigo"] or "", fila["nombre"], fila["marca"] or "",
+             fila["categoria"] or "", fila["almacen"] or "", fila["unidad"],
+             fila["stock"] or 0, fila["stock_minimo"] or 0,
+             fila["vencimiento"] or "")
+            for fila in filas
+        ],
+        [18, 32, 18, 20, 24, 12, 12, 16, 16],
+        titulo="PRODUCTOS - INVENTARIO DEL SAZONADOR",
+    )
+
+
+@sazonador_bp.route("/api/sazonador/productos/<int:producto_id>",
+                    methods=["PUT", "DELETE"])
 @login_requerido
 def editar_producto_sazonador(producto_id):
     if not _sesion_sazonador():
@@ -147,6 +211,14 @@ def editar_producto_sazonador(producto_id):
     if not producto:
         conn.close()
         return err("Producto Sazonador no encontrado", 404)
+    if request.method == "DELETE":
+        conn.execute("""
+            UPDATE sazonador_productos SET activo = 0
+            WHERE id = ? AND sucursal_id = ? AND almacen_id = ? AND activo = 1
+        """, (producto_id, sid, almacen["id"]))
+        conn.commit()
+        conn.close()
+        return ok({"id": producto_id}, message="Producto del Sazonador eliminado")
 
     data = request.get_json() or {}
     nombre = (data.get("nombre") or "").strip()
