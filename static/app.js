@@ -1139,9 +1139,11 @@ async function loadProductos() {
                     <td style="color:${stockColor};font-weight:700">${stockIcon} ${fmtNum(stockN)} ${p.unidad}${provVista ? ' <small style="color:var(--muted)">disp.</small>' : ''}</td>
                     <td>${p.stock_minimo} ${p.unidad}</td>
                     <td>${p.unidad}</td>
-                    ${soloLecturaSasonador ? '' : `<td>${esProductoSazonador ? '—' : `Bs ${fmtNum(p.costo_promedio)}`}</td>
-                    <td>${esProductoSazonador ? '—' : `Bs ${fmtNum(p.precio_venta)}`}</td>
-                    <td>${esProductoSazonador ? '—' : (p.proveedor_nombre || '—')}</td>`}
+                    <td>${esProductoSazonador && p.costo_promedio == null
+        ? '—' : `Bs ${fmtNum(p.costo_promedio)}`}</td>
+                    <td>${esProductoSazonador && p.precio_venta == null
+        ? '—' : `Bs ${fmtNum(p.precio_venta)}`}</td>
+                    <td>${p.proveedor_nombre || '—'}</td>
                     <td>${p.vencimiento ? fmtDate(p.vencimiento) : '—'}</td>
                     <td>${acciones}
                     </td>
@@ -1164,7 +1166,7 @@ async function loadProductos() {
                                         <tr>
                                             <th>Producto</th><th>Almacén</th><th>Stock</th>
                                             <th>Mínimo</th><th>Unidad</th>
-                                            ${soloLecturaSasonador ? '' : '<th>Costo (Bs)</th><th>Precio (Bs)</th><th>Proveedor</th>'}
+                                            <th>Costo (Bs)</th><th>Precio (Bs)</th><th>Proveedor</th>
                                             <th>Vence</th><th></th>
                                         </tr>
                                     </thead>
@@ -1809,14 +1811,15 @@ async function openProductoModal(id, lista) {
     $('#campo-stock-inicial').style.display = 'flex';
     $('#campo-stock-actual').style.display = 'none';
     $('#prod-stock-hint').style.display = 'none';
+    $('#prod-stock-hint').textContent =
+        'Al guardar se registra un "Ajuste de inventario" por la diferencia.';
     const esGestionDlg = esCentral();
     const esAdminDlg = esAdmin();
     const esSazonador = window.ROL === 'sasonador';
     editaProductoSazonador = false;
     const lblSuc = $('#prod-sucursal-label');
     if (lblSuc) lblSuc.style.display = esGestionDlg ? 'block' : 'none';
-    ['prod-almacen', 'prod-costo', 'prod-precio-venta',
-        'prod-proveedor', 'prod-para-proveer-wrap', 'prod-para-proveer-hint',
+    ['prod-almacen', 'prod-para-proveer-wrap', 'prod-para-proveer-hint',
         'prod-sucursal-label'].forEach((idCampo) => {
         const campo = document.getElementById(idCampo);
         const etiqueta = campo && (campo.closest('label') || campo.closest('.grid-2'));
@@ -1886,8 +1889,12 @@ if (selSuc.options.length < 2 && (catalogos.sucursales || []).length) {
         }
         actualizarControlProductoPedido($('#prod-sucursal').value, !!p.para_proveer);
         $('#campo-stock-inicial').style.display = 'none';
-        $('#campo-stock-actual').style.display = editaProductoSazonador ? 'none' : 'flex';
-        $('#prod-stock-hint').style.display = editaProductoSazonador ? 'none' : 'block';
+        $('#campo-stock-actual').style.display = 'flex';
+        $('#prod-stock-hint').style.display = 'block';
+        if (editaProductoSazonador) {
+            $('#prod-stock-hint').textContent =
+                'Al guardar, el stock se actualiza en el inventario independiente del Sazonador.';
+        }
         $('#prod-stock-actual').value = p.stock;
     }
     openModal('modal-producto');
@@ -1920,7 +1927,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
     if (puedeRevisarEquivalencias()) {
         body.sucursal_id = +$('#prod-sucursal').value || null;
     }
-    if (id && !editaProductoSazonador) body.stock = +$('#prod-stock-actual').value || 0;
+    if (id) body.stock = +$('#prod-stock-actual').value || 0;
     try {
         let resp = null;
         if (id && editaProductoSazonador) {
@@ -1933,6 +1940,10 @@ $('#form-producto').addEventListener('submit', async (e) => {
                     categoria_id: body.categoria_id,
                     unidad: body.unidad,
                     stock_minimo: body.stock_minimo,
+                    stock: body.stock,
+                    costo_promedio: body.costo_promedio,
+                    precio_venta: body.precio_venta,
+                    proveedor_id: body.proveedor_id,
                     vencimiento: body.vencimiento,
                 }),
             }), '#form-producto button[type="submit"]');

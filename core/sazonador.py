@@ -59,7 +59,10 @@ def productos_sazonador():
         try:
             stock_minimo = _numero(data.get("stock_minimo"), "El stock mínimo", 0)
             stock_inicial = _numero(data.get("stock_inicial"), "El stock inicial", 0)
+            costo_promedio = _numero(data.get("costo_promedio"), "El costo promedio", 0)
+            precio_venta = _numero(data.get("precio_venta"), "El precio de venta", 0)
             categoria_id = int(data["categoria_id"]) if data.get("categoria_id") else None
+            proveedor_id = int(data["proveedor_id"]) if data.get("proveedor_id") else None
         except (TypeError, ValueError) as exc:
             conn.close()
             return err(str(exc))
@@ -67,6 +70,10 @@ def productos_sazonador():
                 "SELECT 1 FROM categorias WHERE id = ?", (categoria_id,)).fetchone():
             conn.close()
             return err("La categoría seleccionada no existe")
+        if proveedor_id and not conn.execute(
+                "SELECT 1 FROM proveedores WHERE id = ?", (proveedor_id,)).fetchone():
+            conn.close()
+            return err("El proveedor seleccionado no existe")
         if codigo and conn.execute(
                 "SELECT 1 FROM sazonador_productos WHERE sucursal_id = ? AND codigo = ?",
                 (sid, codigo)).fetchone():
@@ -75,10 +82,12 @@ def productos_sazonador():
         cursor = conn.execute("""
             INSERT INTO sazonador_productos
                 (sucursal_id, almacen_id, codigo, nombre, marca, categoria_id, unidad,
-                 stock_minimo, stock_actual, vencimiento, creado_por)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 stock_minimo, stock_actual, costo_promedio, precio_venta, proveedor_id,
+                 vencimiento, creado_por)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (sid, almacen["id"], codigo, nombre, (data.get("marca") or "").strip() or None,
-              categoria_id, unidad, stock_minimo, stock_inicial,
+              categoria_id, unidad, stock_minimo, stock_inicial, costo_promedio,
+              precio_venta, proveedor_id,
               data.get("vencimiento") or None,
               session.get("usuario", "")))
         product_id = cursor.lastrowid
@@ -97,11 +106,13 @@ def productos_sazonador():
     consulta = """
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad,
                p.stock_minimo, p.stock_actual AS stock, p.sucursal_id, p.almacen_id,
+               p.costo_promedio, p.precio_venta, p.proveedor_id,
                p.vencimiento, c.nombre AS categoria_nombre,
                s.nombre AS sucursal_nombre, a.nombre AS almacen_nombre,
-               NULL AS proveedor_id, NULL AS proveedor_nombre
+               pr.nombre AS proveedor_nombre
         FROM sazonador_productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
+        LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
         JOIN almacenes a ON a.id = p.almacen_id
         JOIN sucursales s ON s.id = p.sucursal_id
         WHERE p.sucursal_id = ? AND p.almacen_id = ? AND p.activo = 1
@@ -169,9 +180,11 @@ def exportar_productos_sazonador():
     filas = conn.execute("""
         SELECT p.codigo, p.nombre, p.marca, c.nombre AS categoria,
                a.nombre AS almacen, p.unidad, p.stock_actual AS stock,
-               p.stock_minimo, p.vencimiento
+               p.stock_minimo, p.costo_promedio, p.precio_venta,
+               pr.nombre AS proveedor, p.vencimiento
         FROM sazonador_productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
+        LEFT JOIN proveedores pr ON pr.id = p.proveedor_id
         JOIN almacenes a ON a.id = p.almacen_id
         WHERE """ + " AND ".join(filtros) + " ORDER BY p.nombre", params).fetchall()
     conn.close()
@@ -179,15 +192,17 @@ def exportar_productos_sazonador():
     return responder_excel(
         "productos_sazonador.xlsx",
         ["Código", "Producto", "Marca", "Categoría", "Almacén", "Unidad",
-         "Stock", "Stock mínimo", "Vencimiento"],
+         "Stock", "Stock mínimo", "Costo (Bs)", "Precio venta (Bs)",
+         "Proveedor", "Vencimiento"],
         [
             (fila["codigo"] or "", fila["nombre"], fila["marca"] or "",
              fila["categoria"] or "", fila["almacen"] or "", fila["unidad"],
              fila["stock"] or 0, fila["stock_minimo"] or 0,
-             fila["vencimiento"] or "")
+             fila["costo_promedio"] or 0, fila["precio_venta"] or 0,
+             fila["proveedor"] or "", fila["vencimiento"] or "")
             for fila in filas
         ],
-        [18, 32, 18, 20, 24, 12, 12, 16, 16],
+        [18, 32, 18, 20, 24, 12, 12, 16, 16, 16, 24, 16],
         titulo="PRODUCTOS - INVENTARIO DEL SAZONADOR",
     )
 
@@ -205,7 +220,8 @@ def editar_producto_sazonador(producto_id):
         conn.close()
         return err("Crea en la sucursal Sazonador el almacén con el mismo nombre de la sucursal", 409)
     producto = conn.execute("""
-        SELECT id FROM sazonador_productos
+        SELECT id, stock_actual, costo_promedio, precio_venta, proveedor_id
+        FROM sazonador_productos
         WHERE id = ? AND sucursal_id = ? AND almacen_id = ? AND activo = 1
     """, (producto_id, sid, almacen["id"])).fetchone()
     if not producto:
@@ -226,7 +242,17 @@ def editar_producto_sazonador(producto_id):
     unidad = (data.get("unidad") or "unidad").strip() or "unidad"
     try:
         stock_minimo = _numero(data.get("stock_minimo"), "El stock mínimo", 0)
+        stock_actual = _numero(
+            data.get("stock"), "El stock actual", producto["stock_actual"] or 0)
+        costo_promedio = _numero(
+            data.get("costo_promedio"), "El costo promedio",
+            producto["costo_promedio"] or 0)
+        precio_venta = _numero(
+            data.get("precio_venta"), "El precio de venta",
+            producto["precio_venta"] or 0)
         categoria_id = int(data["categoria_id"]) if data.get("categoria_id") else None
+        proveedor_id = (int(data["proveedor_id"]) if data.get("proveedor_id")
+                        else None if "proveedor_id" in data else producto["proveedor_id"])
     except (TypeError, ValueError) as exc:
         conn.close()
         return err(str(exc))
@@ -246,6 +272,10 @@ def editar_producto_sazonador(producto_id):
             "SELECT 1 FROM categorias WHERE id = ?", (categoria_id,)).fetchone():
         conn.close()
         return err("La categoría seleccionada no existe")
+    if proveedor_id and not conn.execute(
+            "SELECT 1 FROM proveedores WHERE id = ?", (proveedor_id,)).fetchone():
+        conn.close()
+        return err("El proveedor seleccionado no existe")
     vencimiento = data.get("vencimiento") or None
     if vencimiento:
         try:
@@ -257,11 +287,26 @@ def editar_producto_sazonador(producto_id):
     conn.execute("""
         UPDATE sazonador_productos
         SET codigo = ?, nombre = ?, marca = ?, categoria_id = ?, unidad = ?,
-            stock_minimo = ?, vencimiento = ?
+            stock_minimo = ?, stock_actual = ?, costo_promedio = ?,
+            precio_venta = ?, proveedor_id = ?, vencimiento = ?
         WHERE id = ? AND sucursal_id = ? AND almacen_id = ? AND activo = 1
     """, (codigo, nombre, (data.get("marca") or "").strip() or None,
-          categoria_id, unidad, stock_minimo, vencimiento,
+          categoria_id, unidad, stock_minimo, stock_actual, costo_promedio,
+          precio_venta, proveedor_id, vencimiento,
           producto_id, sid, almacen["id"]))
+    if float(producto["stock_actual"] or 0) != stock_actual:
+        conn.execute("""
+            UPDATE sazonador_inventario_detalle
+            SET stock_sistema = ?, inicial = ?, disponible = ?,
+                diferencia = CASE WHEN conteo_fisico IS NULL THEN 0
+                                  ELSE conteo_fisico - ? END,
+                utilizada = CASE WHEN conteo_fisico IS NULL THEN 0
+                                 ELSE GREATEST(? - conteo_fisico, 0) END
+            WHERE producto_id = ? AND inventario_id IN (
+                SELECT id FROM sazonador_inventarios
+                WHERE sucursal_id = ? AND estado = 'abierto')
+        """, (stock_actual, stock_actual, stock_actual, stock_actual,
+              stock_actual, producto_id, sid))
     conn.commit()
     conn.close()
     return ok({"id": producto_id}, message="Producto Sazonador actualizado")

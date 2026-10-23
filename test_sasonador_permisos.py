@@ -233,6 +233,8 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
             );
             CREATE TABLE categorias (id INTEGER PRIMARY KEY, nombre TEXT);
             INSERT INTO categorias VALUES (1, 'Insumos');
+            CREATE TABLE proveedores (id INTEGER PRIMARY KEY, nombre TEXT);
+            INSERT INTO proveedores VALUES (4, 'Proveedor de prueba');
             CREATE TABLE productos (
                 id INTEGER PRIMARY KEY, sucursal_id INTEGER, nombre TEXT,
                 stock_actual REAL, activo INTEGER DEFAULT 1,
@@ -250,6 +252,8 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
                 almacen_id INTEGER,
                 codigo TEXT, nombre TEXT NOT NULL, marca TEXT, categoria_id INTEGER,
                 unidad TEXT NOT NULL, stock_minimo REAL NOT NULL, stock_actual REAL NOT NULL,
+                costo_promedio REAL NOT NULL DEFAULT 0,
+                precio_venta REAL NOT NULL DEFAULT 0, proveedor_id INTEGER,
                 producto_pedido_id INTEGER,
                 vencimiento TEXT, creado_por TEXT, activo INTEGER NOT NULL DEFAULT 1,
                 UNIQUE (sucursal_id, codigo)
@@ -445,7 +449,7 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         self.assertEqual(fila_detalle, 0)
         self.assertEqual(stock, 7)
 
-    def test_sazonador_puede_editar_sus_productos_sin_cambiar_stock(self):
+    def test_sazonador_puede_editar_su_producto_y_stock(self):
         with self.client.session_transaction() as state:
             state.update({
                 "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
@@ -454,14 +458,20 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         crear = self.client.post("/api/sazonador/productos", json={
             "nombre": "Producto original", "codigo": "SAZ-EDIT-1",
             "unidad": "kg", "stock_minimo": 2, "stock_inicial": 7,
+            "costo_promedio": 12.5, "precio_venta": 18,
+            "proveedor_id": 4,
         })
         self.assertEqual(crear.status_code, 200)
         producto_id = crear.json["data"]["id"]
+        inventario = self.client.post("/api/sazonador/inventario-diario")
+        self.assertEqual(inventario.status_code, 200)
 
         respuesta = self.client.put(f"/api/sazonador/productos/{producto_id}", json={
             "nombre": "Producto actualizado", "codigo": "SAZ-EDIT-2",
             "marca": "Marca nueva", "categoria_id": 1, "unidad": "kg",
-            "stock_minimo": 4, "vencimiento": "2027-01-15",
+            "stock_minimo": 4, "stock": 11,
+            "costo_promedio": 13.25, "precio_venta": 20,
+            "proveedor_id": 4, "vencimiento": "2027-01-15",
         })
         self.assertEqual(respuesta.status_code, 200)
 
@@ -471,8 +481,17 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         self.assertEqual(producto["codigo"], "SAZ-EDIT-2")
         self.assertEqual(producto["marca"], "Marca nueva")
         self.assertEqual(producto["stock_minimo"], 4)
+        self.assertEqual(producto["stock"], 11)
+        self.assertEqual(producto["costo_promedio"], 13.25)
+        self.assertEqual(producto["precio_venta"], 20)
+        self.assertEqual(producto["proveedor_id"], 4)
+        self.assertEqual(producto["proveedor_nombre"], "Proveedor de prueba")
         self.assertNotIn("producto_pedido_id", producto)
-        self.assertEqual(producto["stock"], 7)
+        self.assertEqual(producto["stock"], 11)
+        detalle_inventario = self.client.get(
+            f"/api/sazonador/inventario-diario/{inventario.json['data']['id']}")
+        self.assertEqual(
+            detalle_inventario.json["data"]["lineas"][0]["inicial"], 11)
 
         with self.client.session_transaction() as state:
             state["rol"] = "admin"

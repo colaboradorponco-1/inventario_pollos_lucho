@@ -347,6 +347,9 @@ def init_db():
                     "unidad VARCHAR(50) NOT NULL DEFAULT 'unidad',"
                     "stock_minimo DOUBLE NOT NULL DEFAULT 0,"
                     "stock_actual DOUBLE NOT NULL DEFAULT 0,"
+                    "costo_promedio DOUBLE NOT NULL DEFAULT 0,"
+                    "precio_venta DOUBLE NOT NULL DEFAULT 0,"
+                    "proveedor_id INT NULL,"
                     "producto_pedido_id INT,"
                     "vencimiento DATE,"
                     "creado_por VARCHAR(255) DEFAULT '',"
@@ -901,6 +904,16 @@ def migrar_esquema():
             _add_columna(cur, "pedido_detalle", "preparado TINYINT NOT NULL DEFAULT 0")
         if not _col_existe(cur, "sazonador_productos", "producto_pedido_id"):
             _add_columna(cur, "sazonador_productos", "producto_pedido_id INT")
+        if not _col_existe(cur, "sazonador_productos", "costo_promedio"):
+            _add_columna(
+                cur, "sazonador_productos",
+                "costo_promedio DOUBLE NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "sazonador_productos", "precio_venta"):
+            _add_columna(
+                cur, "sazonador_productos",
+                "precio_venta DOUBLE NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "sazonador_productos", "proveedor_id"):
+            _add_columna(cur, "sazonador_productos", "proveedor_id INT NULL")
         if not _indice_existe(cur, "sazonador_productos",
                               "uq_sazonador_producto_pedido"):
             cur.execute(
