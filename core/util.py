@@ -208,6 +208,10 @@ def ruta_bloqueada_sasonador(path, method="GET"):
     if path in ("/api/sesion", "/api/catalogos",
                 "/api/perfil/avatar/imagen"):
         return metodo not in lectura
+    if path == "/api/perfil":
+        return metodo != "PUT"
+    if path == "/api/perfil/avatar":
+        return metodo != "PUT"
     if path == "/api/productos":
         return metodo not in lectura
     if path == "/api/sazonador/productos":
