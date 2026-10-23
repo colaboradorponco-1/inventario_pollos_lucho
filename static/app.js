@@ -3959,7 +3959,9 @@ async function listarInventario() {
             <tr>
                 <td>${esc(fmtFechaES(f.fecha))}</td>
                 <td><strong>${esc(f.categoria_nombre || 'Todas las categorías')}</strong></td>
-                <td>${esc(f.sucursal_nombre || '')}</td>
+                <td>${esc(window.ROL === 'sasonador'
+                    ? (f.almacen_nombre || f.sucursal_nombre || '')
+                    : (f.sucursal_nombre || ''))}</td>
                 <td>${esc(f.hora_corte || '')}</td>
                 <td><span class="badge ${f.estado === 'cerrado' ? 'badge-compra' : 'badge-entrada'}">${f.estado === 'cerrado' ? 'Cerrada' : 'Abierta'}</span></td>
                 <td>${f.total_items || 0}${(f.estado !== 'cerrado' && (f.contados || 0) > 0) ? ` <small style="color:var(--muted)">${f.contados} contados</small>` : ''}</td>
@@ -6120,8 +6122,11 @@ async function init() {
             const encabezadoInventario = $('#view-inventario .panel-head p');
             if (encabezadoInventario) {
                 encabezadoInventario.textContent =
-                    'El conteo y las existencias pertenecen al inventario del Sazonador, separado del inventario del encargado de la sucursal.';
+                    'El conteo y las existencias pertenecen al almacén propio del Sazonador, separado del inventario del encargado de la sucursal.';
             }
+            const columnaAlmacen = $('#inv-lista-tbody')
+                ?.closest('table')?.querySelector('thead th:nth-child(3)');
+            if (columnaAlmacen) columnaAlmacen.textContent = 'Almacén';
             document.querySelectorAll('#view-inventario .inv-finance').forEach((elemento) => {
                 elemento.style.display = 'none';
             });

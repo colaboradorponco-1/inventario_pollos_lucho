@@ -339,6 +339,7 @@ def init_db():
         cur.execute("CREATE TABLE IF NOT EXISTS sazonador_productos ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "sucursal_id INT NOT NULL,"
+                    "almacen_id INT,"
                     "codigo VARCHAR(255),"
                     "nombre VARCHAR(255) NOT NULL,"
                     "marca VARCHAR(100),"
@@ -351,10 +352,12 @@ def init_db():
                     "activo TINYINT NOT NULL DEFAULT 1,"
                     "UNIQUE KEY uq_sazonador_sucursal_codigo (sucursal_id, codigo),"
                     "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
+                    "FOREIGN KEY (almacen_id) REFERENCES almacenes(id),"
                     "FOREIGN KEY (categoria_id) REFERENCES categorias(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS sazonador_inventarios ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "sucursal_id INT NOT NULL,"
+                    "almacen_id INT,"
                     "categoria_id INT NOT NULL DEFAULT 0,"
                     "fecha DATE NOT NULL,"
                     "hora_corte VARCHAR(20),"
@@ -367,7 +370,8 @@ def init_db():
                     "total_faltantes INT DEFAULT 0,"
                     "total_sobrantes INT DEFAULT 0,"
                     "UNIQUE KEY uq_sazonador_inv_suc_cat_fecha (sucursal_id, categoria_id, fecha),"
-                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id))")
+                    "FOREIGN KEY (sucursal_id) REFERENCES sucursales(id),"
+                    "FOREIGN KEY (almacen_id) REFERENCES almacenes(id))")
         cur.execute("CREATE TABLE IF NOT EXISTS sazonador_inventario_detalle ("
                     "id INT AUTO_INCREMENT PRIMARY KEY,"
                     "inventario_id INT NOT NULL,"
@@ -703,6 +707,26 @@ def migrar_esquema():
         # 1) Columnas faltantes
         if not _col_existe(cur, "usuarios", "sucursal_id"):
             _add_columna(cur, "usuarios", "sucursal_id INT")
+        if not _col_existe(cur, "sazonador_productos", "almacen_id"):
+            _add_columna(cur, "sazonador_productos", "almacen_id INT NULL")
+        if not _col_existe(cur, "sazonador_inventarios", "almacen_id"):
+            _add_columna(cur, "sazonador_inventarios", "almacen_id INT NULL")
+        cur.execute("""
+            UPDATE sazonador_productos p
+            JOIN sucursales s ON s.id = p.sucursal_id
+            JOIN almacenes a ON a.sucursal_id = s.id
+                            AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+            SET p.almacen_id = a.id
+            WHERE p.almacen_id IS NULL
+        """)
+        cur.execute("""
+            UPDATE sazonador_inventarios i
+            JOIN sucursales s ON s.id = i.sucursal_id
+            JOIN almacenes a ON a.sucursal_id = s.id
+                            AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+            SET i.almacen_id = a.id
+            WHERE i.almacen_id IS NULL
+        """)
         # Usuarios RECEPTURA (p. ej. "AS America" / "AS Simon Lopez"): son el
         # ALMACEN de una sucursal proveedora. Su panel es la BANDEJA de pedidos
         # que le hacen a esa sucursal y solo sus propios datos; no crean "Mis

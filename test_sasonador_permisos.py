@@ -203,7 +203,12 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         conn = sqlite3.connect(self.db_path)
         conn.executescript("""
             CREATE TABLE sucursales (id INTEGER PRIMARY KEY, nombre TEXT);
-            INSERT INTO sucursales VALUES (42, 'Sucursal de prueba');
+            INSERT INTO sucursales VALUES (42, 'Sazonador Simon Lopez');
+            CREATE TABLE almacenes (
+                id INTEGER PRIMARY KEY, nombre TEXT, sucursal_id INTEGER
+            );
+            INSERT INTO almacenes VALUES (90, 'Almacén Principal', 42);
+            INSERT INTO almacenes VALUES (91, 'Sazonador Simon Lopez', 42);
             CREATE TABLE categorias (id INTEGER PRIMARY KEY, nombre TEXT);
             INSERT INTO categorias VALUES (1, 'Insumos');
             CREATE TABLE productos (
@@ -212,6 +217,7 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
             INSERT INTO productos VALUES (1, 42, 'Producto del encargado', 18);
             CREATE TABLE sazonador_productos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal_id INTEGER NOT NULL,
+                almacen_id INTEGER,
                 codigo TEXT, nombre TEXT NOT NULL, marca TEXT, categoria_id INTEGER,
                 unidad TEXT NOT NULL, stock_minimo REAL NOT NULL, stock_actual REAL NOT NULL,
                 vencimiento TEXT, creado_por TEXT, activo INTEGER NOT NULL DEFAULT 1,
@@ -219,6 +225,7 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
             );
             CREATE TABLE sazonador_inventarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, sucursal_id INTEGER NOT NULL,
+                almacen_id INTEGER,
                 categoria_id INTEGER NOT NULL DEFAULT 0, fecha TEXT NOT NULL,
                 hora_corte TEXT, usuario TEXT, cerrado_por TEXT, estado TEXT NOT NULL,
                 fecha_hora_cierre TEXT, observaciones TEXT, total_items INTEGER DEFAULT 0,
@@ -263,15 +270,26 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         listado = self.client.get("/api/sazonador/productos")
         self.assertEqual([p["nombre"] for p in listado.json["data"]],
                          ["Adobo del Sazonador"])
+        self.assertEqual(listado.json["data"][0]["almacen_id"], 91)
+        self.assertEqual(
+            listado.json["data"][0]["almacen_nombre"], "Sazonador Simon Lopez")
         inicio = self.client.post("/api/sazonador/inventario-diario")
         self.assertEqual(inicio.status_code, 200)
         inventario_id = inicio.json["data"]["id"]
+        conn = sqlite3.connect(self.db_path)
+        registro_inventario = conn.execute(
+            "SELECT almacen_id FROM sazonador_inventarios WHERE id = ?",
+            (inventario_id,)).fetchone()
+        conn.close()
+        self.assertEqual(registro_inventario[0], 91)
         self.assertEqual(len(self.client.get(
             "/api/sazonador/inventario-diario").json["data"]), 1)
         self.assertEqual(self.client.get(
             "/api/sazonador/inventario-diario?desde=9999-01-01").json["data"], [])
         detalle = self.client.get(
             f"/api/sazonador/inventario-diario/{inventario_id}")
+        self.assertEqual(
+            detalle.json["data"]["almacen_nombre"], "Sazonador Simon Lopez")
         linea = detalle.json["data"]["lineas"][0]
         self.assertEqual(linea["inicial"], 5)
         guardado = self.client.put(
@@ -317,6 +335,22 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         inventario_duplicado = self.client.post(
             "/api/sazonador/inventario-diario?categoria_id=1")
         self.assertEqual(inventario_duplicado.status_code, 409)
+
+    def test_exige_el_almacen_especifico_de_la_sucursal_sazonador(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "DELETE FROM almacenes WHERE id = 91")
+        conn.commit()
+        conn.close()
+        response = self.client.post("/api/sazonador/productos", json={
+            "nombre": "No debe guardarse", "stock_inicial": 1,
+        })
+        self.assertEqual(response.status_code, 409)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,18 @@ def _sesion_sazonador():
     return session.get("rol") == "sasonador" and sucursal_actual() is not None
 
 
+def _almacen_sazonador(conn, sid):
+    return conn.execute("""
+        SELECT a.id, a.nombre
+        FROM almacenes a
+        JOIN sucursales s ON s.id = a.sucursal_id
+        WHERE a.sucursal_id = ?
+          AND LOWER(TRIM(a.nombre)) = LOWER(TRIM(s.nombre))
+        ORDER BY a.id
+        LIMIT 1
+    """, (sid,)).fetchone()
+
+
 def _numero(valor, nombre, defecto=None):
     if valor in (None, ""):
         return defecto
@@ -32,6 +44,10 @@ def productos_sazonador():
         return err("Esta operación es exclusiva del rol Sazonador con sucursal asignada", 403)
     sid = sucursal_actual()
     conn = get_conn()
+    almacen = _almacen_sazonador(conn, sid)
+    if not almacen:
+        conn.close()
+        return err("Crea en la sucursal Sazonador el almacén con el mismo nombre de la sucursal", 409)
     if request.method == "POST":
         data = request.get_json() or {}
         nombre = (data.get("nombre") or "").strip()
@@ -58,10 +74,10 @@ def productos_sazonador():
             return err("Ya tienes un producto con ese código en tu inventario", 409)
         cursor = conn.execute("""
             INSERT INTO sazonador_productos
-                (sucursal_id, codigo, nombre, marca, categoria_id, unidad,
+                (sucursal_id, almacen_id, codigo, nombre, marca, categoria_id, unidad,
                  stock_minimo, stock_actual, vencimiento, creado_por)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (sid, codigo, nombre, (data.get("marca") or "").strip() or None,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (sid, almacen["id"], codigo, nombre, (data.get("marca") or "").strip() or None,
               categoria_id, unidad, stock_minimo, stock_inicial,
               data.get("vencimiento") or None, session.get("usuario", "")))
         product_id = cursor.lastrowid
@@ -79,16 +95,17 @@ def productos_sazonador():
     estado = request.args.get("estado", "").strip()
     consulta = """
         SELECT p.id, p.codigo, p.nombre, p.marca, p.categoria_id, p.unidad,
-               p.stock_minimo, p.stock_actual AS stock, p.sucursal_id,
+               p.stock_minimo, p.stock_actual AS stock, p.sucursal_id, p.almacen_id,
                p.vencimiento, c.nombre AS categoria_nombre,
-               s.nombre AS sucursal_nombre, '' AS almacen_nombre,
+               s.nombre AS sucursal_nombre, a.nombre AS almacen_nombre,
                NULL AS proveedor_id, NULL AS proveedor_nombre
         FROM sazonador_productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
+        JOIN almacenes a ON a.id = p.almacen_id
         JOIN sucursales s ON s.id = p.sucursal_id
-        WHERE p.sucursal_id = ? AND p.activo = 1
+        WHERE p.sucursal_id = ? AND p.almacen_id = ? AND p.activo = 1
     """
-    params = [sid]
+    params = [sid, almacen["id"]]
     if filtro:
         consulta += " AND (p.nombre LIKE ? OR p.codigo LIKE ?)"
         params.extend([f"%{filtro}%", f"%{filtro}%"])
@@ -134,6 +151,10 @@ def inventario_sazonador():
     sid = sucursal_actual()
     conn = get_conn()
     if request.method == "GET":
+        almacen = _almacen_sazonador(conn, sid)
+        if not almacen:
+            conn.close()
+            return err("Crea en la sucursal Sazonador el almacén con el mismo nombre de la sucursal", 409)
         filtros = ["i.sucursal_id = ?"]
         params = [sid]
         desde = request.args.get("desde", "").strip()
@@ -163,16 +184,18 @@ def inventario_sazonador():
         filas = conn.execute("""
             SELECT i.*, c.nombre AS categoria_nombre,
                    s.nombre AS sucursal_nombre,
+                   a.nombre AS almacen_nombre,
                    (SELECT COUNT(*) FROM sazonador_inventario_detalle d
                     WHERE d.inventario_id = i.id) AS total_items,
                    (SELECT COUNT(*) FROM sazonador_inventario_detalle d
                     WHERE d.inventario_id = i.id AND d.conteo_fisico IS NULL) AS sin_contar
             FROM sazonador_inventarios i
             LEFT JOIN categorias c ON c.id = i.categoria_id
+            JOIN almacenes a ON a.id = i.almacen_id
             JOIN sucursales s ON s.id = i.sucursal_id
-            WHERE """ + " AND ".join(filtros) + """
+            WHERE i.almacen_id = ? AND """ + " AND ".join(filtros) + """
             ORDER BY (i.estado = 'abierto') DESC, i.fecha DESC, c.nombre
-        """, params).fetchall()
+        """, [almacen["id"]] + params).fetchall()
         resultado = []
         for row in filas:
             item = dict(row)
@@ -187,6 +210,10 @@ def inventario_sazonador():
         conn.close()
         return ok(resultado)
 
+    almacen = _almacen_sazonador(conn, sid)
+    if not almacen:
+        conn.close()
+        return err("Crea en la sucursal Sazonador el almacén con el mismo nombre de la sucursal", 409)
     fecha = request.args.get("fecha") or date.today().isoformat()
     try:
         fecha = datetime.strptime(fecha[:10], "%Y-%m-%d").date().isoformat()
@@ -200,8 +227,8 @@ def inventario_sazonador():
     hora = request.args.get("hora") or datetime.now().strftime("%H:%M")
     existente = conn.execute("""
         SELECT id, estado FROM sazonador_inventarios
-        WHERE sucursal_id = ? AND categoria_id = ? AND fecha = ?
-    """, (sid, categoria_id, fecha)).fetchone()
+        WHERE sucursal_id = ? AND almacen_id = ? AND categoria_id = ? AND fecha = ?
+    """, (sid, almacen["id"], categoria_id, fecha)).fetchone()
     if existente:
         conn.close()
         if existente["estado"] == "cerrado":
@@ -209,10 +236,10 @@ def inventario_sazonador():
         return ok({"id": existente["id"]}, message="Ya existe un inventario abierto")
     solapada = conn.execute("""
         SELECT id FROM sazonador_inventarios
-        WHERE sucursal_id = ? AND fecha = ?
+        WHERE sucursal_id = ? AND almacen_id = ? AND fecha = ?
           AND (categoria_id = 0 OR ? = 0)
         LIMIT 1
-    """, (sid, fecha, categoria_id)).fetchone()
+    """, (sid, almacen["id"], fecha, categoria_id)).fetchone()
     if solapada:
         conn.close()
         return err("Ya existe una planilla de esa fecha que se superpone con esos productos", 409)
@@ -226,18 +253,18 @@ def inventario_sazonador():
         categoria_nombre = cat["nombre"]
     cursor = conn.execute("""
         INSERT INTO sazonador_inventarios
-            (sucursal_id, categoria_id, fecha, hora_corte, usuario, estado)
-        VALUES (?, ?, ?, ?, ?, 'abierto')
-    """, (sid, categoria_id, fecha, hora, session.get("usuario", "")))
+            (sucursal_id, almacen_id, categoria_id, fecha, hora_corte, usuario, estado)
+        VALUES (?, ?, ?, ?, ?, ?, 'abierto')
+    """, (sid, almacen["id"], categoria_id, fecha, hora, session.get("usuario", "")))
     inv_id = cursor.lastrowid
     productos = conn.execute("""
         SELECT p.*, c.nombre AS categoria_nombre
         FROM sazonador_productos p
         LEFT JOIN categorias c ON c.id = p.categoria_id
-        WHERE p.sucursal_id = ? AND p.activo = 1
+        WHERE p.sucursal_id = ? AND p.almacen_id = ? AND p.activo = 1
           AND (? = 0 OR p.categoria_id = ?)
         ORDER BY c.nombre, p.nombre
-    """, (sid, categoria_id, categoria_id)).fetchall()
+    """, (sid, almacen["id"], categoria_id, categoria_id)).fetchall()
     for producto in productos:
         stock = float(producto["stock_actual"] or 0)
         conn.execute("""
@@ -343,11 +370,15 @@ def detalle_inventario_sazonador(inv_id):
                              (inv["categoria_id"],)).fetchone() if inv["categoria_id"] else None
     sucursal = conn.execute("SELECT nombre FROM sucursales WHERE id = ?",
                             (sid,)).fetchone()
+    almacen = conn.execute("SELECT nombre FROM almacenes WHERE id = ?",
+                           (inv["almacen_id"],)).fetchone()
     conn.close()
     return ok({
         "id": inv["id"], "fecha": str(inv["fecha"])[:10],
         "hora_corte": inv["hora_corte"] or "", "sucursal_id": sid,
         "sucursal_nombre": sucursal["nombre"] if sucursal else "",
+        "almacen_id": inv["almacen_id"],
+        "almacen_nombre": almacen["nombre"] if almacen else "",
         "categoria_id": inv["categoria_id"],
         "categoria_nombre": categoria["nombre"] if categoria else "Todas las categorías",
         "usuario": inv["usuario"] or "", "cerrado_por": inv["cerrado_por"] or "",
@@ -392,8 +423,8 @@ def cerrar_inventario_sazonador(inv_id):
         conn.execute("""
             UPDATE sazonador_productos
             SET stock_actual = ?
-            WHERE id = ? AND sucursal_id = ?
-        """, (fila["conteo_fisico"], fila["producto_id"], sid))
+                WHERE id = ? AND sucursal_id = ? AND almacen_id = ?
+            """, (fila["conteo_fisico"], fila["producto_id"], sid, inv["almacen_id"]))
     faltantes = sum(1 for fila in filas if (fila["diferencia"] or 0) < 0)
     sobrantes = sum(1 for fila in filas if (fila["diferencia"] or 0) > 0)
     conn.execute("""

@@ -22,6 +22,7 @@ USE `pollos_lucho`;
 CREATE TABLE IF NOT EXISTS `almacenes` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `nombre` VARCHAR(255) NOT NULL UNIQUE,
+  `sucursal_id` INT,
   `ubicacion` VARCHAR(255) DEFAULT ''
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -234,6 +235,7 @@ CREATE TABLE IF NOT EXISTS `pedido_detalle` (
 CREATE TABLE IF NOT EXISTS `sazonador_productos` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `sucursal_id` INT NOT NULL,
+  `almacen_id` INT,
   `codigo` VARCHAR(255),
   `nombre` VARCHAR(255) NOT NULL,
   `marca` VARCHAR(100),
@@ -246,12 +248,14 @@ CREATE TABLE IF NOT EXISTS `sazonador_productos` (
   `activo` TINYINT NOT NULL DEFAULT 1,
   UNIQUE KEY `uq_sazonador_sucursal_codigo` (`sucursal_id`, `codigo`),
   CONSTRAINT `fk_sazonador_prod_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`),
+  CONSTRAINT `fk_sazonador_prod_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`),
   CONSTRAINT `fk_sazonador_prod_categoria` FOREIGN KEY (`categoria_id`) REFERENCES `categorias`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `sazonador_inventarios` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `sucursal_id` INT NOT NULL,
+  `almacen_id` INT,
   `categoria_id` INT NOT NULL DEFAULT 0,
   `fecha` DATE NOT NULL,
   `hora_corte` VARCHAR(20),
@@ -264,7 +268,8 @@ CREATE TABLE IF NOT EXISTS `sazonador_inventarios` (
   `total_faltantes` INT DEFAULT 0,
   `total_sobrantes` INT DEFAULT 0,
   UNIQUE KEY `uq_sazonador_inv_suc_cat_fecha` (`sucursal_id`, `categoria_id`, `fecha`),
-  CONSTRAINT `fk_sazonador_inv_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`)
+  CONSTRAINT `fk_sazonador_inv_sucursal` FOREIGN KEY (`sucursal_id`) REFERENCES `sucursales`(`id`),
+  CONSTRAINT `fk_sazonador_inv_almacen` FOREIGN KEY (`almacen_id`) REFERENCES `almacenes`(`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `sazonador_inventario_detalle` (
