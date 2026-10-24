@@ -107,6 +107,7 @@ def usuario(user_id):
     data = request.get_json() or {}
     nombre = (data.get("nombre") or "").strip()
     rol = data.get("rol", "encargado")
+    rol_incluido = "rol" in data
     activo = 1 if data.get("activo", 1) else 0
     sucursal_id = data.get("sucursal_id")
     # Igual que en el POST: "receptor" es un encargado con flag receptor.
@@ -133,8 +134,8 @@ def usuario(user_id):
         if rol != "encargado":
             conn.close()
             return err("Solo el superadministrador puede asignar ese rol", 403)
-        # Un admin no cambia la bandera receptor: se conserva la que ya tenía.
-        receptor = bool(target["receptor"])
+        if not rol_incluido:
+            receptor = bool(target["receptor"])
         sucursal_id = sucursal_actual()
     conn.execute("UPDATE usuarios SET nombre = ?, rol = ?, activo = ?, sucursal_id = ?, receptor = ? WHERE id = ?",
                  (nombre, rol, activo, sucursal_id, 1 if receptor else 0, user_id))
