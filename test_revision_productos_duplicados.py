@@ -72,7 +72,8 @@ class RevisionProductosDuplicadosTest(unittest.TestCase):
             INSERT INTO categorias VALUES (1, 'Alimentos');
             INSERT INTO productos VALUES
                 (1, 'PRD-0656', 'PAPA HOLANDESA', NULL, 'kg', 10, 1, 0, 0, 1, 1),
-                (2, 'PRD-0395', 'Papa Holandesa', NULL, 'KG', 20, 1, 0, 0, 0, 1);
+                (2, 'PRD-0395', 'Papa Holandesa', NULL, 'KG', 10, 1, 0, 0, 0, 1),
+                (3, 'PRD-0999', 'Papa Holandesa', NULL, 'kg', 20, 1, 0, 0, 0, 1);
             INSERT INTO lotes VALUES (1, 1, 10, 4335.4), (2, 2, 20, 35);
             INSERT INTO movimientos VALUES (1, 2);
             INSERT INTO pedidos VALUES (1, 'pendiente');
@@ -109,6 +110,8 @@ class RevisionProductosDuplicadosTest(unittest.TestCase):
         self.assertEqual(respuesta.status_code, 200)
         grupo = respuesta.get_json()["data"]["grupos"][0]
         self.assertEqual(len(grupo["productos"]), 2)
+        self.assertEqual(
+            {producto["id"] for producto in grupo["productos"]}, {1, 2})
         stock = {
             p["codigo"]: [(s["sucursal_nombre"], s["cantidad"]) for s in p["stocks"]]
             for p in grupo["productos"]
@@ -166,8 +169,9 @@ class RevisionProductosDuplicadosTest(unittest.TestCase):
         self.assertEqual(self.db.execute(
             "SELECT activo FROM productos WHERE id = 2").fetchone()["activo"], 1)
 
-    def test_no_unifica_productos_de_as_proveedores_diferentes(self):
-        self.db.execute("UPDATE productos SET para_proveer = 1 WHERE id = 2")
+    def test_no_unifica_fichas_de_sucursales_distintas(self):
+        self.db.execute(
+            "UPDATE productos SET sucursal_id = 20 WHERE id = 2")
         respuesta = self.client.post("/api/productos/duplicados", json={
             "confirmar": True, "canonico_id": 1, "duplicados": [2],
         })

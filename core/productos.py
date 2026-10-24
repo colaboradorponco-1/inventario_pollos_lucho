@@ -121,13 +121,18 @@ def _chunks(valores, tamano=300):
         yield valores[inicio:inicio + tamano]
 
 
-def _producto_duplicado(conn, nombre, unidad, excluir_id=None):
-    """Busca una ficha activa del mismo producto y unidad en cualquier sucursal."""
+def _producto_duplicado(conn, nombre, unidad, sucursal_id, excluir_id=None):
+    """Busca una ficha activa del mismo producto dentro de una sucursal."""
     unidad_norm = norm_nombre(unidad or "unidad")
-    productos = conn.execute(
-        "SELECT id, codigo, nombre, unidad, sucursal_id FROM productos WHERE activo = 1"
-        + (" AND id <> ?" if excluir_id is not None else ""),
-        (excluir_id,) if excluir_id is not None else ()).fetchall()
+    sucursal_sql = ("sucursal_id IS NULL" if sucursal_id is None else "sucursal_id = ?")
+    parametros = [] if sucursal_id is None else [sucursal_id]
+    consulta = (
+        "SELECT id, codigo, nombre, unidad, sucursal_id FROM productos "
+        f"WHERE activo = 1 AND {sucursal_sql}")
+    if excluir_id is not None:
+        consulta += " AND id <> ?"
+        parametros.append(excluir_id)
+    productos = conn.execute(consulta, parametros).fetchall()
     for producto in productos:
         if (norm_nombre(producto["unidad"] or "unidad") == unidad_norm
                 and norm_nombre(producto["nombre"]) == norm_nombre(nombre)):
@@ -151,7 +156,9 @@ def _producto_duplicado_edicion(conn, nombre, unidad, producto_actual):
     if (norm_nombre(nombre) == norm_nombre(nombre_actual)
             and norm_nombre(unidad or "unidad") == norm_nombre(unidad_actual)):
         return None
-    return _producto_duplicado(conn, nombre, unidad, excluir_id=producto_actual["id"])
+    return _producto_duplicado(
+        conn, nombre, unidad, producto_actual["sucursal_id"],
+        excluir_id=producto_actual["id"])
 
 
 def _tacho_unidad(data):
@@ -293,7 +300,8 @@ def productos():
         if len(nombre) > 255:
             conn.close()
             return err("El nombre del producto no puede superar 255 caracteres", 400)
-        duplicado = _producto_duplicado(conn, nombre, data.get("unidad", "unidad"))
+        duplicado = _producto_duplicado(
+            conn, nombre, data.get("unidad", "unidad"), sid)
         if duplicado:
             sucursal_dup = duplicado["sucursal_nombre"] or "sin sucursal"
             conn.close()
@@ -343,8 +351,10 @@ def productos():
         if nv:
             unidad_actual = (data.get("unidad") or "unidad").strip().lower()
             duplicado = conn.execute(
-                "SELECT nombre, codigo, marca, unidad FROM productos WHERE activo = 1 AND id != ? ORDER BY nombre LIMIT 5",
-                (new_id,)).fetchall()
+                "SELECT nombre, codigo, marca, unidad FROM productos "
+                "WHERE activo = 1 AND id != ? AND sucursal_id = ? "
+                "ORDER BY nombre LIMIT 5",
+                (new_id, sid)).fetchall()
             for f in duplicado:
                 if norm_nombre(f["nombre"]) == nv:
                     detalle = f["marca"] and (" - " + f["marca"]) or ""
@@ -874,11 +884,14 @@ def producto_restaurar(prod_id):
         return err("Solo administradores pueden restaurar productos", 403)
     conn = get_conn()
     fila = conn.execute(
-        "SELECT id, nombre, unidad FROM productos WHERE id = ?", (prod_id,)).fetchone()
+        "SELECT id, nombre, unidad, sucursal_id FROM productos WHERE id = ?",
+        (prod_id,)).fetchone()
     if not fila:
         conn.close()
         return err("Producto no encontrado", 404)
-    duplicado = _producto_duplicado(conn, fila["nombre"], fila["unidad"], excluir_id=prod_id)
+    duplicado = _producto_duplicado(
+        conn, fila["nombre"], fila["unidad"], fila["sucursal_id"],
+        excluir_id=prod_id)
     if duplicado:
         conn.close()
         return err(
@@ -912,7 +925,9 @@ def productos_duplicados():
         """).fetchall()
         grupos = {}
         for fila in productos:
-            clave = (norm_nombre(fila["nombre"]), norm_nombre(fila["unidad"] or "unidad"))
+            clave = (int(fila["sucursal_id"] or 0),
+                     norm_nombre(fila["nombre"]),
+                     norm_nombre(fila["unidad"] or "unidad"))
             grupos.setdefault(clave, []).append(dict(fila))
         grupos = [grupo for grupo in grupos.values() if len(grupo) > 1]
         ids = sorted({int(p["id"]) for grupo in grupos for p in grupo})
@@ -1056,6 +1071,11 @@ def productos_duplicados():
                 norm_nombre(por_id[i]["unidad"] or "unidad")) != clave
                for i in duplicados):
             raise ValueError("Solo se pueden unificar productos con mismo nombre y unidad.")
+        if any(por_id[i]["sucursal_id"] != canonico["sucursal_id"]
+               for i in duplicados):
+            raise ValueError(
+                "No se pueden unificar fichas de sucursales distintas; cada sucursal "
+                "mantiene su catálogo e inventario independientes.")
         proveedores = {
             int(p["sucursal_id"]) for p in filas
             if p["para_proveer"] and p["sucursal_id"]
@@ -1738,11 +1758,11 @@ def importar_productos():
                     codigo = siguiente_codigo(conn)
                 marca = (str(rd.get(h_marca) or "").strip() if h_marca else "") or None
                 unidad = (str(rd.get(h_unidad) or "unidad").strip() if h_unidad else "unidad") or "unidad"
-                duplicado = _producto_duplicado(conn, nombre, unidad)
+                duplicado = _producto_duplicado(conn, nombre, unidad, sid_imp)
                 if duplicado:
                     raise ValueError(
                         f"ya existe '{duplicado['nombre']}' ({duplicado['codigo']}) "
-                        f"en {duplicado['sucursal_nombre'] or 'otra sucursal'}")
+                        "en la sucursal elegida")
                 costo = parse_num(rd.get(h_costo)) if h_costo else 0.0
                 precio = parse_num(rd.get(h_precio)) if h_precio else 0.0
                 stock_min = parse_num(rd.get(h_stock_min)) if h_stock_min else 0.0
