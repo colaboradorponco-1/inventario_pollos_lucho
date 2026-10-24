@@ -150,13 +150,21 @@ class _EquivalenciaApiConn:
 class _EquivalenciaListadoConn:
     def __init__(self):
         self.sql = ""
+        self.queries = []
         self.closed = False
 
-    def execute(self, sql, _params=None):
+    def execute(self, sql, params=None):
         self.sql = " ".join(str(sql).split())
+        self.queries.append((self.sql, params or ()))
         return self
 
     def fetchall(self):
+        if "FROM productos p" in self.sql:
+            return [{
+                "id": 662, "nombre": "Arveja", "unidad": "kg",
+                "sucursal_id": 35, "categoria_id": 9,
+                "categoria_nombre": "Verduras", "sucursal_nombre": "America",
+            }]
         if "FROM sazonador_productos p" in self.sql:
             return [{
                 "id": 22, "nombre": "Adobo", "unidad": "kg",
@@ -355,6 +363,35 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         datos = respuesta.get_json()["data"]
         self.assertEqual(datos["productos_sazonador"][0]["id"], 22)
         self.assertEqual(datos["sucursales_sazonador"], [42])
+        self.assertTrue(conn.closed)
+
+    def test_receptor_lista_fichas_de_sucursal_receptora_con_catalogo_independiente(self):
+        conn = _EquivalenciaListadoConn()
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context("/api/equivalencias-productos"):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            session["receptor"] = True
+            session["sucursal_id"] = 49
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=True), \
+                    patch.object(productos, "sucursal_actual", return_value=49):
+                respuesta = productos.equivalencias_productos()
+
+        datos = respuesta.get_json()["data"]
+        self.assertEqual([producto["id"] for producto in datos["productos"]], [662])
+        consulta_productos, parametros = next(
+            (sql, params) for sql, params in conn.queries
+            if "FROM productos p" in sql)
+        self.assertIn("pedido.sucursal_id = p.sucursal_id", consulta_productos)
+        self.assertIn(
+            "COALESCE(detalle.destino_id, pedido.destino_id) = ?",
+            consulta_productos)
+        self.assertNotIn("detalle.producto_id = p.id", consulta_productos)
+        self.assertEqual(parametros, (49, 49, 49))
         self.assertTrue(conn.closed)
 
     def test_receptor_resuelve_equivalencia_661_a_662(self):

@@ -1295,7 +1295,6 @@ def equivalencias_productos():
                     JOIN pedido_detalle detalle ON detalle.pedido_id = pedido.id
                     WHERE pedido.sucursal_id = p.sucursal_id
                       AND COALESCE(detalle.destino_id, pedido.destino_id) = ?
-                      AND detalle.producto_id = p.id
                       AND pedido.estado IN ('pendiente', 'en_camino')
                       AND pedido.sucursal_id <> ?
                 )
