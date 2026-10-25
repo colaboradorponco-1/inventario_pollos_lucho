@@ -940,7 +940,8 @@ function sucursalesFiltroBandejaPedidos(lista) {
     if (puedeVerTodasSucursales()) return base;
     if (!window.RECEPTOR) return sucursalesFiltroBandeja(base);
 
-    const actual = base.find((s) =>
+    const sucursalesReceptor = base.filter((s) => !s.es_sazonador);
+    const actual = sucursalesReceptor.find((s) =>
         String(s.id) === String(window.SUCURSAL_ID));
     const nombreAS = nombreNorm(actual && actual.nombre || '')
         .replace(/^as\s+/, '').trim();
@@ -950,10 +951,10 @@ function sucursalesFiltroBandejaPedidos(lista) {
     } else if (nombreAS.includes('6 de agosto')) {
         solicitantes = ['miraflores', 'sopocachi'];
     }
-    if (!solicitantes.length) return sucursalesFiltroBandeja(base);
+    if (!solicitantes.length) return sucursalesFiltroBandeja(sucursalesReceptor);
 
-    const principales = base.filter((s) => !!s.principal);
-    const pedidosDe = base.filter((s) => {
+    const principales = sucursalesReceptor.filter((s) => !!s.principal);
+    const pedidosDe = sucursalesReceptor.filter((s) => {
         if (s.principal || s.es_as || /^AS\s/i.test(s.nombre || '')) return false;
         const nombre = nombreNorm(s.nombre || '')
             .replace(/^la paz\s*-\s*/, '')
