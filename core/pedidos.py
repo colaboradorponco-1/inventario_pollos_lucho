@@ -6,9 +6,8 @@ proveedores en un mismo pedido). Se genera UN ticket imprimible agrupado
 por proveedor y por categoría.
 
 Estados unificados: pendiente -> en_camino -> entregado, más rechazado desde
-pendiente. Los AS y la administración del almacén solo gestionan pedidos que
-abastece su sucursal; preparador y repartidor tienen pasos limitados. El stock
-se mueve una sola vez al marcar 'entregado'.
+pendiente. Cada proveedor prepara y entrega solo sus líneas; el estado general
+avanza cuando todas las partes están listas o entregadas.
 """
 from collections import OrderedDict
 from datetime import datetime
@@ -101,6 +100,11 @@ def _proveedores_preparados(detalle, pedido):
         preparados[proveedor_id] = (
             preparados.get(proveedor_id, True) and bool(linea.get("preparado")))
     return bool(preparados) and all(preparados.values())
+
+
+def _lineas_entregadas(detalle):
+    """Indica si todas las líneas del pedido ya movieron su stock."""
+    return bool(detalle) and all(bool(linea.get("entregado")) for linea in detalle)
 
 
 def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
@@ -922,7 +926,7 @@ def pedido_ticket_pagina(pedido_id):
 @login_requerido
 def pedido_estado(pedido_id):
     return err("El cambio directo de estado está deshabilitado. Usa el flujo "
-               "del pedido: AS para preparar y repartidor para confirmar entrega.", 409)
+               "de pedidos por proveedor.", 409)
 
 
 def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
@@ -1097,7 +1101,7 @@ def _despachar_stock(conn, pedido, detalle=None, origen_propio=True):
 @login_requerido
 def pedido_despachar(pedido_id):
     return err("El despacho directo está deshabilitado para evitar marcar el pedido "
-               "como entregado antes de la confirmación del repartidor.", 409)
+               "como entregado antes de confirmar la parte del proveedor.", 409)
 
 
 @pedidos_bp.route("/api/pedidos/bandeja", methods=["GET"])
@@ -1305,8 +1309,7 @@ def logistica_resumen():
 _ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
 
 _AVANCE_PREPARADOR = {"pendiente": "en_camino"}
-_AVANCE_REPARTIDOR = {"en_camino": "entregado"}
-_AVANCE_AS_GESTION = {"pendiente": "en_camino", "en_camino": "entregado"}
+_AVANCE_AS_GESTION = {"pendiente": "en_camino"}
 
 _ETIQUETA_ETAPA = {
     "pendiente": "Pendiente",
@@ -1319,7 +1322,7 @@ _ETIQUETA_ETAPA = {
 @pedidos_bp.route("/api/pedidos/<int:pedido_id>/etapa", methods=["PUT"])
 @login_requerido
 def pedido_etapa(pedido_id):
-    """Avanza la etapa logística del pedido desde quien prepara o recibe."""
+    """Actualiza la parte del pedido correspondiente al proveedor autenticado."""
     conn = get_conn()
     # FOR UPDATE: dos personas marcando a la vez no pueden saltarse la
     # validacion de la etapa actual ni duplicar el movimiento de stock.
@@ -1328,7 +1331,7 @@ def pedido_etapa(pedido_id):
     if not pedido:
         conn.close()
         return err("Pedido no encontrado", 404)
-    detalle = conn.execute("SELECT destino_id, preparado FROM pedido_detalle WHERE pedido_id = ?",
+    detalle = conn.execute("SELECT * FROM pedido_detalle WHERE pedido_id = ? FOR UPDATE",
                            (pedido_id,)).fetchall()
     if not _puede_ver_pedido(conn, pedido, detalle):
         conn.close()
@@ -1360,9 +1363,7 @@ def pedido_etapa(pedido_id):
         conn.close()
         return err("No tenes sucursal asignada", 403)
 
-    # AS, preparadores y administración de almacén actúan desde el proveedor;
-    # el repartidor confirma desde la sucursal que solicitó. El superadmin
-    # conserva su alcance global.
+    # Los proveedores actúan únicamente sobre sus propias líneas.
     es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in detalle)
     if not es_superadmin() and (es_as or es_preparador or puede_gestionar_todos) \
             and not es_proveedor:
@@ -1372,17 +1373,10 @@ def pedido_etapa(pedido_id):
         conn.close()
         return err("Ese pedido no lo recibe tu sucursal", 403)
 
-    if (puede_gestionar_todos and destino_etapa == "en_camino"
-            and actual_etapa == "pendiente"):
-        conn.execute(
-            "UPDATE pedidos SET etapa = 'en_camino', estado = 'en_camino' WHERE id = ?",
-            (pedido_id,))
-        conn.commit()
+    if (destino_etapa == "entregado" and actual_etapa == "entregado"
+            and pedido["stock_movido"]):
         conn.close()
-        registrar_auditoria(
-            "Pedido listo para envío",
-            f"{pedido['nro_ticket']}: encargado avanzó el pedido completo")
-        return ok(message=f"Pedido {pedido['nro_ticket']} pasó a «En camino».")
+        return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
 
     if (es_preparador or es_as or puede_gestionar_todos) \
             and destino_etapa == "en_camino" \
@@ -1392,7 +1386,7 @@ def pedido_etapa(pedido_id):
             "WHERE pedido_id = ? AND COALESCE(destino_id, ?) = ?",
             (pedido_id, pedido["destino_id"], sid))
         detalle = conn.execute(
-            "SELECT destino_id, preparado FROM pedido_detalle WHERE pedido_id = ?",
+            "SELECT * FROM pedido_detalle WHERE pedido_id = ? FOR UPDATE",
             (pedido_id,)).fetchall()
         if _proveedores_preparados(detalle, pedido):
             conn.execute(
@@ -1413,11 +1407,65 @@ def pedido_etapa(pedido_id):
         return ok(message="Tu parte quedó lista. El pedido pasará a «En camino» "
                           "cuando los demás proveedores terminen.")
 
-    reparar_stock_entregado = (
-        destino_etapa == "entregado"
-        and actual_etapa == "entregado"
-        and not pedido["stock_movido"]
-    )
+    if destino_etapa == "entregado":
+        puede_reparar_global = es_superadmin() and reparar_stock_entregado
+        if (es_preparador or rol == "repartidor"
+                or not (es_as or puede_gestionar_todos or puede_reparar_global)):
+            conn.close()
+            return err("Solo el proveedor puede confirmar la entrega de sus líneas.", 403)
+        if actual_etapa != "en_camino" and not reparar_stock_entregado:
+            conn.close()
+            return err("El pedido debe estar en camino antes de entregar una parte.", 403)
+
+        lineas_proveedor = [
+            d for d in detalle
+            if es_superadmin()
+            or (d["destino_id"] or pedido["destino_id"]) == sid
+        ]
+        pendientes = [d for d in lineas_proveedor if not d.get("entregado")]
+        if not pendientes:
+            conn.close()
+            return ok(message="La parte de tu almacén ya estaba entregada.")
+
+        movido = _despachar_stock(conn, pedido, detalle=pendientes, origen_propio=False)
+        if movido[0] == "error":
+            conn.rollback()
+            conn.close()
+            return err(movido[1])
+
+        for linea in pendientes:
+            actualizado = conn.execute(
+                "UPDATE pedido_detalle SET entregado = 1 "
+                "WHERE id = ? AND pedido_id = ? AND entregado = 0",
+                (linea["id"], pedido_id))
+            if actualizado.rowcount != 1:
+                conn.rollback()
+                conn.close()
+                return err("No se pudo registrar la entrega de todas tus líneas; "
+                           "no se modificó stock.")
+
+        detalle = conn.execute(
+            "SELECT * FROM pedido_detalle WHERE pedido_id = ? FOR UPDATE",
+            (pedido_id,)).fetchall()
+        todas_entregadas = _lineas_entregadas(detalle)
+        etapa_general = "entregado" if todas_entregadas else actual_etapa
+        conn.execute(
+            "UPDATE pedidos SET etapa = ?, estado = ?, total = COALESCE(total, 0) + ?, "
+            "stock_movido = ? WHERE id = ?",
+            (etapa_general, etapa_general, movido[0],
+             1 if todas_entregadas else 0, pedido_id))
+        conn.commit()
+        conn.close()
+        registrar_auditoria(
+            "Parte de pedido entregada",
+            f"{pedido['nro_ticket']} por proveedor ID {sid}; "
+            f"ticket {'completado' if todas_entregadas else 'a la espera de otros proveedores'}")
+        if todas_entregadas:
+            return ok(message=f"Pedido {pedido['nro_ticket']} entregado. "
+                              "Todas las partes fueron recibidas y el stock se movió.")
+        return ok(message="Tu parte fue entregada y el stock de tu almacén se movió. "
+                          "El pedido quedará «Entregado» cuando terminen los demás proveedores.")
+
     if destino_etapa == actual_etapa and not reparar_stock_entregado:
         conn.close()
         return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
@@ -1425,17 +1473,15 @@ def pedido_etapa(pedido_id):
         conn.close()
         return err("El preparador solo puede marcar en camino.", 403)
     # El preparador solo marca en camino. AS y administración del almacén
-    # pueden además rechazar desde pendiente y confirmar pedidos en camino.
+    # pueden además rechazar desde pendiente.
     if destino_etapa == "rechazado" and (es_as or puede_gestionar_todos):
         permitido = "rechazado" if actual_etapa == "pendiente" else None
     elif es_preparador:
         permitido = _AVANCE_PREPARADOR.get(actual_etapa)
-    elif rol == "repartidor":
-        permitido = _AVANCE_REPARTIDOR.get(actual_etapa)
     elif es_as or puede_gestionar_todos:
         permitido = _AVANCE_AS_GESTION.get(actual_etapa)
     else:
-        permitido = "entregado" if reparar_stock_entregado else None
+        permitido = None
 
     if permitido != destino_etapa and not reparar_stock_entregado:
         conn.close()
@@ -1444,44 +1490,25 @@ def pedido_etapa(pedido_id):
             esperado = _AVANCE_PREPARADOR.get(actual_etapa)
             if esperado is None:
                 return err(f"El pedido ya esta en {_ETIQUETA_ETAPA[actual_etapa]}; "
-                           f"el repartidor lo continua", 403)
+                           "cada proveedor continúa solo su parte", 403)
         return err(f"No se puede pasar de '{_ETIQUETA_ETAPA[actual_etapa]}' "
                    f"a '{_ETIQUETA_ETAPA[destino_etapa]}'", 403)
 
-    # El stock se mueve UNA sola vez, al llegar a 'entregado'. Un pedido ya
-    # entregado no vuelve a mover stock.
-    stock_ya_movido = bool(pedido["stock_movido"])
-
-    if destino_etapa == "entregado" and not stock_ya_movido:
-        movido = _despachar_stock(conn, pedido, origen_propio=False)
-        if movido[0] == "error":
-            conn.rollback()
-            conn.close()
-            return err(movido[1])
-        # Sin round(): las columnas son DOUBLE y el movimiento ya viene
-        # valuado con la precision del lote. Redondear a 2 decimales alteraba el
-        # total real del pedido (3 x 3.333 = 9.999 se guardaba como 10.0).
-        conn.execute("UPDATE pedidos SET etapa = ?, estado = ?, total = ?, "
-                     "stock_movido = 1 WHERE id = ?",
-                     (destino_etapa, "entregado", movido[0], pedido_id))
-        conn.commit()
-        conn.close()
-        registrar_auditoria("Pedido entregado",
-                            f"{pedido['nro_ticket']} etapa {actual_etapa} -> entregado; "
-                            "movimiento de stock registrado")
-        mensaje = ("Se recuperó el movimiento de inventario" if reparar_stock_entregado
-                   else "Se movió el stock a tu sucursal")
-        return ok(message=f"Pedido {pedido['nro_ticket']} entregado. {mensaje}.")
-
     # Rechazo: desde pendiente, sin tocar stock.
     if destino_etapa == "rechazado":
+        conn.execute(
+            "UPDATE pedido_detalle SET rechazado = 1 "
+            "WHERE pedido_id = ? AND COALESCE(destino_id, ?) = ?",
+            (pedido_id, pedido["destino_id"], sid))
         conn.execute("UPDATE pedidos SET etapa = ?, estado = ? WHERE id = ?",
                      (destino_etapa, "rechazado", pedido_id))
         conn.commit()
         conn.close()
-        registrar_auditoria("Pedido rechazado",
-                            f"{pedido['nro_ticket']} rechazado desde pendiente")
-        return ok(message=f"Pedido {pedido['nro_ticket']} rechazado.")
+        registrar_auditoria(
+            "Parte de pedido rechazada",
+            f"{pedido['nro_ticket']} por proveedor ID {sid}; ticket rechazado")
+        return ok(message="Tu parte fue rechazada; el pedido completo quedó rechazado. "
+                          "No se movió stock.")
 
     conn.execute("UPDATE pedidos SET etapa = ?, estado = ? WHERE id = ?",
                  (destino_etapa, destino_etapa, pedido_id))

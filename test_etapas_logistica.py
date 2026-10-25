@@ -21,7 +21,7 @@ AVANCE = {
     "preparador": {"pendiente": "en_camino"},
     "AS": {"pendiente": "en_camino", "en_camino": "entregado",
            "rechazado": "rechazado"},
-    "repartidor": {"en_camino": "entregado"},
+    "repartidor": {},
 }
 ETAPAS = ("pendiente", "en_camino", "entregado", "rechazado")
 
@@ -48,7 +48,7 @@ def permitido(rol, actual, destino):
 
 
 print("=" * 70)
-print("MATRIZ DE ETAPAS (rol x etapa actual -> etapa destino)")
+print("MATRIZ DE ACCIONES POR PROVEEDOR (rol x etapa actual -> etapa destino)")
 print("=" * 70)
 
 for rol in ("AS", "preparador", "repartidor"):
@@ -65,7 +65,7 @@ for rol in ("AS", "preparador", "repartidor"):
                     marca = "  (ya lo continua otro rol)"
                 print(f"  bloqueado      {actual:15s} -> {destino}{marca}")
 
-# El AS prepara/rechaza; el preparador prepara; solo el repartidor entrega.
+# Cada proveedor prepara y confirma la entrega de sus líneas.
 print("\n" + "=" * 70)
 print("REGLAS CRITICAS")
 print("=" * 70)
@@ -76,7 +76,7 @@ reglas = [
     ("preparador: pendiente -> en_camino", permitido("preparador", "pendiente", "en_camino"), True),
     ("preparador: NO puede -> entregado", permitido("preparador", "pendiente", "entregado"), False),
     ("preparador: NO puede rechazar", permitido("preparador", "pendiente", "rechazado"), False),
-    ("repartidor: en_camino -> entregado", permitido("repartidor", "en_camino", "entregado"), True),
+    ("repartidor no cambia la entrega del proveedor", permitido("repartidor", "en_camino", "entregado"), False),
     ("repartidor: NO puede empezar de cero", permitido("repartidor", "pendiente", "en_camino"), False),
     ("repartidor: NO puede saltar a entregado", permitido("repartidor", "pendiente", "entregado"), False),
     ("nadie puede volver a pendiente", permitido("repartidor", "en_camino", "pendiente"), False),
@@ -122,7 +122,8 @@ check("AS puede confirmar estados del pedido de su sucursal",
       "elif es_as or puede_gestionar_todos:" in fuente_etapa)
 check("el sistema registra por separado si el stock de un pedido ya se movió",
       'pedido["stock_movido"]' in fuente_etapa
-      and "stock_movido = 1" in fuente_etapa)
+      and "SET entregado = 1" in fuente_etapa
+      and "_lineas_entregadas(detalle)" in fuente_etapa)
 check("un pedido entregado sin movimiento permite una recuperación protegida",
       "reparar_stock_entregado" in fuente_etapa
       and "if reparar_stock_entregado and es_preparador" in fuente_etapa)
@@ -132,6 +133,10 @@ with open(os.path.join(base, "database.py"), encoding="utf-8") as archivo:
     database_py = archivo.read()
 check("la migración respeta entregas previas con reparto y detecta las no registradas",
       'pedidos", "stock_movido"' in database_py
+      and 'pedido_detalle", "entregado"' in database_py
+      and "SET d.entregado = 1" in database_py
+      and 'pedido_detalle", "rechazado"' in database_py
+      and "SET d.rechazado = 1" in database_py
       and "p.stock_movido = 1" in database_py
       and "EXISTS (SELECT 1 FROM repartos r WHERE r.pedido_id = p.id)" in database_py
       and database_py.count("COLLATE utf8mb4_unicode_ci") >= 4)
@@ -251,11 +256,12 @@ class _MultiProveedorConn:
             "stock_movido": 0,
         }
         self.detalle = [
-            {"destino_id": 20, "preparado": 0},
-            {"destino_id": 21, "preparado": 0},
+            {"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0, "rechazado": 0},
+            {"id": 2, "destino_id": 21, "preparado": 0, "entregado": 0, "rechazado": 0},
         ]
         self.sql_actual = ""
         self.params = []
+        self.rowcount = 1
 
     def execute(self, sql, params=None):
         self.sql_actual = " ".join(str(sql).split())
@@ -267,12 +273,24 @@ class _MultiProveedorConn:
                     proveedor_id = linea["destino_id"] or destino_defecto
                     if proveedor_id == sucursal_id:
                         linea["preparado"] = 1
+        elif self.sql_actual.startswith("UPDATE pedido_detalle SET entregado = 1"):
+            linea_id, pedido_id = self.params
+            for linea in self.detalle:
+                if linea["id"] == linea_id and pedido_id == self.pedido["id"]:
+                    linea["entregado"] = 1
+        elif self.sql_actual.startswith("UPDATE pedido_detalle SET rechazado = 1"):
+            pedido_id, destino_defecto, sucursal_id = self.params
+            if pedido_id == self.pedido["id"]:
+                for linea in self.detalle:
+                    proveedor_id = linea["destino_id"] or destino_defecto
+                    if proveedor_id == sucursal_id:
+                        linea["rechazado"] = 1
         elif self.sql_actual.startswith("UPDATE pedidos SET etapa = 'en_camino'"):
             self.pedido["etapa"] = self.pedido["estado"] = "en_camino"
-        elif self.sql_actual.startswith(
-                "UPDATE pedidos SET etapa = ?, estado = ?, total = ?, stock_movido = 1"):
+        elif self.sql_actual.startswith("UPDATE pedidos SET etapa = ?, estado = ?, total = COALESCE"):
             self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
-            self.pedido["stock_movido"] = 1
+            self.pedido["total"] = self.pedido.get("total", 0) + self.params[2]
+            self.pedido["stock_movido"] = self.params[3]
         elif self.sql_actual.startswith("UPDATE pedidos SET etapa = ?, estado = ?"):
             self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
         return self
@@ -320,12 +338,16 @@ try:
 
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
     conn_multi.detalle = [
-        {"destino_id": 20, "preparado": 1},
-        {"destino_id": 21, "preparado": 1},
+        {"id": 1, "destino_id": 20, "preparado": 1, "entregado": 0, "rechazado": 0},
+        {"id": 2, "destino_id": 21, "preparado": 1, "entregado": 0, "rechazado": 0},
     ]
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "en_camino"
+    conn_multi.pedido["stock_movido"] = 0
     despacho_original = ped._despachar_stock
-    ped._despachar_stock = lambda *args, **kwargs: (10.0, [91])
+    despachos_por_proveedor = []
+    ped._despachar_stock = lambda _conn, _pedido, detalle=None, **kwargs: (
+        despachos_por_proveedor.append([linea["id"] for linea in detalle])
+        or (10.0, [91]))
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
         session["user_id"] = 1
@@ -333,12 +355,41 @@ try:
         session["sucursal_id"] = 20
         session["receptor"] = True
         entrega_as = cuerpo_respuesta(ped.pedido_etapa(11))
-    check("el AS puede confirmar Entregado dentro de su sucursal",
-          entrega_as["ok"] and conn_multi.pedido["etapa"] == "entregado")
+    check("el AS entrega solo sus líneas sin cerrar lo de otros proveedores",
+          entrega_as["ok"]
+          and conn_multi.pedido["etapa"] == "en_camino"
+          and conn_multi.pedido["stock_movido"] == 0
+          and conn_multi.detalle[0]["entregado"]
+          and not conn_multi.detalle[1]["entregado"]
+          and despachos_por_proveedor == [[1]])
+
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
+        session["user_id"] = 1
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = True
+        entrega_as_repetida = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("repetir entrega no mueve por segunda vez el stock del proveedor",
+          entrega_as_repetida["ok"] and despachos_por_proveedor == [[1]])
+
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
+        session["user_id"] = 2
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 21
+        session["receptor"] = True
+        entrega_segundo_as = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el segundo AS entrega sus líneas y completa el pedido",
+          entrega_segundo_as["ok"]
+          and conn_multi.pedido["etapa"] == "entregado"
+          and conn_multi.pedido["stock_movido"] == 1
+          and all(linea["entregado"] for linea in conn_multi.detalle)
+          and despachos_por_proveedor == [[1], [2]])
 
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
     conn_multi.detalle = [
-        {"destino_id": 21, "preparado": 0},
+        {"id": 2, "destino_id": 21, "preparado": 0, "entregado": 0, "rechazado": 0},
     ]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
@@ -351,8 +402,8 @@ try:
           not cambio_as_ajeno["ok"] and conn_multi.pedido["etapa"] == "pendiente")
 
     conn_multi.detalle = [
-        {"destino_id": 20, "preparado": 0},
-        {"destino_id": 21, "preparado": 1},
+        {"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0, "rechazado": 0},
+        {"id": 2, "destino_id": 21, "preparado": 1, "entregado": 0, "rechazado": 0},
     ]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
@@ -362,13 +413,15 @@ try:
         session["receptor"] = True
         rechazo_as = cuerpo_respuesta(ped.pedido_etapa(11))
     check("el AS puede rechazar antes de que salga el pedido",
-          rechazo_as["ok"] and conn_multi.pedido["etapa"] == "rechazado")
+          rechazo_as["ok"] and conn_multi.pedido["etapa"] == "rechazado"
+          and conn_multi.detalle[0]["rechazado"]
+          and not conn_multi.detalle[1]["rechazado"])
 
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "en_camino"
     conn_multi.pedido["stock_movido"] = 0
     conn_multi.detalle = [
-        {"destino_id": 20, "preparado": 1},
-        {"destino_id": 21, "preparado": 1},
+        {"id": 1, "destino_id": 20, "preparado": 1, "entregado": 0, "rechazado": 0},
+        {"id": 2, "destino_id": 21, "preparado": 1, "entregado": 0, "rechazado": 0},
     ]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
@@ -387,11 +440,13 @@ try:
         session["sucursal_id"] = 30
         session["receptor"] = False
         entrega_repartidor = cuerpo_respuesta(ped.pedido_etapa(11))
-    check("el repartidor solicitante puede confirmar la entrega",
-          entrega_repartidor["ok"])
+    check("el repartidor no puede entregar las líneas de los proveedores",
+          not entrega_repartidor["ok"]
+          and conn_multi.pedido["etapa"] == "en_camino"
+          and conn_multi.pedido["stock_movido"] == 0)
 
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
-    conn_multi.detalle = [{"destino_id": 20, "preparado": 0}]
+    conn_multi.detalle = [{"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0}]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
         session["user_id"] = 1
@@ -407,8 +462,8 @@ try:
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
     conn_multi.pedido["stock_movido"] = 0
     conn_multi.detalle = [
-        {"destino_id": 20, "preparado": 0},
-        {"destino_id": 21, "preparado": 0},
+        {"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0},
+        {"id": 2, "destino_id": 21, "preparado": 0, "entregado": 0},
     ]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "en_camino"}):
@@ -417,36 +472,52 @@ try:
         session["sucursal_id"] = 20
         session["receptor"] = False
         avance_encargado = cuerpo_respuesta(ped.pedido_etapa(11))
-    check("el encargado principal pasa el pedido completo a En camino",
+    check("el encargado principal marca solo su parte lista",
           avance_encargado["ok"]
-          and conn_multi.pedido["etapa"] == "en_camino"
+          and conn_multi.pedido["etapa"] == "pendiente"
           and conn_multi.pedido["stock_movido"] == 0
-          and not any(linea["preparado"] for linea in conn_multi.detalle))
+          and conn_multi.detalle[0]["preparado"]
+          and not conn_multi.detalle[1]["preparado"])
 
-    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "en_camino"
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "en_camino"}):
+        session["user_id"] = 2
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 21
+        session["receptor"] = True
+        segundo_proveedor_listo = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el ticket pasa a En camino cuando el último proveedor termina",
+          segundo_proveedor_listo["ok"]
+          and conn_multi.pedido["etapa"] == "en_camino"
+          and all(linea["preparado"] for linea in conn_multi.detalle))
+
     despacho_gestor_original = ped._despachar_stock
     llamadas_despacho_gestor = []
-    ped._despachar_stock = lambda *args, **kwargs: (
-        llamadas_despacho_gestor.append(1) or (10.0, [92]))
+    ped._despachar_stock = lambda _conn, _pedido, detalle=None, **kwargs: (
+        llamadas_despacho_gestor.append([linea["id"] for linea in detalle])
+        or (10.0, [92]))
     try:
-        with app_pruebas.test_request_context(
-                "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
-            session["user_id"] = 1
-            session["rol"] = "encargado"
-            session["sucursal_id"] = 20
-            session["receptor"] = False
-            entrega_encargado = cuerpo_respuesta(ped.pedido_etapa(11))
+        for proveedor_id, line_id in ((20, 1), (21, 2)):
+            with app_pruebas.test_request_context(
+                    "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
+                session["user_id"] = proveedor_id
+                session["rol"] = "encargado"
+                session["sucursal_id"] = proveedor_id
+                session["receptor"] = True
+                entrega_proveedor = cuerpo_respuesta(ped.pedido_etapa(11))
+                check(f"el proveedor {proveedor_id} confirma solo sus líneas",
+                      entrega_proveedor["ok"]
+                      and llamadas_despacho_gestor[-1] == [line_id])
     finally:
         ped._despachar_stock = despacho_gestor_original
-    check("el encargado principal confirma Entregado y mueve stock una vez",
-          entrega_encargado["ok"]
-          and conn_multi.pedido["etapa"] == "entregado"
+    check("el ticket queda entregado tras mover por separado ambas partes",
+          conn_multi.pedido["etapa"] == "entregado"
           and conn_multi.pedido["stock_movido"] == 1
-          and len(llamadas_despacho_gestor) == 1)
+          and all(linea["entregado"] for linea in conn_multi.detalle))
 
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
     conn_multi.pedido["stock_movido"] = 0
-    conn_multi.detalle = [{"destino_id": 20, "preparado": 0}]
+    conn_multi.detalle = [{"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0}]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
         session["user_id"] = 1
@@ -473,14 +544,19 @@ class _RetryEntregaConn:
             "destino_id": 20, "estado": "entregado", "etapa": "entregado",
             "stock_movido": 0,
         }
-        self.detalle = [{"destino_id": 20, "preparado": 1}]
+        self.detalle = [
+            {"id": 1, "destino_id": 20, "preparado": 1, "entregado": 0},
+        ]
+        self.rowcount = 1
 
     def execute(self, sql, params=None):
         query = " ".join(str(sql).split())
-        if query.startswith("UPDATE pedidos SET etapa = ?, estado = ?, total = ?, stock_movido = 1"):
+        if query.startswith("UPDATE pedido_detalle SET entregado = 1"):
+            self.detalle[0]["entregado"] = 1
+        elif query.startswith("UPDATE pedidos SET etapa = ?, estado = ?, total = COALESCE"):
             self.pedido["etapa"] = params[0]
             self.pedido["estado"] = params[1]
-            self.pedido["stock_movido"] = 1
+            self.pedido["stock_movido"] = params[3]
         return self
 
     def fetchone(self):
@@ -512,21 +588,23 @@ try:
     with app_pruebas.test_request_context(
             "/api/pedidos/12/etapa", method="PUT", json={"etapa": "entregado"}):
         session["user_id"] = 1
-        session["rol"] = "repartidor"
-        session["sucursal_id"] = 30
-        respuesta_recuperacion = ped.pedido_etapa(12).get_json()
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = True
+        respuesta_recuperacion = cuerpo_respuesta(ped.pedido_etapa(12))
     with app_pruebas.test_request_context(
             "/api/pedidos/12/etapa", method="PUT", json={"etapa": "entregado"}):
         session["user_id"] = 1
-        session["rol"] = "repartidor"
-        session["sucursal_id"] = 30
-        respuesta_repetida = ped.pedido_etapa(12).get_json()
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = True
+        respuesta_repetida = cuerpo_respuesta(ped.pedido_etapa(12))
     check("se recupera una entrega antigua sin duplicar movimientos",
           respuesta_recuperacion["ok"]
-          and "recuperó" in respuesta_recuperacion["message"]
           and respuesta_repetida["ok"]
           and len(llamadas_despacho) == 1
-          and conn_retry.pedido["stock_movido"] == 1)
+          and conn_retry.pedido["stock_movido"] == 1
+          and conn_retry.detalle[0]["entregado"] == 1)
 finally:
     ped.get_conn = get_conn_original
     ped.registrar_auditoria = auditoria_original
@@ -544,8 +622,9 @@ check("sin controles duplicados de cambio de estado",
           "window.despacharPedido", "window.cambiarEstadoPedido")))
 check("acciones centralizadas en el detalle",
       "function pintarEtapaEnModal" in app_js and "verPedido(${p.id}, true)" in app_js)
-check("el encargado ve la acción para pasar el pedido a En camino",
-      "b('Pasar a «En camino»', 'en_camino', true)" in app_js)
+check("el encargado ve la acción para marcar su parte lista",
+  "b('Marcar mi parte lista', 'en_camino', true)" in app_js
+  and "b('Entregar mi parte', 'entregado', true)" in app_js)
 
 print("\n" + "=" * 70)
 print("FALLOS:", fallos)

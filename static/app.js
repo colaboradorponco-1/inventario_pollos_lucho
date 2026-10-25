@@ -4791,12 +4791,10 @@ const ESTADO_LAB = { pendiente: 'Pendiente', en_camino: 'En camino', entregado: 
 const ETAPA_LAB = ESTADO_LAB;
 
 window.avanzarEtapa = async (id, etapa) => {
-    if (etapa === 'rechazado' && !confirm('¿Rechazar este pedido?\n\nEl pedido quedará como rechazado y no se moverá stock.')) return;
-    const recuperarStock = etapa === 'entregado' && window._pedidoActual
-        && Number(window._pedidoActual.stock_movido) === 0;
-    if (etapa === 'entregado' && !confirm(recuperarStock
-        ? 'Este pedido figura entregado, pero no tiene registrado el movimiento de inventario. ¿Reintentar el traslado?'
-        : '¿Confirmar que el pedido fue entregado?\n\nAl confirmar, el stock sale del almacén que despachó y suma a la sucursal que recibe.')) return;
+    if (etapa === 'rechazado' && !confirm(
+        '¿Rechazar la parte de tu almacén?\n\nEl ticket completo quedará rechazado y no se moverá stock.')) return;
+    if (etapa === 'entregado' && !confirm(
+        '¿Confirmar la entrega de las líneas de tu almacén?\n\nSolo se descontará stock de tu almacén y se sumará a la sucursal receptora correspondiente.')) return;
     try {
         const r = await request(API + '/pedidos/' + id + '/etapa', {
             method: 'PUT',
@@ -6013,20 +6011,29 @@ function pintarEtapaEnModal(p, puedeGestionar) {
                 : b('Marcar mi parte lista', 'en_camino', true);
             box.innerHTML = listo;
         } else if (esGestorAlmacen) {
-            box.innerHTML = b('Pasar a «En camino»', 'en_camino', true)
+            const listo = p.miProveedorPreparado
+                ? '<span class="respaldo-txt">Tu parte está lista. El pedido avanzará cuando terminen los demás proveedores.</span>'
+                : b('Marcar mi parte lista', 'en_camino', true);
+            box.innerHTML = listo
                 + `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`;
         } else {
             box.innerHTML = '<span class="respaldo-txt">El AS debe preparar este pedido.</span>';
         }
     } else if (etapa === 'en_camino') {
         box.innerHTML = esPreparador
-            ? '<span class="respaldo-txt">El repartidor debe confirmar la entrega.</span>'
-            : (rol === 'repartidor' || esAS || esGestorAlmacen)
-                ? b('Entregado', 'entregado', true)
-                : '<span class="respaldo-txt">En camino. El repartidor confirmará la entrega.</span>';
+            ? '<span class="respaldo-txt">El proveedor confirmará la entrega de su parte.</span>'
+            : (esAS || esGestorAlmacen)
+                ? (p.miProveedorEntregado
+                    ? '<span class="respaldo-txt">Tu parte ya fue entregada. El ticket espera a los demás proveedores.</span>'
+                    : b('Entregar mi parte', 'entregado', true))
+                : '<span class="respaldo-txt">Cada proveedor confirmará la entrega de su parte.</span>';
     } else if (etapa === 'entregado' && Number(p.stock_movido) === 0
-            && (rol === 'repartidor' || esAS || esAdmin() || esAlmacenPpal())) {
-        box.innerHTML = b('Reintentar movimiento de inventario', 'entregado', true);
+            && (esAS || esGestorAlmacen || rol === 'superadmin')) {
+        box.innerHTML = p.miProveedorEntregado && rol !== 'superadmin'
+            ? '<span class="respaldo-txt">Tu parte ya fue registrada como entregada.</span>'
+            : b(rol === 'superadmin'
+                ? 'Recuperar movimientos pendientes'
+                : 'Registrar entrega de mi parte', 'entregado', true);
     } else {
         box.innerHTML = `<span class="respaldo-txt">${esc(ETAPA_LAB[etapa] || etapa)}</span>`;
     }
@@ -6073,7 +6080,8 @@ window.verPedido = async (id, accionables = true) => {
             <tr><td>${esc(d.producto_nombre)}${d.sin_stock ? ' <span class="stock-rojo" title="El proveedor no tiene stock">⚠ sin stock en el proveedor</span>' : ''}</td><td>${d.cantidad}</td>
                 <td>${esc(d.unidad || 'unidad')}</td>
                 <td>${tachoEtiqueta(d) || '—'}</td>
-                <td>${esc(sucMap[d.destino_id] || '—')}</td></tr>`).join('');
+                <td>${esc(sucMap[d.destino_id] || '—')}</td>
+                <td>${d.rechazado ? 'Rechazado' : d.entregado ? 'Entregado' : d.preparado ? 'En camino' : 'Pendiente'}</td></tr>`).join('');
         openModal('modal-pedido');
         window._pedidoActual = { id, estado: p.estado, stock_movido: p.stock_movido };
         const esDestinoMio = destIds.some((sid) => String(sid) === String(window.SUCURSAL_ID));
@@ -6081,6 +6089,8 @@ window.verPedido = async (id, accionables = true) => {
             String(d.destino_id || p.destino_id) === String(window.SUCURSAL_ID));
         p.miProveedorPreparado = misLineas.length > 0 &&
             misLineas.every((d) => Boolean(d.preparado));
+        p.miProveedorEntregado = misLineas.length > 0 &&
+            misLineas.every((d) => Boolean(d.entregado));
         const etapaActual = p.etapa || p.estado || 'pendiente';
         const esSolicitanteMio = String(p.sucursal_id) === String(window.SUCURSAL_ID);
         const puedeGestionarEtapa = window.ROL === 'repartidor'

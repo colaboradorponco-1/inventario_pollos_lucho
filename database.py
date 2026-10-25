@@ -500,6 +500,8 @@ def init_db():
                     "tacho_unidad DOUBLE DEFAULT 0,"
                     "sin_stock TINYINT NOT NULL DEFAULT 0,"
                     "preparado TINYINT NOT NULL DEFAULT 0,"
+                    "entregado TINYINT NOT NULL DEFAULT 0,"
+                    "rechazado TINYINT NOT NULL DEFAULT 0,"
                     "producto_sazonador_id INT,"
                     "FOREIGN KEY (pedido_id) REFERENCES pedidos(id) ON DELETE CASCADE,"
                     "FOREIGN KEY (producto_id) REFERENCES productos(id))")
@@ -896,6 +898,25 @@ def migrar_esquema():
             _add_columna(cur, "pedido_detalle", "sin_stock TINYINT NOT NULL DEFAULT 0")
         if not _col_existe(cur, "pedido_detalle", "preparado"):
             _add_columna(cur, "pedido_detalle", "preparado TINYINT NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "pedido_detalle", "entregado"):
+            _add_columna(cur, "pedido_detalle", "entregado TINYINT NOT NULL DEFAULT 0")
+        if not _col_existe(cur, "pedido_detalle", "rechazado"):
+            _add_columna(cur, "pedido_detalle", "rechazado TINYINT NOT NULL DEFAULT 0")
+        cur.execute("""
+            UPDATE pedido_detalle d
+            JOIN pedidos p ON p.id = d.pedido_id
+            SET d.entregado = 1
+            WHERE p.estado = 'entregado'
+              AND IFNULL(p.stock_movido, 0) = 1
+              AND d.entregado = 0
+        """)
+        cur.execute("""
+            UPDATE pedido_detalle d
+            JOIN pedidos p ON p.id = d.pedido_id
+            SET d.rechazado = 1
+            WHERE p.estado = 'rechazado'
+              AND d.rechazado = 0
+        """)
         if not _col_existe(cur, "sazonador_productos", "producto_pedido_id"):
             _add_columna(cur, "sazonador_productos", "producto_pedido_id INT")
         if not _indice_existe(cur, "sazonador_productos",

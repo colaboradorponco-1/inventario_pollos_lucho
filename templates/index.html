@@ -879,7 +879,7 @@
             <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap;">
                 <div>
                     <h2>Gestión de Pedidos y Despachos</h2>
-                    <p>El AS puede avanzar todos los estados de los pedidos que abastece su almacén. El preparador solo los marca «En camino» y el repartidor de la sucursal solicitante solo confirma «Entregado». Administración y encargados de almacenes principales también gestionan los pedidos que abastece su almacén. Ninguno crea solicitudes; las sucursales las envían desde «Mis pedidos». El rol Sazonador puede crear pedidos y consultar los de su sucursal.</p>
+                    <p>Cada proveedor solo prepara y confirma la entrega de las líneas que abastece su almacén. El pedido pasa a «En camino» cuando todos los proveedores preparan su parte y a «Entregado» cuando todos confirman la entrega; cada confirmación mueve únicamente el stock de ese proveedor. El preparador solo marca su parte lista. Administración y encargados gestionan los pedidos de sus almacenes, sin cambiar líneas de otros proveedores. Las sucursales y Sazonador crean solicitudes desde «Mis pedidos».</p>
                 </div>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     <button class="btn btn-primary" id="btn-abrir-equivalencias" type="button" style="display:none">
@@ -1057,7 +1057,7 @@
                     <span><strong>Nota:</strong> <span id="det-pedido-nota"></span></span>
                 </div>
                 <div class="table-scroll"><table class="data-table">
-                    <thead><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Medida</th><th>Proveedor</th></tr></thead>
+                    <thead><tr><th>Producto</th><th>Cantidad</th><th>Unidad</th><th>Medida</th><th>Proveedor</th><th>Estado proveedor</th></tr></thead>
                     <tbody id="det-pedido-items"></tbody>
                 </table></div>
                 <div id="det-pedido-repartos" style="display:none;margin-top:12px">
@@ -1584,7 +1584,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=20261025-encargado-avance-completo"></script>
+    <script src="/static/app.js?v=20261025-estados-por-proveedor"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {
