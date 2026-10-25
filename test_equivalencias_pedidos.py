@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import sys
 import unittest
 from unittest.mock import patch
@@ -299,6 +300,57 @@ class _PedidoSinEquivalenciaConn:
 
 
 class EquivalenciasPedidosTest(unittest.TestCase):
+    def test_as_receptor_recibe_fichas_locales_para_elegir_equivalencia(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE sucursales (id INTEGER PRIMARY KEY, nombre TEXT);
+            CREATE TABLE categorias (id INTEGER PRIMARY KEY, nombre TEXT);
+            CREATE TABLE productos (
+                id INTEGER PRIMARY KEY, nombre TEXT, unidad TEXT,
+                sucursal_id INTEGER, categoria_id INTEGER, activo INTEGER
+            );
+            CREATE TABLE equivalencias_productos (
+                id INTEGER PRIMARY KEY, producto_origen_id INTEGER,
+                sucursal_destino_id INTEGER, producto_destino_id INTEGER
+            );
+            CREATE TABLE pedidos (
+                id INTEGER PRIMARY KEY, sucursal_id INTEGER,
+                destino_id INTEGER, estado TEXT
+            );
+            CREATE TABLE pedido_detalle (
+                id INTEGER PRIMARY KEY, pedido_id INTEGER,
+                producto_id INTEGER, destino_id INTEGER
+            );
+            INSERT INTO sucursales VALUES
+                (35, 'Simon Lopez'), (49, 'AS America'), (77, 'Otra sucursal');
+            INSERT INTO categorias VALUES (1, 'Verduras');
+            INSERT INTO productos VALUES
+                (661, 'ARVEJA', 'kg', 49, 1, 1),
+                (662, 'ARVEJA', 'kg', 35, 1, 1),
+                (663, 'PAPA', 'kg', 35, 1, 1),
+                (664, 'ARVEJA', 'kg', 77, 1, 1);
+            INSERT INTO pedidos VALUES (10, 35, 49, 'pendiente');
+            INSERT INTO pedido_detalle VALUES (20, 10, 661, NULL);
+        """)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context("/api/equivalencias-productos"):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            session["receptor"] = True
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=True), \
+                    patch.object(productos, "sucursal_actual", return_value=49):
+                respuesta = productos.equivalencias_productos()
+
+        data = respuesta.get_json()["data"]
+        ids_productos = {producto["id"] for producto in data["productos"]}
+        self.assertEqual(ids_productos, {661, 662, 663})
+        self.assertEqual(data["sucursales"], [{"id": 35, "nombre": "Simon Lopez"}])
+
     def test_receptor_resuelve_equivalencia_661_a_662(self):
         conn = _FilaConn({
             "sucursal_origen_id": 49,

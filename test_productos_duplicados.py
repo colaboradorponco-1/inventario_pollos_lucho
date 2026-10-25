@@ -54,6 +54,15 @@ class ProductosDuplicadosTest(unittest.TestCase):
         self.assertIsNone(_producto_duplicado_edicion(
             self.conn, "PAPA HOLANDESA", "kg", actual, 1))
 
+    def test_cambiar_unidad_a_una_ya_existente_en_la_sucursal_se_bloquea(self):
+        actual = {
+            "id": 3, "nombre": "Papa Holandesa",
+            "unidad": "unidad", "sucursal_id": 1,
+        }
+        duplicado = _producto_duplicado_edicion(
+            self.conn, "PAPA HOLANDESA", "kg", actual, 1)
+        self.assertEqual(duplicado["id"], 1)
+
     def test_cambiar_nombre_o_unidad_sigue_validando_duplicados(self):
         actual = {
             "id": 2, "nombre": "Papa Holandesa especial",

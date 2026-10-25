@@ -1280,16 +1280,18 @@ def equivalencias_productos():
                     SELECT 1
                     FROM pedidos pedido
                     JOIN pedido_detalle detalle ON detalle.pedido_id = pedido.id
+                    JOIN productos proveedor ON proveedor.id = detalle.producto_id
                     WHERE pedido.sucursal_id = p.sucursal_id
                       AND COALESCE(detalle.destino_id, pedido.destino_id) = ?
-                      AND detalle.producto_id = p.id
+                      AND proveedor.sucursal_id = ?
                       AND pedido.estado IN ('pendiente', 'en_camino')
                       AND pedido.sucursal_id <> ?
                 )
             )
         """ if es_as_limitado else ""
         parametros_productos_as = (
-            (sucursal_as, sucursal_as, sucursal_as) if es_as_limitado else ())
+            (sucursal_as, sucursal_as, sucursal_as, sucursal_as)
+            if es_as_limitado else ())
         productos = conn.execute("""
             SELECT p.id, p.nombre, p.unidad, p.sucursal_id, p.categoria_id,
                    c.nombre AS categoria_nombre,

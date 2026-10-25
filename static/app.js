@@ -1259,8 +1259,11 @@ async function loadEquivalencias() {
 
     const labelProducto = (p) =>
         `${p.nombre} (${p.unidad || 'unidad'}) · ${p.categoria_nombre || 'Sin categoría'} — ${p.sucursal_nombre}`;
+    const productosOrigen = window.RECEPTOR
+        ? productos.filter((p) => Number(p.sucursal_id) === Number(window.SUCURSAL_ID))
+        : productos;
     origen.innerHTML = '<option value="">Producto del proveedor...</option>' +
-        productos.map((p) => `<option value="${p.id}">${esc(labelProducto(p))}</option>`).join('');
+        productosOrigen.map((p) => `<option value="${p.id}">${esc(labelProducto(p))}</option>`).join('');
     sucursal.innerHTML = '<option value="">Sucursal receptora...</option>' +
         sucursales.map((s) => `<option value="${s.id}">${esc(s.nombre)}</option>`).join('');
     actualizarProductosEquivalenciaDestino();
