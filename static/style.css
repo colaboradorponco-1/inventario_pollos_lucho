@@ -1266,7 +1266,11 @@ body.rol-encargado .panel-finance {
     font-size: 13px;
     text-transform: none;
     letter-spacing: 0;
-    color: var(--red);
+    color: var(--primary-dark, #0F3D2E);
+    background: #f8f5eb;
+    border-left: 3px solid var(--primary, #f2b900);
+    border-radius: 5px;
+    padding: 8px 10px;
 }
 .prod-card {
     display: flex;

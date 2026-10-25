@@ -5049,16 +5049,35 @@ function renderTarjetasPedido() {
     });
     const bts = $('#pedido-prov-btns');
     if (bts) {
-        // Lista FIJA de sucursales (principales + AS), igual para todos: así el
-        // encargado de America ve "AS America" aunque no se pida a sí mismo, y
-        // el de Simon Lopez ve "AS Simon Lopez". Antes los botones salían de
-        // los proveedores que tenían productos, y la propia sucursal nunca
-        // aparecía.
-        const fijas = sucursalesFiltroPedidos(catalogos && catalogos.sucursales)
-            .map((s) => ({ id: String(s.id), nombre: (s.principal ? '★ ' : '') + (nombreSucursalPedido(s) || s.nombre) }));
-        bts.innerHTML = [{ id: '', nombre: 'Todos' }].concat(fijas).map((b) => {
-            const activa = pedidoProvFiltro === b.id;
-            return `<button type="button" class="btn btn-sm ${activa ? 'btn-primary' : ''}" data-prov="${b.id}">${esc(b.nombre)}</button>`;
+        const proveedoresConProductos = keys.map((key) => {
+            const proveedor = provs[key];
+            return {
+                id: String(proveedor.id),
+                nombre: (proveedor.principal ? '★ ' : '') + proveedor.nombre,
+                cantidad: proveedor.prod.length,
+            };
+        });
+        const cantidadVisible = proveedoresConProductos.reduce(
+            (total, proveedor) => total + proveedor.cantidad, 0);
+        const opciones = [{ id: '', nombre: 'Todos', cantidad: cantidadVisible }];
+        if (pedidoProvFiltro && !proveedoresConProductos.some((p) => p.id === pedidoProvFiltro)) {
+            const sucursal = (catalogos.sucursales || []).find(
+                (s) => String(s.id) === pedidoProvFiltro);
+            if (sucursal) {
+                opciones.push({
+                    id: pedidoProvFiltro,
+                    nombre: (sucursal.principal ? '★ ' : '') +
+                        (nombreSucursalPedido(sucursal) || sucursal.nombre),
+                    cantidad: 0,
+                });
+            }
+        }
+        opciones.push(...proveedoresConProductos);
+        bts.innerHTML = opciones.map((proveedor) => {
+            const activa = pedidoProvFiltro === proveedor.id;
+            const nombre = proveedor.cantidad
+                ? `${proveedor.nombre} · ${proveedor.cantidad}` : proveedor.nombre;
+            return `<button type="button" class="btn btn-sm ${activa ? 'btn-primary' : ''}" data-prov="${proveedor.id}">${esc(nombre)}</button>`;
         }).join('');
     }
     const keysV = pedidoProvFiltro ? keys.filter((k) => String(provs[k].id) === pedidoProvFiltro) : keys;
