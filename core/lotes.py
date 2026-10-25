@@ -90,6 +90,19 @@ def destinos_validos(conn, desde=None):
     return ids
 
 
+def _solo_almacenes_principales(conn, ids):
+    """Limita una lista de destinos a los Almacenes Principales."""
+    ids = list(ids or [])
+    if not ids:
+        return []
+    filas = conn.execute(
+        "SELECT id FROM sucursales WHERE principal = 1 "
+        "AND id IN (" + ",".join(["?"] * len(ids)) + ")",
+        ids).fetchall()
+    principales = {int(f["id"]) for f in filas}
+    return [int(sid) for sid in ids if int(sid) in principales]
+
+
 def stock_por_destino(conn, desde=None):
     """{producto_id: [(sucursal_id, stock, nombre), ...]} -> solo los VÁLIDOS
     que tienen stock > 0, ordenados por prioridad.

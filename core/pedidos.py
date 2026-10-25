@@ -18,7 +18,8 @@ from flask import Blueprint, redirect, render_template, request, session
 
 from database import get_conn
 from .lotes import (destinos_validos, elegir_destino, stock_en_destino,
-                   stock_por_destino, _ids_proveedores_misma_ciudad)
+                   stock_por_destino, _ids_proveedores_misma_ciudad,
+                   _solo_almacenes_principales)
 from .util import (ok, err, login_requerido, registrar_auditoria, ok_paginado,
                    paginar_params, sucursal_actual, sucursal_operativa, stock_actual,
                    es_gestion, es_superadmin, es_encargado_almacen, registrar_movimiento,
@@ -328,6 +329,15 @@ def pedidos():
         # responsable no tiene: que la persona decida, no que el sistema le
         # vacíe el inventario a otra sucursal.
         candidatos = stock_por_destino(conn)
+        if session.get("rol") == "sasonador":
+            validos = _solo_almacenes_principales(conn, validos)
+            principales = set(validos)
+            candidatos = {
+                producto_id: [item for item in lista if item[0] in principales]
+                for producto_id, lista in candidatos.items()
+            }
+            candidatos = {producto_id: lista for producto_id, lista in candidatos.items()
+                          if lista}
         # Restricción por ciudad: la sucursal que pide solo puede pedir a los
         # Almacenes Principales o a proveedores de su misma ciudad (Cochabamba
         # no pide a La Paz, ni La Paz a Cochabamba). Ver
@@ -368,7 +378,9 @@ def pedidos():
                 tacho_unidad = 0
             fila = conn.execute(
                 "SELECT id, nombre, sucursal_id, unidad, IFNULL(unidad_tacho, 0) AS unidad_tacho, "
-                "IFNULL(pide_tacho, 0) AS pide_tacho, IFNULL(para_proveer, 1) AS para_proveer "
+                "IFNULL(pide_tacho, 0) AS pide_tacho, IFNULL(para_proveer, 1) AS para_proveer, "
+                "IFNULL((SELECT principal FROM sucursales WHERE id = productos.sucursal_id), 0) "
+                "AS proveedor_principal "
                 "FROM productos WHERE id = ? AND activo = 1", (prod_id,)).fetchone()
             if not fila:
                 conn.close()
@@ -378,6 +390,10 @@ def pedidos():
             if not fila["para_proveer"]:
                 conn.close()
                 return err(f"'{fila['nombre']}' es solo de inventario y no se puede pedir")
+            if session.get("rol") == "sasonador" and not fila["proveedor_principal"]:
+                conn.close()
+                return err(
+                    "Sazonador solo puede pedir productos de los Almacenes Principales")
             producto_sazonador_id = None
             if session.get("rol") == "sasonador":
                 producto_sazonador = conn.execute("""

@@ -9,7 +9,8 @@ from flask import Blueprint, request, session
 from database import get_conn
 from core.backup import carpeta_respaldos, nombre_respaldo, volcar_a_archivo
 from .lotes import (destinos_validos, elegir_destino, stock_por_destino,
-                    _ids_proveedores_misma_ciudad)
+                    _ids_proveedores_misma_ciudad,
+                    _solo_almacenes_principales)
 from .util import (ok, err, login_requerido, registrar_auditoria, registrar_movimiento,
                    ok_paginado, paginar_params, sucursal_actual, sucursal_operativa,
                    clausula_sucursal, stock_actual, es_gestion, es_encargado_almacen,
@@ -504,6 +505,8 @@ def productos():
               "WHERE a.sucursal_id = sp.id AND a.nombre LIKE 'AS %')) "
               "AND NOT EXISTS (SELECT 1 FROM usuarios saz "
               "WHERE saz.sucursal_id = sp.id AND saz.rol = 'sasonador'))")
+        if session.get("rol") == "sasonador":
+            q += " AND EXISTS (SELECT 1 FROM sucursales pp WHERE pp.id = p.sucursal_id AND pp.principal = 1)"
         # «La versión para proveer del AS manda»: si el artículo ya tiene una
         # fila con casilla «para proveer» en un almacén de sucursal (AS) de la
         # misma ciudad, SOLO esa fila se ofrece en los pedidos. La misma
@@ -569,6 +572,15 @@ def productos():
     if para_pedido:
         validos = destinos_validos(conn)
         destinos = stock_por_destino(conn)
+        if session.get("rol") == "sasonador":
+            validos = _solo_almacenes_principales(conn, validos)
+            principales = set(validos)
+            destinos = {
+                producto_id: [item for item in lista if item[0] in principales]
+                for producto_id, lista in destinos.items()
+            }
+            destinos = {producto_id: lista for producto_id, lista in destinos.items()
+                        if lista}
         # Acotado a la sucursal que pide (la elegida en el paso 1, o la propia):
         # Principales + sucursales AS de su misma ciudad, la misma lista que
         # revalida el alta del pedido. Las tiendas sin AS no despachan pedidos.

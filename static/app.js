@@ -5439,17 +5439,13 @@ async function loadPedidos() {
         if (!esGestionPed()) {
             sucursales = proveedoresAlcance(sucursales);
         }
-        // Selector de almacén destino. "Automático" es lo de siempre: cada
-        // producto va a la sucursal que lo reparte (la que lo tiene en el
-        // catálogo). Abajo están los almacenes a los que SÍ se puede pedir
-        // (principales, proveedoras y las que tienen productos «para proveer»,
-        // la misma regla que valida el backend), por si hay que sacarlo de uno
-        // puntual. Incluye la propia sucursal: se puede pedir a tu propio
-        // almacén principal (auto-pedido).
+        // El selector conserva los destinos permitidos por rol; Sazonador solo
+        // puede elegir Almacenes Principales.
         const selDest = $('#pedido-destino');
         if (selDest) {
             const pueden = sucursales.filter((x) =>
-                !x.es_sazonador && (x.principal || x.provee || x.es_as));
+                !x.es_sazonador && (x.principal || x.provee || x.es_as) &&
+                (window.ROL !== 'sasonador' || x.principal));
             // Cada sucursal es un almacén independiente: el pedido va DIRECTO al
             // almacén que despacha (los Principales y los de la misma ciudad).
             const destinosP = pueden;

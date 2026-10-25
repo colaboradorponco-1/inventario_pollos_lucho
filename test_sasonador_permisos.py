@@ -617,6 +617,56 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         conn.close()
         self.assertEqual(linea, (2, None))
 
+    def test_sazonador_solo_puede_pedir_a_almacenes_principales(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "INSERT INTO sucursales VALUES (43, 'America', 0, 1, 0)")
+        conn.execute("""
+            INSERT INTO productos
+                (id, sucursal_id, nombre, stock_actual, activo, para_proveer, unidad)
+            VALUES (3, 43, 'Producto de America', 8, 1, 1, 'kg')
+        """)
+        conn.commit()
+        conn.close()
+
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        conn_factory = lambda: SqliteCompatConnection(self.db_path)
+        with patch.object(pedidos_module, "get_conn", side_effect=conn_factory), \
+                patch.object(pedidos_module, "destinos_validos",
+                             return_value=[30, 43]), \
+                patch.object(pedidos_module, "stock_por_destino",
+                             return_value={2: [
+                                 (30, 12, "Almacén Principal"),
+                                 (43, 8, "America"),
+                             ]}), \
+                patch.object(pedidos_module, "_ids_proveedores_misma_ciudad",
+                             return_value=None), \
+                patch.object(pedidos_module, "_nombre_sucursal",
+                             side_effect=lambda conn, sid:
+                             {30: "Almacén Principal", 43: "America"}.get(sid, sid)):
+            respuesta = self.client.post("/api/pedidos", json={
+                "destino_id": 43,
+                "detalle": [{"producto_id": 2, "cantidad": 3}],
+            })
+            producto_no_principal = self.client.post("/api/pedidos", json={
+                "detalle": [{"producto_id": 3, "cantidad": 1}],
+            })
+
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("no pueden ser destino", respuesta.json["message"])
+        self.assertEqual(producto_no_principal.status_code, 400)
+        self.assertIn("Almacenes Principales",
+                      producto_no_principal.json["message"])
+        conn = sqlite3.connect(self.db_path)
+        cantidad_pedidos = conn.execute(
+            "SELECT COUNT(*) FROM pedidos").fetchone()[0]
+        conn.close()
+        self.assertEqual(cantidad_pedidos, 0)
+
     def test_entrega_pedido_suma_stock_al_producto_sazonador_vinculado(self):
         with self.client.session_transaction() as state:
             state.update({
