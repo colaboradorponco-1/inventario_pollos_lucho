@@ -269,12 +269,12 @@ class _MultiProveedorConn:
                         linea["preparado"] = 1
         elif self.sql_actual.startswith("UPDATE pedidos SET etapa = 'en_camino'"):
             self.pedido["etapa"] = self.pedido["estado"] = "en_camino"
-        elif self.sql_actual.startswith("UPDATE pedidos SET etapa = ?, estado = ?"):
-            self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
         elif self.sql_actual.startswith(
                 "UPDATE pedidos SET etapa = ?, estado = ?, total = ?, stock_movido = 1"):
             self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
             self.pedido["stock_movido"] = 1
+        elif self.sql_actual.startswith("UPDATE pedidos SET etapa = ?, estado = ?"):
+            self.pedido["etapa"], self.pedido["estado"] = self.params[:2]
         return self
 
     def fetchone(self):
@@ -405,6 +405,47 @@ try:
     encargado_almacen_original = ped.es_encargado_almacen
     ped.es_encargado_almacen = lambda _conn: True
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.pedido["stock_movido"] = 0
+    conn_multi.detalle = [
+        {"destino_id": 20, "preparado": 0},
+        {"destino_id": 21, "preparado": 0},
+    ]
+    with app_pruebas.test_request_context(
+            "/api/pedidos/11/etapa", method="PUT", json={"etapa": "en_camino"}):
+        session["user_id"] = 1
+        session["rol"] = "encargado"
+        session["sucursal_id"] = 20
+        session["receptor"] = False
+        avance_encargado = cuerpo_respuesta(ped.pedido_etapa(11))
+    check("el encargado principal pasa el pedido completo a En camino",
+          avance_encargado["ok"]
+          and conn_multi.pedido["etapa"] == "en_camino"
+          and conn_multi.pedido["stock_movido"] == 0
+          and not any(linea["preparado"] for linea in conn_multi.detalle))
+
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "en_camino"
+    despacho_gestor_original = ped._despachar_stock
+    llamadas_despacho_gestor = []
+    ped._despachar_stock = lambda *args, **kwargs: (
+        llamadas_despacho_gestor.append(1) or (10.0, [92]))
+    try:
+        with app_pruebas.test_request_context(
+                "/api/pedidos/11/etapa", method="PUT", json={"etapa": "entregado"}):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            session["sucursal_id"] = 20
+            session["receptor"] = False
+            entrega_encargado = cuerpo_respuesta(ped.pedido_etapa(11))
+    finally:
+        ped._despachar_stock = despacho_gestor_original
+    check("el encargado principal confirma Entregado y mueve stock una vez",
+          entrega_encargado["ok"]
+          and conn_multi.pedido["etapa"] == "entregado"
+          and conn_multi.pedido["stock_movido"] == 1
+          and len(llamadas_despacho_gestor) == 1)
+
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.pedido["stock_movido"] = 0
     conn_multi.detalle = [{"destino_id": 20, "preparado": 0}]
     with app_pruebas.test_request_context(
             "/api/pedidos/11/etapa", method="PUT", json={"etapa": "rechazado"}):
@@ -503,6 +544,8 @@ check("sin controles duplicados de cambio de estado",
           "window.despacharPedido", "window.cambiarEstadoPedido")))
 check("acciones centralizadas en el detalle",
       "function pintarEtapaEnModal" in app_js and "verPedido(${p.id}, true)" in app_js)
+check("el encargado ve la acción para pasar el pedido a En camino",
+      "b('Pasar a «En camino»', 'en_camino', true)" in app_js)
 
 print("\n" + "=" * 70)
 print("FALLOS:", fallos)

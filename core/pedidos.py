@@ -1372,6 +1372,18 @@ def pedido_etapa(pedido_id):
         conn.close()
         return err("Ese pedido no lo recibe tu sucursal", 403)
 
+    if (puede_gestionar_todos and destino_etapa == "en_camino"
+            and actual_etapa == "pendiente"):
+        conn.execute(
+            "UPDATE pedidos SET etapa = 'en_camino', estado = 'en_camino' WHERE id = ?",
+            (pedido_id,))
+        conn.commit()
+        conn.close()
+        registrar_auditoria(
+            "Pedido listo para envío",
+            f"{pedido['nro_ticket']}: encargado avanzó el pedido completo")
+        return ok(message=f"Pedido {pedido['nro_ticket']} pasó a «En camino».")
+
     if (es_preparador or es_as or puede_gestionar_todos) \
             and destino_etapa == "en_camino" \
             and actual_etapa == "pendiente":

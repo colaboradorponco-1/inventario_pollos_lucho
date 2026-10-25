@@ -6013,7 +6013,7 @@ function pintarEtapaEnModal(p, puedeGestionar) {
                 : b('Marcar mi parte lista', 'en_camino', true);
             box.innerHTML = listo;
         } else if (esGestorAlmacen) {
-            box.innerHTML = b('Marcar mi parte lista', 'en_camino', true)
+            box.innerHTML = b('Pasar a «En camino»', 'en_camino', true)
                 + `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`;
         } else {
             box.innerHTML = '<span class="respaldo-txt">El AS debe preparar este pedido.</span>';
