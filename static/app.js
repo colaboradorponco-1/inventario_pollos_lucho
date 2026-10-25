@@ -5036,10 +5036,8 @@ function renderTarjetasPedido() {
     });
     const keys = Object.keys(provs);
     if (!keys.length) {
-        const sinVinculos = window.ROL === 'sasonador' && !pedidoProdsAll.length;
-        cont.innerHTML = sinVinculos
-            ? '<div class="empty"><p>No hay productos vinculados para pedir todavía. En Productos, edita cada ficha del Sazonador y selecciona su equivalente en “Producto del proveedor para pedidos”. La unidad debe coincidir.</p><button type="button" class="btn btn-primary" id="btn-vincular-productos-pedido">Ir a Productos</button></div>'
-            : '<p class="empty">No hay productos que coincidan con la búsqueda y los filtros elegidos.</p>';
+        cont.innerHTML =
+            '<p class="empty">No hay productos que coincidan con la búsqueda y los filtros elegidos.</p>';
         return;
     }
     keys.sort((a, b) => {
@@ -5348,11 +5346,6 @@ on('#pedido-sucursal', 'change', async () => {
 });
 on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
 on('#pedido-categoria', 'change', () => renderTarjetasPedido());
-on('#pedido-listado', 'click', (event) => {
-    if (!event.target.closest('#btn-vincular-productos-pedido')) return;
-    document.querySelector('.menu-btn[data-view="productos"]')?.click();
-});
-
 // Cambiar de almacén recarga el "disponible": el número depende de dónde esté
 // la mercadería, así que hay que volver a pedirlo al servidor.
 on('#pedido-destino', 'change', async () => {
@@ -5410,14 +5403,6 @@ async function cargarProductosPedido() {
     const respP = await request(API + '/productos?' + qs.toString());
     pedidoProdsAll = (respP.data || respP)
         .map((p) => ({ ...p, stock_prov: p.stock_prov ?? 0 }));
-    if (window.ROL === 'sasonador') {
-        const productosSazonador = await request(API + '/sazonador/productos');
-        const vinculados = new Set((productosSazonador.data || productosSazonador)
-            .map((producto) => Number(producto.producto_pedido_id))
-            .filter((id) => id > 0));
-        pedidoProdsAll = pedidoProdsAll.filter((producto) =>
-            vinculados.has(Number(producto.id)));
-    }
 }
 
 // Sucursal por la que se pediría este producto. Si el servidor ya la resolvió

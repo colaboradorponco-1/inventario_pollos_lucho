@@ -239,7 +239,8 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
                 id INTEGER PRIMARY KEY, sucursal_id INTEGER, nombre TEXT,
                 stock_actual REAL, activo INTEGER DEFAULT 1,
                 para_proveer INTEGER DEFAULT 1, unidad TEXT DEFAULT 'unidad',
-                costo_promedio REAL DEFAULT 0
+                costo_promedio REAL DEFAULT 0, unidad_tacho REAL DEFAULT 0,
+                pide_tacho INTEGER DEFAULT 0
             );
             INSERT INTO productos
                 (id, sucursal_id, nombre, stock_actual, activo, para_proveer, unidad)
@@ -274,12 +275,16 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
                 observaciones TEXT, UNIQUE (inventario_id, producto_id)
             );
             CREATE TABLE pedidos (
-                id INTEGER PRIMARY KEY, nro_ticket TEXT, sucursal_id INTEGER,
-                destino_id INTEGER
+                id INTEGER PRIMARY KEY AUTOINCREMENT, nro_ticket TEXT, fecha TEXT,
+                sucursal_id INTEGER, destino_id INTEGER, estado TEXT, total REAL,
+                usuario TEXT, nota TEXT
             );
             CREATE TABLE pedido_detalle (
-                id INTEGER PRIMARY KEY, pedido_id INTEGER, producto_id INTEGER,
-                producto_nombre TEXT, cantidad REAL, destino_id INTEGER,
+                id INTEGER PRIMARY KEY AUTOINCREMENT, pedido_id INTEGER,
+                producto_id INTEGER, producto_nombre TEXT, cantidad REAL,
+                destino_id INTEGER, unidad TEXT DEFAULT 'kg',
+                tacho_fraccion REAL DEFAULT 0, tacho_texto TEXT DEFAULT '',
+                tacho_unidad REAL DEFAULT 0, sin_stock INTEGER DEFAULT 0,
                 producto_sazonador_id INTEGER
             );
             CREATE TABLE repartos (
@@ -298,6 +303,7 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         self.app = Flask(__name__)
         self.app.secret_key = "test"
         self.app.register_blueprint(sazonador_module.sazonador_bp)
+        self.app.register_blueprint(pedidos_module.pedidos_bp)
         self.client = self.app.test_client()
         self.patch_conn = patch.object(
             sazonador_module, "get_conn",
@@ -578,6 +584,39 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
         self.assertFalse(_sucursal_puede_proveer(conn, 42))
         conn.close()
 
+    def test_sazonador_puede_crear_pedido_sin_vincular_fichas_antes(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        conn_factory = lambda: SqliteCompatConnection(self.db_path)
+        with patch.object(pedidos_module, "get_conn", side_effect=conn_factory), \
+                patch.object(pedidos_module, "destinos_validos", return_value=[30]), \
+                patch.object(pedidos_module, "stock_por_destino",
+                             return_value={2: [(30, 12, "Almacén Principal")]}), \
+                patch.object(pedidos_module, "_ids_proveedores_misma_ciudad",
+                             return_value=None), \
+                patch.object(pedidos_module, "elegir_destino",
+                             return_value=(30, 12)), \
+                patch.object(pedidos_module, "stock_en_destino", return_value=12), \
+                patch.object(pedidos_module, "_nro_ticket",
+                             return_value="TKT-00003"), \
+                patch.object(pedidos_module, "registrar_auditoria"):
+            respuesta = self.client.post("/api/pedidos", json={
+                "detalle": [{"producto_id": 2, "cantidad": 3}],
+            })
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json["data"]["nro_ticket"], "TKT-00003")
+        conn = sqlite3.connect(self.db_path)
+        linea = conn.execute("""
+            SELECT producto_id, producto_sazonador_id
+            FROM pedido_detalle WHERE pedido_id = ?
+        """, (respuesta.json["data"]["id"],)).fetchone()
+        conn.close()
+        self.assertEqual(linea, (2, None))
+
     def test_entrega_pedido_suma_stock_al_producto_sazonador_vinculado(self):
         with self.client.session_transaction() as state:
             state.update({
@@ -637,6 +676,62 @@ class InventarioSazonadorSeparadoTests(unittest.TestCase):
             "SELECT stock_actual FROM productos WHERE id = 2").fetchone()[0]
         conn.close()
         self.assertEqual(stock_sazonador, 7)
+        self.assertEqual(stock_producto_normal, 12)
+
+    def test_entrega_pedido_crea_ficha_sazonador_si_no_hay_vinculo(self):
+        with self.client.session_transaction() as state:
+            state.update({
+                "user_id": 7, "rol": "sasonador", "sucursal_id": 42,
+                "usuario": "sazonador_prueba",
+            })
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "INSERT INTO usuarios (sucursal_id, rol, activo) VALUES (42, 'sasonador', 1)")
+        conn.execute(
+            "INSERT INTO pedidos (id, nro_ticket, sucursal_id, destino_id) "
+            "VALUES (2, 'TKT-00002', 42, 30)")
+        conn.execute("""
+            INSERT INTO pedido_detalle
+                (id, pedido_id, producto_id, producto_nombre, cantidad,
+                 destino_id, producto_sazonador_id)
+            VALUES (2, 2, 2, 'Producto proveedor', 3, 30, NULL)
+        """)
+        conn.commit()
+        conn.close()
+
+        movimientos = []
+        with self.app.test_request_context("/"):
+            session.update({
+                "user_id": 7, "rol": "repartidor", "sucursal_id": 42,
+                "usuario": "repartidor_prueba",
+            })
+            with patch.object(pedidos_module, "stock_actual", return_value=12), \
+                    patch.object(pedidos_module, "registrar_movimiento",
+                                 side_effect=lambda *args: movimientos.append(args)):
+                conn = SqliteCompatConnection(self.db_path)
+                try:
+                    total, repartos = pedidos_module._despachar_stock(
+                        conn,
+                        {"id": 2, "nro_ticket": "TKT-00002", "sucursal_id": 42,
+                         "destino_id": 30},
+                        origen_propio=False)
+                    conn.commit()
+                finally:
+                    conn.close()
+
+        self.assertEqual(total, 0)
+        self.assertEqual(len(repartos), 1)
+        self.assertEqual(len(movimientos), 1)
+        conn = sqlite3.connect(self.db_path)
+        ficha = conn.execute("""
+            SELECT nombre, unidad, stock_actual
+            FROM sazonador_productos
+            WHERE sucursal_id = 42 AND almacen_id = 91
+        """).fetchone()
+        stock_producto_normal = conn.execute(
+            "SELECT stock_actual FROM productos WHERE id = 2").fetchone()[0]
+        conn.close()
+        self.assertEqual(ficha, ("Producto proveedor", "kg", 3))
         self.assertEqual(stock_producto_normal, 12)
 
     def test_exige_el_almacen_especifico_de_la_sucursal_sazonador(self):
