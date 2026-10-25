@@ -9,13 +9,19 @@ set -euo pipefail
 AUTO=0
 [ "${1:-}" = "--auto" ] && AUTO=1
 APP_DIR="/opt/pollos-lucho"
-STAGE="/root/pollos-deploy"
+STAGE=""
 VENV="$APP_DIR/venv"
 REPO="https://github.com/colaboradorponco-1/inventario_pollos_lucho.git"
 SELF="/root/desplegar.sh"
 SELF_RAW="https://raw.githubusercontent.com/colaboradorponco-1/inventario_pollos_lucho/main/deploy/desplegar.sh"
 # Version del script: sirve para saber desde el log que version corrio en el droplet.
-SCRIPT_VERSION="2026-09-30b"
+SCRIPT_VERSION="2026-10-25a"
+
+limpiar_stage() {
+  if [ -n "$STAGE" ] && [ -d "$STAGE" ]; then
+    rm -rf -- "$STAGE"
+  fi
+}
 
 # Auto-actualizacion: si GitHub tiene este script mas nuevo, reemplazarse y reintentar.
 tmp_self="$(mktemp)"
@@ -28,8 +34,10 @@ if curl -fsSL "$SELF_RAW" -o "$tmp_self" 2>/dev/null && [ -s "$tmp_self" ] && \
 fi
 rm -f "$tmp_self"
 
+STAGE="$(mktemp -d /root/pollos-deploy.XXXXXX)"
+trap limpiar_stage EXIT
+
 echo "==> Clonando ultima version ($(date '+%F %T'))"
-rm -rf "$STAGE"
 git clone --depth 1 --branch main "$REPO" "$STAGE"
 
 HEAD="$(git -C "$STAGE" rev-parse HEAD)"
