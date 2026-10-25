@@ -968,7 +968,12 @@
                         <div class="wiz-panel" data-paso="2">
                             <label>Destino del pedido <select id="pedido-destino"></select></label>
                             <span class="respaldo-txt" id="pedido-destino-aviso"></span>
-                            <input type="text" id="pedido-buscar" placeholder="Buscar producto, sucursal, categoría..." autocomplete="off">
+                            <div class="pedido-filtros-productos">
+                                <input type="search" id="pedido-buscar" placeholder="Buscar por producto, código o sucursal..." autocomplete="off">
+                                <select id="pedido-categoria" aria-label="Filtrar productos por categoría">
+                                    <option value="">Todas las categorías</option>
+                                </select>
+                            </div>
                             <div id="pedido-prov-btns" class="toolbar small"></div>
                             <div id="pedido-listado"></div>
                             <div class="toolbar small">

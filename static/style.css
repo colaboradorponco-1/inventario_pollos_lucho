@@ -435,6 +435,25 @@ button:focus-visible, a:focus-visible, .tab-log:focus-visible, .hist-tab:focus-v
 .toolbar h2 { margin-right: auto; }
 .toolbar input, .toolbar select { min-width: 170px; }
 
+.pedido-filtros-productos {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    margin: 8px 0;
+}
+.pedido-filtros-productos input {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+.pedido-filtros-productos select {
+    flex: 0 1 260px;
+    min-width: 190px;
+}
+@media (max-width: 600px) {
+    .pedido-filtros-productos { flex-direction: column; }
+    .pedido-filtros-productos select { flex: 1 1 auto; width: 100%; }
+}
+
 /* Badges */
 .badge { padding: 3px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
 .badge-entrada { background: #e8f5e9; color: var(--green); }

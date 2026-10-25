@@ -4992,13 +4992,16 @@ function productosElegidos() {
 // almacén y misma búsqueda que usa renderTarjetasPedido).
 function pedidoProductosVisibles() {
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
+    const categoria = ($('#pedido-categoria') || {}).value || '';
     return (pedidoProdsAll || []).filter((p) => {
         const provId = provDeProducto(p);
         if (!provId) return false;
         if (!proveeActivo(provId)) return false;
         if (pedidoProvFiltro && String(provId) !== pedidoProvFiltro) return false;
+        if (categoria && String(p.categoria_id || '') !== categoria) return false;
         if (q) {
-            const buscar = (p.nombre + ' ' + (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
+            const buscar = (p.nombre + ' ' + (p.codigo || '') + ' ' +
+                (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
             if (!buscar.includes(q)) return false;
         }
         return true;
@@ -5009,12 +5012,15 @@ function renderTarjetasPedido() {
     const cont = $('#pedido-listado');
     if (!cont) return;
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
+    const categoria = ($('#pedido-categoria') || {}).value || '';
     const provs = {};
     (pedidoProdsAll || []).forEach((p) => {
         const provId = provDeProducto(p);
         if (!provId) return;
         if (!proveeActivo(provId)) return;
-        const buscar = (p.nombre + ' ' + (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
+        if (categoria && String(p.categoria_id || '') !== categoria) return;
+        const buscar = (p.nombre + ' ' + (p.codigo || '') + ' ' +
+            (p.sucursal_nombre || '') + ' ' + (p.categoria_nombre || '')).toLowerCase();
         if (q && !buscar.includes(q)) return;
         const key = String(provId);
         if (!provs[key]) {
@@ -5030,7 +5036,10 @@ function renderTarjetasPedido() {
     });
     const keys = Object.keys(provs);
     if (!keys.length) {
-        cont.innerHTML = '<p class="empty">No hay productos con ese nombre. Prueba con otra palabra.</p>';
+        const sinVinculos = window.ROL === 'sasonador' && !pedidoProdsAll.length;
+        cont.innerHTML = sinVinculos
+            ? '<div class="empty"><p>No hay productos vinculados para pedir todavía. En Productos, edita cada ficha del Sazonador y selecciona su equivalente en “Producto del proveedor para pedidos”. La unidad debe coincidir.</p><button type="button" class="btn btn-primary" id="btn-vincular-productos-pedido">Ir a Productos</button></div>'
+            : '<p class="empty">No hay productos que coincidan con la búsqueda y los filtros elegidos.</p>';
         return;
     }
     keys.sort((a, b) => {
@@ -5319,6 +5328,11 @@ on('#pedido-sucursal', 'change', async () => {
     renderTarjetasPedido();
 });
 on('#pedido-buscar', 'input', debounce(() => renderTarjetasPedido(), 180));
+on('#pedido-categoria', 'change', () => renderTarjetasPedido());
+on('#pedido-listado', 'click', (event) => {
+    if (!event.target.closest('#btn-vincular-productos-pedido')) return;
+    document.querySelector('.menu-btn[data-view="productos"]')?.click();
+});
 
 // Cambiar de almacén recarga el "disponible": el número depende de dónde esté
 // la mercadería, así que hay que volver a pedirlo al servidor.
@@ -5437,6 +5451,12 @@ async function loadPedidos() {
             const destinosP = pueden;
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + destinosP.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
+        }
+        const filtroCategoria = $('#pedido-categoria');
+        if (filtroCategoria) {
+            filtroCategoria.innerHTML = '<option value="">Todas las categorías</option>' +
+                (catalogos.categorias || []).map((categoria) =>
+                    `<option value="${categoria.id}">${esc(categoria.nombre)}</option>`).join('');
         }
         const opcionesAS = opcionesSucursales(sucursalesFiltroBandejaPedidos(sucursales), 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
