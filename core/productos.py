@@ -195,10 +195,15 @@ def _sucursal_puede_proveer(conn, sucursal_id):
     # usuario receptor.
     sucursal = conn.execute(
         "SELECT s.principal, s.es_as, s.nombre, "
+        "EXISTS (SELECT 1 FROM usuarios saz "
+        "WHERE saz.sucursal_id = s.id AND saz.rol = 'sasonador') AS tiene_sazonador, "
         "EXISTS (SELECT 1 FROM almacenes a "
         "WHERE a.sucursal_id = s.id AND a.nombre LIKE 'AS %') AS almacen_as "
         "FROM sucursales s WHERE s.id = ?", (sucursal_id,)).fetchone()
     if not sucursal:
+        return False
+    sucursal = dict(sucursal)
+    if sucursal["tiene_sazonador"]:
         return False
     nombre = (sucursal.get("nombre") or "").strip().upper()
     return bool(sucursal.get("principal") or sucursal.get("es_as")
@@ -496,7 +501,9 @@ def productos():
               "OR EXISTS (SELECT 1 FROM usuarios u "
               "WHERE u.sucursal_id = sp.id AND IFNULL(u.receptor, 0) = 1) "
               "OR EXISTS (SELECT 1 FROM almacenes a "
-              "WHERE a.sucursal_id = sp.id AND a.nombre LIKE 'AS %')))")
+              "WHERE a.sucursal_id = sp.id AND a.nombre LIKE 'AS %')) "
+              "AND NOT EXISTS (SELECT 1 FROM usuarios saz "
+              "WHERE saz.sucursal_id = sp.id AND saz.rol = 'sasonador'))")
         # «La versión para proveer del AS manda»: si el artículo ya tiene una
         # fila con casilla «para proveer» en un almacén de sucursal (AS) de la
         # misma ciudad, SOLO esa fila se ofrece en los pedidos. La misma

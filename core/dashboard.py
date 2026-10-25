@@ -559,7 +559,11 @@ def catalogos():
         "categorias": [dict(r) for r in conn.execute("SELECT * FROM categorias ORDER BY nombre").fetchall()],
         "proveedores": proveedores,
         "sucursales": [
-            dict(r, provee=r["id"] in _validos)
+            dict(r, provee=r["id"] in _validos,
+                 es_sazonador=conn.execute(
+                     "SELECT 1 FROM usuarios WHERE sucursal_id = ? "
+                     "AND rol = 'sasonador' LIMIT 1", (r["id"],)
+                 ).fetchone() is not None)
             for r in conn.execute(
                 "SELECT s.*, p.nombre AS padre_nombre "
                 "FROM sucursales s LEFT JOIN sucursales p ON p.id = s.padre_id "

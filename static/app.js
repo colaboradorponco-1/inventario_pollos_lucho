@@ -1120,8 +1120,11 @@ async function loadProductos() {
                     ? esProductoSazonador
                     : !esProductoSazonador && (esGestion || esPropio);
                 const acciones = soloLecturaSasonador
-                    ? (puedeEditar
-                        ? `<button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>`
+                    ? (puedeEditar && estado === 'inactivos'
+                        ? `<button class="btn btn-icon" data-restaurar-prod="${p.id}" title="Restaurar" aria-label="Restaurar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></button>`
+                        : puedeEditar
+                        ? `<button class="btn btn-icon" data-edit-prod="${p.id}" title="Editar" aria-label="Editar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg></button>
+                        <button class="btn btn-icon btn-danger" data-del-prod="${p.id}" title="Desactivar" aria-label="Desactivar"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>`
                         : '')
                     : esProductoSazonador ? ''
                     : estado === 'inactivos'
@@ -1180,7 +1183,10 @@ async function loadProductos() {
         $$('[data-restaurar-prod]').forEach((b) => b.addEventListener('click', async () => {
             if (!confirm('¿Restaurar este producto?')) return;
             try {
-                await request(API + '/productos/' + b.dataset.restaurarProd + '/restaurar', { method: 'POST' });
+                const ruta = window.ROL === 'sasonador'
+                    ? '/sazonador/productos/' + b.dataset.restaurarProd + '/restaurar'
+                    : '/productos/' + b.dataset.restaurarProd + '/restaurar';
+                await request(API + ruta, { method: 'POST' });
                 toast('Producto restaurado');
                 loadProductos();
             } catch (e) { toast(e.message, 'err'); }
@@ -1962,10 +1968,14 @@ $('#form-producto').addEventListener('submit', async (e) => {
 });
 
 async function delProducto(id) {
-    if (!confirm('¿Eliminar este producto?')) return;
+    const esSazonador = window.ROL === 'sasonador';
+    if (!confirm(esSazonador
+        ? '¿Desactivar este producto? Se conservará su historial y no se podrá desactivar mientras tenga stock o esté en un inventario abierto.'
+        : '¿Eliminar este producto?')) return;
     try {
-        await request(API + '/productos/' + id, { method: 'DELETE' });
-        toast('Producto eliminado');
+        await request((esSazonador ? API + '/sazonador/productos/' : API + '/productos/') + id,
+            { method: 'DELETE' });
+        toast(esSazonador ? 'Producto desactivado' : 'Producto eliminado');
         loadProductos();
     } catch (e) {
         toast(e.message, 'err');
@@ -4235,10 +4245,10 @@ async function abrirInventario(invId) {
     $('#btn-inv-guardar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-cerrar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-borrar').style.display =
-        (INV_CERRADA || INV_SOLO_LECTURA || window.ROL === 'sasonador') ? 'none' : '';
+        (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#btn-inv-excel').style.display = window.ROL === 'sasonador' ? 'none' : '';
     $('#btn-inv-print').style.display = window.ROL === 'sasonador' ? 'none' : '';
-    $('#btn-inv-refrescar').style.display = window.ROL === 'sasonador' ? 'none' : '';
+    $('#btn-inv-refrescar').style.display = (INV_CERRADA || INV_SOLO_LECTURA) ? 'none' : '';
     $('#inv-nota-cierre').textContent = INV_CERRADA
         ? 'Esta planilla está cerrada. El stock ya fue ajustado según el conteo.'
         : (INV_SOLO_LECTURA
@@ -4468,7 +4478,7 @@ async function borrarInventario() {
     if (!confirm('Borrar esta planilla abierta?\n\n' +
         'Se elimina el conteo que hiciste. El stock NO se toca, porque solo se ' +
         'ajusta al cerrar.\n\nSolo se puede borrar si sigue abierta.')) return;
-    const r = await request(API + '/inventario-diario/' + INV_ID, { method: 'DELETE' });
+    const r = await request(apiInventarioDiario() + '/' + INV_ID, { method: 'DELETE' });
     toast(r.message || 'Planilla borrada', 'ok');
     $('#inv-panel-conteo').style.display = 'none';
     INV_ID = null;
@@ -4911,7 +4921,7 @@ function proveedorCantShow(p) {
 // fuera como destino de pedido, y sus productos desaparecían del formulario.
 function proveeActivo(provId) {
     const s = (catalogos.sucursales || []).find((x) => x.id === provId);
-    if (!s) return false;
+    if (!s || s.es_sazonador) return false;
     if (s.principal) return true;
     if (!s.provee && !s.es_as) return false;
     // Restricción de ciudad: solo se puede pedir a proveedores de la MISMA
@@ -5420,7 +5430,8 @@ async function loadPedidos() {
         // almacén principal (auto-pedido).
         const selDest = $('#pedido-destino');
         if (selDest) {
-            const pueden = sucursales.filter((x) => (x.principal || x.provee || x.es_as));
+            const pueden = sucursales.filter((x) =>
+                !x.es_sazonador && (x.principal || x.provee || x.es_as));
             // Cada sucursal es un almacén independiente: el pedido va DIRECTO al
             // almacén que despacha (los Principales y los de la misma ciudad).
             const destinosP = pueden;
@@ -5471,7 +5482,8 @@ function puedeRevisarEquivalencias() { return esCentral() || !!window.RECEPTOR; 
 function sucursalProvee() {
     const m = (catalogos.sucursales || []).find((s) => s.id === window.SUCURSAL_ID);
     if (!m) return false;
-    return !!m.provee || !!m.es_as || !!window.SUCURSAL_PRINCIPAL;
+    return !m.es_sazonador
+        && (!!m.provee || !!m.es_as || !!window.SUCURSAL_PRINCIPAL);
 }
 
 // «Mis pedidos» (wizard + historial de los que yo realicé) está disponible para
@@ -5877,7 +5889,7 @@ async function listarPedidos() {
             <td>${celdaEstado}</td>
             <td>${esc(p.nota) || '—'}</td>
             <td>
-                ${window.ROL !== 'sasonador' && window.SUCURSAL_ID && ['entregado', 'rechazado'].includes(estado)
+                ${window.SUCURSAL_ID && ['entregado', 'rechazado'].includes(estado)
                     ? `<button class="btn btn-sm" onclick="archivarPedido(${p.id}, ${vistaPropios !== 'archivados'})">${vistaPropios === 'archivados' ? 'Restaurar' : 'Archivar'}</button>`
                     : ''}
                 ${window.ROL !== 'sasonador' && window.SUCURSAL_ID && vistaPropios === 'archivados' && ['entregado', 'rechazado'].includes(estado)

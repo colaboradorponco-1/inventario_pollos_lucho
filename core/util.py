@@ -213,11 +213,13 @@ def ruta_bloqueada_sasonador(path, method="GET"):
     if path == "/api/sazonador/productos":
         return metodo not in ("GET", "HEAD", "OPTIONS", "POST")
     if re.fullmatch(r"/api/sazonador/productos/\d+", path):
-        return metodo != "PUT"
+        return metodo not in ("PUT", "DELETE")
+    if re.fullmatch(r"/api/sazonador/productos/\d+/restaurar", path):
+        return metodo != "POST"
     if path == "/api/sazonador/inventario-diario":
         return metodo not in ("GET", "HEAD", "OPTIONS", "POST")
     if re.fullmatch(r"/api/sazonador/inventario-diario/\d+", path):
-        return metodo not in ("GET", "HEAD", "OPTIONS", "PUT")
+        return metodo not in ("GET", "HEAD", "OPTIONS", "PUT", "DELETE")
     if re.fullmatch(r"/api/sazonador/inventario-diario/\d+/cerrar", path):
         return metodo != "POST"
     if path == "/api/dashboard":
@@ -237,8 +239,11 @@ def ruta_bloqueada_sasonador(path, method="GET"):
         return metodo != "POST"
     if path == "/api/pedidos":
         return metodo not in lectura and metodo != "POST"
-    if (re.fullmatch(r"/api/pedidos/\d+", path)
-            or re.fullmatch(r"/api/pedidos/\d+/ticket", path)
+    if re.fullmatch(r"/api/pedidos/\d+/archivar", path):
+        return metodo != "PUT"
+    if re.fullmatch(r"/api/pedidos/\d+", path):
+        return metodo not in lectura
+    if (re.fullmatch(r"/api/pedidos/\d+/ticket", path)
             or re.fullmatch(r"/pedidos/ticket/\d+", path)):
         return metodo not in lectura
     return True

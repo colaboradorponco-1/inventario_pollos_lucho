@@ -142,9 +142,9 @@ def productos_sazonador():
         LEFT JOIN sucursales pps ON pps.id = pp.sucursal_id
         JOIN almacenes a ON a.id = p.almacen_id
         JOIN sucursales s ON s.id = p.sucursal_id
-        WHERE p.sucursal_id = ? AND p.almacen_id = ? AND p.activo = 1
+        WHERE p.sucursal_id = ? AND p.almacen_id = ? AND p.activo = ?
     """
-    params = [sid, almacen["id"]]
+    params = [sid, almacen["id"], 0 if estado == "inactivos" else 1]
     if filtro:
         consulta += " AND (p.nombre LIKE ? OR p.codigo LIKE ?)"
         params.extend([f"%{filtro}%", f"%{filtro}%"])
@@ -167,7 +167,8 @@ def productos_sazonador():
     return ok(filas)
 
 
-@sazonador_bp.route("/api/sazonador/productos/<int:producto_id>", methods=["PUT"])
+@sazonador_bp.route("/api/sazonador/productos/<int:producto_id>",
+                    methods=["PUT", "DELETE"])
 @login_requerido
 def editar_producto_sazonador(producto_id):
     if not _sesion_sazonador():
@@ -185,6 +186,28 @@ def editar_producto_sazonador(producto_id):
     if not producto:
         conn.close()
         return err("Producto Sazonador no encontrado", 404)
+    if request.method == "DELETE":
+        stock = conn.execute(
+            "SELECT stock_actual FROM sazonador_productos WHERE id = ?",
+            (producto_id,)).fetchone()
+        if float(stock["stock_actual"] or 0) != 0:
+            conn.close()
+            return err("No puedes desactivar un producto que todavía tiene stock", 409)
+        en_inventario_abierto = conn.execute("""
+            SELECT 1 FROM sazonador_inventario_detalle d
+            JOIN sazonador_inventarios i ON i.id = d.inventario_id
+            WHERE d.producto_id = ? AND i.estado = 'abierto' LIMIT 1
+        """, (producto_id,)).fetchone()
+        if en_inventario_abierto:
+            conn.close()
+            return err("Cierra o termina el inventario diario abierto antes de desactivar el producto", 409)
+        conn.execute(
+            "UPDATE sazonador_productos SET activo = 0 "
+            "WHERE id = ? AND sucursal_id = ? AND almacen_id = ? AND activo = 1",
+            (producto_id, sid, almacen["id"]))
+        conn.commit()
+        conn.close()
+        return ok(message="Producto desactivado; se conservaron su historial y registros")
 
     data = request.get_json() or {}
     nombre = (data.get("nombre") or "").strip()
@@ -238,6 +261,30 @@ def editar_producto_sazonador(producto_id):
     return ok({"id": producto_id}, message="Producto Sazonador actualizado")
 
 
+@sazonador_bp.route("/api/sazonador/productos/<int:producto_id>/restaurar",
+                    methods=["POST"])
+@login_requerido
+def restaurar_producto_sazonador(producto_id):
+    if not _sesion_sazonador():
+        return err("Esta operación es exclusiva del rol Sazonador con sucursal asignada", 403)
+    sid = sucursal_actual()
+    conn = get_conn()
+    almacen = _almacen_sazonador(conn, sid)
+    if not almacen:
+        conn.close()
+        return err("Crea en la sucursal Sazonador el almacén con el mismo nombre de la sucursal", 409)
+    cursor = conn.execute("""
+        UPDATE sazonador_productos SET activo = 1
+        WHERE id = ? AND sucursal_id = ? AND almacen_id = ? AND activo = 0
+    """, (producto_id, sid, almacen["id"]))
+    if cursor.rowcount != 1:
+        conn.close()
+        return err("Producto Sazonador inactivo no encontrado", 404)
+    conn.commit()
+    conn.close()
+    return ok(message="Producto Sazonador restaurado")
+
+
 def _inventario_por_id(conn, inv_id, sid, bloquear=False):
     query = "SELECT * FROM sazonador_inventarios WHERE id = ? AND sucursal_id = ?"
     if bloquear:
@@ -253,6 +300,48 @@ def _inventario_detalle(conn, inv_id):
         WHERE d.inventario_id = ?
         ORDER BY COALESCE(c.nombre, 'Sin categoría'), d.producto_nombre
     """, (inv_id,)).fetchall()
+
+
+def _sincronizar_stock_inventario_sazonador(conn, inv, actualizar_contados=False):
+    productos = conn.execute("""
+        SELECT p.*, c.nombre AS categoria_nombre
+        FROM sazonador_productos p
+        LEFT JOIN categorias c ON c.id = p.categoria_id
+        WHERE p.sucursal_id = ? AND p.almacen_id = ? AND p.activo = 1
+          AND (? = 0 OR p.categoria_id = ?)
+        ORDER BY c.nombre, p.nombre
+    """, (inv["sucursal_id"], inv["almacen_id"],
+          inv["categoria_id"], inv["categoria_id"])).fetchall()
+    for producto in productos:
+        detalle = conn.execute("""
+            SELECT id, conteo_fisico FROM sazonador_inventario_detalle
+            WHERE inventario_id = ? AND producto_id = ?
+        """, (inv["id"], producto["id"])).fetchone()
+        stock = float(producto["stock_actual"] or 0)
+        if not detalle:
+            conn.execute("""
+                INSERT INTO sazonador_inventario_detalle
+                    (inventario_id, producto_id, categoria_id, producto_nombre,
+                     codigo, unidad, stock_sistema, inicial, disponible)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (inv["id"], producto["id"], producto["categoria_id"],
+                  producto["nombre"], producto["codigo"], producto["unidad"],
+                  stock, stock, stock))
+            continue
+        if detalle["conteo_fisico"] is not None and not actualizar_contados:
+            continue
+        conteo = detalle["conteo_fisico"]
+        diferencia = float(conteo) - stock if conteo is not None else 0
+        utilizada = max(stock - float(conteo), 0) if conteo is not None else 0
+        conn.execute("""
+            UPDATE sazonador_inventario_detalle
+            SET categoria_id = ?, producto_nombre = ?, codigo = ?, unidad = ?,
+                stock_sistema = ?, inicial = ?, disponible = ?,
+                diferencia = ?, utilizada = ?
+            WHERE id = ?
+        """, (producto["categoria_id"], producto["nombre"], producto["codigo"],
+              producto["unidad"], stock, stock, stock, diferencia, utilizada,
+              detalle["id"]))
 
 
 @sazonador_bp.route("/api/sazonador/inventario-diario", methods=["GET", "POST"])
@@ -395,7 +484,7 @@ def inventario_sazonador():
 
 
 @sazonador_bp.route("/api/sazonador/inventario-diario/<int:inv_id>",
-                    methods=["GET", "PUT"])
+                    methods=["GET", "PUT", "DELETE"])
 @login_requerido
 def detalle_inventario_sazonador(inv_id):
     if not _sesion_sazonador():
@@ -406,6 +495,27 @@ def detalle_inventario_sazonador(inv_id):
     if not inv:
         conn.close()
         return err("Inventario no encontrado", 404)
+    if request.method == "DELETE":
+        if inv["estado"] == "cerrado":
+            conn.close()
+            return err("El inventario está cerrado y ya ajustó el stock. No se puede borrar", 400)
+        lineas = conn.execute(
+            "SELECT COUNT(*) AS n FROM sazonador_inventario_detalle "
+            "WHERE inventario_id = ?", (inv_id,)).fetchone()["n"]
+        conn.execute(
+            "DELETE FROM sazonador_inventario_detalle WHERE inventario_id = ?",
+            (inv_id,))
+        conn.execute(
+            "DELETE FROM sazonador_inventarios WHERE id = ? AND sucursal_id = ?",
+            (inv_id, sid))
+        conn.commit()
+        conn.close()
+        return ok({"id": inv_id, "lineas": lineas},
+                  message=f"Planilla abierta borrada ({lineas} productos, sin cambios en el stock)")
+    if request.method == "GET" and inv["estado"] != "cerrado":
+        _sincronizar_stock_inventario_sazonador(
+            conn, inv, request.args.get("actualizar_stock") == "1")
+        conn.commit()
     if request.method == "PUT":
         if inv["estado"] == "cerrado":
             conn.close()
