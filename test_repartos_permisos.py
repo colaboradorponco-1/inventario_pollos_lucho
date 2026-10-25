@@ -155,10 +155,14 @@ historial_movimientos = inspect.getsource(mov.movimientos)
 check("el reparto manual registra salida en origen y entrada en destino",
       'registrar_movimiento(conn, prod_id, "salida"' in reparto_manual
       and 'registrar_movimiento(conn, prod_id, "entrada"' in reparto_manual)
+reparto_pedido_normalizado = " ".join(reparto_pedido.split())
 check("la entrega automática del pedido registra salida y entrada de stock",
       'conn, d["producto_id"], "salida"' in reparto_pedido
-      and "productos_recepcion[(origen_id, d[\"producto_id\"])]" in reparto_pedido
-      and 'registrar_movimiento(conn, producto_receptor_id, "entrada"' in reparto_pedido)
+      and 'productos_recepcion[ (origen_id, d["producto_id"])]' in reparto_pedido_normalizado
+      and 'if tipo_recepcion == "sazonador":' in reparto_pedido_normalizado
+      and "UPDATE sazonador_productos" in reparto_pedido_normalizado
+      and ('registrar_movimiento( conn, producto_receptor_id, "entrada", '
+           'd["cantidad"]' in reparto_pedido_normalizado))
 check("el historial incluye entradas y salidas si no se selecciona un tipo",
       'if tipo:' in historial_movimientos
       and 'q += " AND m.tipo = ?"' in historial_movimientos)

@@ -82,6 +82,13 @@ class SasonadorPermisosTests(unittest.TestCase):
                 self.assertFalse(ruta_bloqueada_sasonador(path, "GET"))
         self.assertFalse(ruta_bloqueada_sasonador("/api/pedidos", "POST"))
         self.assertFalse(ruta_bloqueada_sasonador("/api/logout", "POST"))
+        self.assertFalse(ruta_bloqueada_sasonador("/api/perfil", "PUT"))
+        self.assertFalse(ruta_bloqueada_sasonador("/api/perfil/avatar", "PUT"))
+        self.assertFalse(ruta_bloqueada_sasonador(
+            "/api/cambiar_password", "POST"))
+        self.assertTrue(ruta_bloqueada_sasonador("/api/perfil", "POST"))
+        self.assertTrue(ruta_bloqueada_sasonador(
+            "/api/perfil/avatar", "POST"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/pedidos/15/etapa", "PUT"))
         self.assertTrue(ruta_bloqueada_sasonador("/api/pedidos/bandeja", "GET"))
         self.assertFalse(ruta_bloqueada_sasonador("/api/pedidos/15/archivar", "PUT"))
