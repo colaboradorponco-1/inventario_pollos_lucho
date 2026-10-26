@@ -901,6 +901,9 @@ function sucursalesFiltroPedidos(lista) {
     return proveedoresAlcance(base).filter((s) =>
         s.principal || s.es_as || /^AS\s/i.test(s.nombre || ''));
 }
+function idsProveedoresFiltroPedidos(lista) {
+    return new Set(sucursalesFiltroPedidos(lista).map((s) => String(s.id)));
+}
 // Nombre visible de una sucursal en el módulo de pedidos (ya sin "AS especial"):
 // cada almacén figura con su propio nombre.
 function nombreSucursalPedido(s) {
@@ -4965,13 +4968,16 @@ function agruparPorCategoria(prods) {
 // que es el orden en que se fueron tocando los steppers: el pedido quedaba
 // guardado en un orden distinto del de la pantalla.
 function productosElegidos() {
+    const proveedoresPermitidos = idsProveedoresFiltroPedidos(
+        catalogos && catalogos.sucursales);
     const datosProv = (id) => {
         const s = (catalogos.sucursales || []).find((x) => x.id === id);
         return { nombre: s ? s.nombre : '', principal: s ? !!s.principal : false };
     };
     const prov = provDeProducto;
     return (pedidoProdsAll || [])
-        .filter((p) => (pedidoSel[p.id] || 0) > 0)
+        .filter((p) => (pedidoSel[p.id] || 0) > 0 &&
+            proveedoresPermitidos.has(String(prov(p))))
         .sort((a, b) => {
             const ia = prov(a), ib = prov(b);
             if (ia !== ib) {
@@ -4992,9 +4998,12 @@ function productosElegidos() {
 function pedidoProductosVisibles() {
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
     const categoria = ($('#pedido-categoria') || {}).value || '';
+    const proveedoresPermitidos = idsProveedoresFiltroPedidos(
+        catalogos && catalogos.sucursales);
     return (pedidoProdsAll || []).filter((p) => {
         const provId = provDeProducto(p);
         if (!provId) return false;
+        if (!proveedoresPermitidos.has(String(provId))) return false;
         if (!proveeActivo(provId)) return false;
         if (pedidoProvFiltro && String(provId) !== pedidoProvFiltro) return false;
         if (categoria && String(p.categoria_id || '') !== categoria) return false;
@@ -5013,9 +5022,15 @@ function renderTarjetasPedido() {
     const q = (($('#pedido-buscar') || {}).value || '').trim().toLowerCase();
     const categoria = ($('#pedido-categoria') || {}).value || '';
     const provs = {};
+    const proveedoresPermitidos = idsProveedoresFiltroPedidos(
+        catalogos && catalogos.sucursales);
+    if (pedidoProvFiltro && !proveedoresPermitidos.has(pedidoProvFiltro)) {
+        pedidoProvFiltro = '';
+    }
     (pedidoProdsAll || []).forEach((p) => {
         const provId = provDeProducto(p);
         if (!provId) return;
+        if (!proveedoresPermitidos.has(String(provId))) return;
         if (!proveeActivo(provId)) return;
         if (categoria && String(p.categoria_id || '') !== categoria) return;
         const buscar = (p.nombre + ' ' + (p.codigo || '') + ' ' +

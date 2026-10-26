@@ -192,6 +192,10 @@ check("el alcance global se elige desde el control exclusivo del superadmin",
 check("el filtro por botones lee la propiedad data-bsuc correctamente",
       "bandejaSucF = b.dataset.bsuc" in interfaz
       and "b.dataset.bSuc" not in interfaz)
+check("Nuevo pedido muestra solo proveedores permitidos",
+      "idsProveedoresFiltroPedidos(catalogos && catalogos.sucursales)" in interfaz
+      and interfaz.count("proveedoresPermitidos.has(String(provId))") >= 2
+      and "proveedoresPermitidos.has(String(prov(p)))" in interfaz)
 check("mis solicitudes también permiten archivar estados terminales",
       "['entregado', 'rechazado'].includes(estado)" in interfaz
       and "await listarPedidos()" in interfaz)
