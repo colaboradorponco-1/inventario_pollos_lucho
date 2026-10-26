@@ -1133,14 +1133,19 @@ def pedidos_bandeja():
             parametros_detalle.extend((sid, sid))
         det = conn.execute(f"""
             SELECT d.pedido_id, d.producto_nombre, d.cantidad, d.unidad,
-                   d.tacho_texto, d.tacho_unidad, d.destino_id, s.nombre AS destino_nombre,
+                   d.tacho_texto, d.tacho_unidad,
+                   COALESCE(d.destino_id, p.destino_id) AS destino_id,
+                   s.nombre AS destino_nombre,
                    COALESCE(c.nombre, 'Sin categoría') AS categoria_nombre
-            FROM pedido_detalle d LEFT JOIN sucursales s ON s.id = d.destino_id
+            FROM pedido_detalle d
             JOIN pedidos p ON p.id = d.pedido_id
+            LEFT JOIN sucursales s
+              ON s.id = COALESCE(d.destino_id, p.destino_id)
             LEFT JOIN productos pr ON pr.id = d.producto_id
             LEFT JOIN categorias c ON c.id = pr.categoria_id
             WHERE d.pedido_id IN ({marks}){filtro_proveedor}
-            ORDER BY d.pedido_id, d.destino_id, categoria_nombre, d.producto_nombre, d.id
+            ORDER BY d.pedido_id, COALESCE(d.destino_id, p.destino_id),
+                     categoria_nombre, d.producto_nombre, d.id
         """, parametros_detalle).fetchall()
     conn.close()
     det_map = {}

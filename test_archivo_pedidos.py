@@ -189,9 +189,12 @@ with open(os.path.join(os.path.dirname(__file__), "static", "app.js"),
     interfaz = archivo.read()
 check("el alcance global se elige desde el control exclusivo del superadmin",
       "pedido-bandeja-alcance" in interfaz and "Todas las sucursales" in interfaz)
-check("el filtro por botones lee la propiedad data-bsuc correctamente",
-      "bandejaSucF = b.dataset.bsuc" in interfaz
-      and "b.dataset.bSuc" not in interfaz)
+check("el filtro por botones agrupa por almacén proveedor",
+      "bandejaSucF = b.dataset.bdest" in interfaz
+      and "data-bdest=" in interfaz
+      and "item.destino_id || pedido.destino_id" in interfaz
+      and "destinosProveedorValidos.has(id)" in interfaz
+      and "items: (pedido.items || []).filter" in interfaz)
 check("mis solicitudes también permiten archivar estados terminales",
       "['entregado', 'rechazado'].includes(estado)" in interfaz
       and "await listarPedidos()" in interfaz)
@@ -246,11 +249,15 @@ check("la bandeja de AS America y AS Simón filtra America, Simón y Siglo XX",
       "solicitantes = ['america', 'simon lopez', 'siglo xx']" in interfaz)
 check("la bandeja de AS 6 de Agosto filtra Miraflores y Sopocachi",
       "solicitantes = ['miraflores', 'sopocachi']" in interfaz)
-check("el filtro de la bandeja también se aplica a las cuentas AS",
-      "const sucF = bandejaSucF || selF;" in interfaz
-      and "const esReceptor = window.ROL === 'encargado'" not in interfaz)
-check("los filtros de principales muestran su estrella",
-      "nombre: (s.principal ? '★ ' : '') + s.nombre" in interfaz)
+check("el selector y los botones filtran por el almacén proveedor",
+      "const seleccionAnterior = bandejaSucF || (filtroSel?.value || '')" in interfaz
+      and "Todos los almacenes proveedores" in interfaz
+      and "=== proveedorSeleccionado" in interfaz)
+check("la bandeja incluye el destino efectivo del pedido en cada línea",
+      "COALESCE(d.destino_id, p.destino_id) AS destino_id" in
+      inspect.getsource(ped.pedidos_bandeja)
+      and "ON s.id = COALESCE(d.destino_id, p.destino_id)" in
+      inspect.getsource(ped.pedidos_bandeja))
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()

@@ -5422,9 +5422,12 @@ async function loadPedidos() {
             selDest.innerHTML = '<option value="">Automático (cada producto a quien lo reparte)</option>'
                 + destinosP.map((x) => `<option value="${x.id}">Todo a ${esc(nombreSucursalPedido(x))}</option>`).join('');
         }
-        const opcionesAS = opcionesSucursales(sucursalesFiltroBandejaPedidos(sucursales), 'Todas las sucursales');
+        const opcionesAS = opcionesSucursales(
+            sucursalesFiltroBandejaPedidos(sucursales), 'Todas las sucursales');
         const filtroSel = $('#pedido-sucursal-filtro');
-        if (filtroSel) filtroSel.innerHTML = opcionesAS;
+        if (filtroSel) {
+            filtroSel.innerHTML = '<option value="">Todos los almacenes proveedores</option>';
+        }
         const filtroReal = $('#pedido-sucursal-realizados');
         if (filtroReal) filtroReal.innerHTML = opcionesAS;
         const selSuc = $('#pedido-sucursal');
@@ -5686,19 +5689,68 @@ async function cargarBandeja() {
         if (desde) qs.set('desde', desde);
         if (hasta) qs.set('hasta', hasta);
         const gruposRaw = (await request(API + '/pedidos/bandeja' + (qs.toString() ? '?' + qs.toString() : ''))) || [];
-        const selF = (($('#pedido-sucursal-filtro') || {}).value || '');
-        const sucF = bandejaSucF || selF;
-        const grupos = sucF ? gruposRaw.filter((g) => String(g.sucursal_id) === sucF) : ordenarSucursales(gruposRaw);
+        const proveedores = new Map();
+        const ticketsTodos = new Set();
+        const destinosProveedorValidos = new Set(
+            sucursalesFiltroPedidos(catalogos.sucursales).map((s) => String(s.id)));
+        gruposRaw.forEach((grupo) => (grupo.pedidos || []).forEach((pedido) => {
+            ticketsTodos.add(String(pedido.id));
+            (pedido.items || []).forEach((item) => {
+                const destinoId = item.destino_id || pedido.destino_id;
+                if (!destinoId) return;
+                const id = String(destinoId);
+                if (!destinosProveedorValidos.has(id)) return;
+                const sucursal = (catalogos.sucursales || []).find(
+                    (s) => String(s.id) === id);
+                const proveedor = proveedores.get(id) || {
+                    id,
+                    nombre: item.destino_nombre || sucursal?.nombre || `Almacén ${id}`,
+                    tickets: new Set(),
+                };
+                proveedor.tickets.add(String(pedido.id));
+                proveedores.set(id, proveedor);
+            });
+        }));
+        const proveedoresOrdenados = [...proveedores.values()].sort((a, b) =>
+            nombreNorm(a.nombre).localeCompare(nombreNorm(b.nombre), 'es'));
+        const filtroSel = $('#pedido-sucursal-filtro');
+        const seleccionAnterior = bandejaSucF || (filtroSel?.value || '');
+        const proveedorSeleccionado = proveedores.has(seleccionAnterior)
+            ? seleccionAnterior : '';
+        bandejaSucF = proveedorSeleccionado;
+        if (filtroSel) {
+            filtroSel.innerHTML = '<option value="">Todos los almacenes proveedores</option>' +
+                proveedoresOrdenados.map((p) =>
+                    `<option value="${esc(p.id)}">${esc(p.nombre)} · ${p.tickets.size}</option>`
+                ).join('');
+            filtroSel.value = proveedorSeleccionado;
+        }
+        let grupos = gruposRaw;
+        if (proveedorSeleccionado) {
+            grupos = gruposRaw.map((grupo) => ({
+                ...grupo,
+                pedidos: (grupo.pedidos || []).map((pedido) => ({
+                    ...pedido,
+                    items: (pedido.items || []).filter((item) =>
+                        String(item.destino_id || pedido.destino_id || '')
+                            === proveedorSeleccionado),
+                })).filter((pedido) => pedido.items.length),
+            })).filter((grupo) => grupo.pedidos.length);
+        } else {
+            grupos = ordenarSucursales(gruposRaw);
+        }
         const btsB = $('#bandeja-suc-btns');
         if (btsB) {
-            const sucsFiltradas = sucursalesFiltroBandejaPedidos(catalogos.sucursales);
-            btsB.innerHTML = [{ id: '', nombre: 'Todas las sucursales' }]
-                .concat(ordenarSucursales(sucsFiltradas.map((s) => ({
-                    id: String(s.id),
-                    nombre: (s.principal ? '★ ' : '') + s.nombre,
-                }))))
+            const opcionesProveedor = [{
+                id: '',
+                nombre: `Todos · ${ticketsTodos.size}`,
+            }].concat(proveedoresOrdenados.map((p) => ({
+                id: p.id,
+                nombre: `${p.nombre} · ${p.tickets.size}`,
+            })));
+            btsB.innerHTML = opcionesProveedor
                 .map((b) => `
-                    <button type="button" class="btn btn-sm ${bandejaSucF === b.id ? 'btn-primary' : ''}" data-bsuc="${b.id}">${esc(b.nombre || '')}</button>`)
+                    <button type="button" class="btn btn-sm ${proveedorSeleccionado === b.id ? 'btn-primary' : ''}" data-bdest="${esc(b.id)}">${esc(b.nombre || '')}</button>`)
                 .join('');
         }
         const total = grupos.reduce((a, g) => a + g.pedidos.length, 0);
@@ -5930,9 +5982,9 @@ on('#pedido-bandeja-vista', 'change', cargarBandeja);
 on('#pedido-bandeja-alcance', 'change', cargarBandeja);
 on('#pedido-sucursal-filtro', 'change', () => { bandejaSucF = ''; cargarBandeja(); });
 on('#bandeja-suc-btns', 'click', (e) => {
-    const b = e.target.closest('[data-bsuc]');
+    const b = e.target.closest('[data-bdest]');
     if (!b) return;
-    bandejaSucF = b.dataset.bsuc;
+    bandejaSucF = b.dataset.bdest;
     const sel = $('#pedido-sucursal-filtro');
     if (sel) sel.value = bandejaSucF;
     cargarBandeja();
