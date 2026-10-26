@@ -258,6 +258,11 @@ check("la bandeja incluye el destino efectivo del pedido en cada línea",
       inspect.getsource(ped.pedidos_bandeja)
       and "ON s.id = COALESCE(d.destino_id, p.destino_id)" in
       inspect.getsource(ped.pedidos_bandeja))
+with open(os.path.join(os.path.dirname(__file__), "static", "sw.js"),
+          encoding="utf-8") as archivo:
+    service_worker = archivo.read()
+check("el service worker invalida la caché de la bandeja anterior",
+      "const CACHE = 'pollos-lucho-v10';" in service_worker)
 with open(os.path.join(os.path.dirname(__file__), "templates", "index.html"),
           encoding="utf-8") as archivo:
     texto = archivo.read()
