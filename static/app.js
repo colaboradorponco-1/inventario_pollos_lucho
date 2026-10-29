@@ -1970,7 +1970,7 @@ $('#form-producto').addEventListener('submit', async (e) => {
         toast(id ? 'Producto actualizado' : 'Producto creado');
         if (resp && resp.aviso) setTimeout(() => toast('⚠ ' + resp.aviso, 'err'), 400);
         closeModal('modal-producto');
-        loadProductos();
+        await loadProductos();
     } catch (err) {
         toast(err.message, 'err');
     }
@@ -4810,6 +4810,17 @@ window.avanzarEtapa = async (id, etapa) => {
         });
         toast((r && r.message) || 'Etapa actualizada', 'ok');
         await cargarBandeja();
+        if (etapa === 'entregado') {
+            try {
+                await Promise.all([
+                    loadProductos(),
+                    cargarProductosPedido().then(() => renderTarjetasPedido()),
+                ]);
+            } catch (e) {
+                toast('La entrega se registró, pero no se pudo refrescar el stock mostrado: '
+                    + e.message, 'err');
+            }
+        }
         const modalPedido = $('#modal-pedido');
         if (modalPedido && modalPedido.classList.contains('show') &&
             window._pedidoActual && Number(window._pedidoActual.id) === Number(id)) {
@@ -5125,9 +5136,9 @@ function renderTarjetasPedido() {
                     <div class="tacho-col">
                         ${selectorTacho(p)}
                         <div class="stepper">
-                            <button type="button" class="ste ste-menos" data-id="${p.id}" ${agotado ? 'disabled' : ''}>−</button>
+                            <button type="button" class="ste ste-menos" data-id="${p.id}" title="Restar 0.1" aria-label="Restar 0.1" ${agotado ? 'disabled' : ''}>−</button>
                             <input type="number" class="prod-q ${excede ? 'prod-q-alto' : ''}" id="pq-${p.id}" value="${qty}" min="0"${falta ? '' : ` max="${max}"`} step="any" data-id="${p.id}" ${agotado ? 'disabled' : ''}>
-                            <button type="button" class="ste ste-mas" data-id="${p.id}" ${agotado ? 'disabled' : ''}>+</button>
+                            <button type="button" class="ste ste-mas" data-id="${p.id}" title="Sumar 0.1" aria-label="Sumar 0.1" ${agotado ? 'disabled' : ''}>+</button>
                         </div>
                     </div>
                 </div>`;
@@ -5307,16 +5318,17 @@ if (_listadoPed) {
         if (!btn) return;
         const id = +btn.dataset.id;
         const actual = pedidoSel[id] || 0;
-        const delta = btn.classList.contains('ste-menos') ? -1 : 1;
+        const delta = btn.classList.contains('ste-menos') ? -0.1 : 0.1;
         const p = (pedidoProdsAll || []).find((x) => x.id === id);
         const max = p ? maxPedido(p) : 0;
-        if (delta > 0 && excedeDisponible(p, actual + delta)) {
+        const cantidad = Math.round((actual + delta) * 1000) / 1000;
+        if (delta > 0 && excedeDisponible(p, cantidad)) {
             toast(`No hay esa cantidad: el stock máximo disponible es ${fmtNum(max)}`, 'err');
             if (actual < max) marcarCantidad(id, max);
             return;
         }
         limpiarTacho(id);
-        marcarCantidad(id, actual + delta);
+        marcarCantidad(id, cantidad);
     });
     _listadoPed.addEventListener('input', (e) => {
         if (!e.target.classList.contains('prod-q')) return;

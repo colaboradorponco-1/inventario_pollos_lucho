@@ -300,6 +300,46 @@ class _PedidoSinEquivalenciaConn:
 
 
 class EquivalenciasPedidosTest(unittest.TestCase):
+    def test_stock_disponible_no_reserva_lineas_ya_entregadas_o_rechazadas(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE sucursales (id INTEGER PRIMARY KEY, principal INTEGER);
+            CREATE TABLE productos (
+                id INTEGER PRIMARY KEY, activo INTEGER, sucursal_id INTEGER
+            );
+            CREATE TABLE lotes (
+                id INTEGER PRIMARY KEY, producto_id INTEGER,
+                sucursal_id INTEGER, cantidad REAL
+            );
+            CREATE TABLE pedidos (
+                id INTEGER PRIMARY KEY, estado TEXT, destino_id INTEGER
+            );
+            CREATE TABLE pedido_detalle (
+                id INTEGER PRIMARY KEY, pedido_id INTEGER, producto_id INTEGER,
+                cantidad REAL, destino_id INTEGER, entregado INTEGER,
+                rechazado INTEGER
+            );
+            INSERT INTO sucursales VALUES (10, 1);
+            INSERT INTO productos VALUES (19, 1, 10);
+            INSERT INTO lotes VALUES (1, 19, 10, 10);
+            INSERT INTO pedidos VALUES (1, 'pendiente', 10);
+            INSERT INTO pedido_detalle VALUES
+                (1, 1, 19, 4, 10, 1, 0),
+                (2, 1, 19, 2, 10, 0, 0),
+                (3, 1, 19, 1, 10, 0, 1);
+        """)
+
+        class ConnSQLitePlaceholders:
+            def execute(self, sql, params=()):
+                return conn.execute(sql.replace("%s", "?"), params)
+
+        disponible = productos._stock_disponible(
+            ConnSQLitePlaceholders(), destino_id=10)
+
+        self.assertEqual(disponible, {19: 8.0})
+        conn.close()
+
     def test_as_receptor_recibe_fichas_locales_para_elegir_equivalencia(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row

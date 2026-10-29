@@ -606,6 +606,8 @@ def productos():
             "       SUM(d.cantidad) AS c "
             "FROM pedido_detalle d JOIN pedidos pd ON pd.id = d.pedido_id "
             "WHERE pd.estado IN ('pendiente', 'en_camino') "
+            "  AND COALESCE(d.entregado, 0) = 0 "
+            "  AND COALESCE(d.rechazado, 0) = 0 "
             "GROUP BY d.producto_id, COALESCE(d.destino_id, pd.destino_id)"
         ).fetchall():
             reservas[(int(r["pid"]), r["dest"])] = float(r["c"] or 0)
@@ -741,7 +743,10 @@ def _stock_disponible(conn, destino_id=None):
                 - COALESCE((SELECT SUM(d.cantidad) FROM pedido_detalle d
                             JOIN pedidos pd ON pd.id = d.pedido_id
                             WHERE d.producto_id = l.producto_id
-                              AND pd.estado IN ('pendiente', 'en_camino') {cond_apartado}), 0)) AS disp
+                              AND pd.estado IN ('pendiente', 'en_camino')
+                              AND COALESCE(d.entregado, 0) = 0
+                              AND COALESCE(d.rechazado, 0) = 0
+                              {cond_apartado}), 0)) AS disp
         FROM lotes l JOIN productos p ON p.id = l.producto_id
         WHERE l.cantidad > 0 AND p.activo = 1
         GROUP BY l.producto_id""".format(cond_lote=cond_lote, cond_apartado=cond_apartado)

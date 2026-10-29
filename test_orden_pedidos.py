@@ -434,7 +434,12 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
            and "stock_dest - reservas.get" in prod)
     _check("lo apartado en pedidos pendientes se descuenta del destino real",
            "COALESCE(d.destino_id, pd.destino_id)" in prod
-           and "pd.estado IN ('pendiente', 'en_camino')" in prod)
+           and "pd.estado IN ('pendiente', 'en_camino')" in prod
+           and "COALESCE(d.entregado, 0) = 0" in prod
+           and "COALESCE(d.rechazado, 0) = 0" in prod)
+    _check("las líneas ya entregadas no se vuelven a reservar como stock",
+           prod.count("COALESCE(d.entregado, 0) = 0") >= 2
+           and prod.count("COALESCE(d.rechazado, 0) = 0") >= 2)
     _check("las demas pantallas NO cambian de comportamiento",
            re.search(r"para_pedido = request\.args\.get", prod) is not None)
 
@@ -443,6 +448,13 @@ def prueba_el_destino_no_se_elige_por_stock_en_el_codigo():
            "function provDeProducto" in js and js.count("provDeProducto(p)") >= 3)
     _check("el frontend pide para_pedido=1",
            "para_pedido: '1'" in js)
+    _check("la cantidad de pedido acepta decimales y el stepper avanza 0.1",
+           'class="prod-q' in js and 'step="any"' in js
+           and "? -0.1 : 0.1" in js)
+    _check("al entregar se refrescan existencias y disponibilidad del pedido",
+           "if (etapa === 'entregado')" in js
+           and "loadProductos()" in js
+           and "cargarProductosPedido()" in js)
 
     # Y el aviso de "no hay stock" es aviso, NO bloqueo.
     _check("avisa cuando el destino responsable no tiene stock",
