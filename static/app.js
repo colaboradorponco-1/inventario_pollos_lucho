@@ -1306,10 +1306,19 @@ async function loadEquivalencias() {
 function iniciarRevisionEquivalencia(pendiente) {
     pedidoEquivalenciaActual = pendiente;
     $('#equiv-configuracion-manual').open = true;
+    const origen = $('#equiv-origen');
+    if (!origen.querySelector(`option[value="${pendiente.producto_id}"]`)) {
+        const option = document.createElement('option');
+        option.value = String(pendiente.producto_id);
+        option.textContent =
+            `${pendiente.producto_nombre} (${pendiente.producto_unidad || 'unidad'})` +
+            ` — ${pendiente.proveedor_nombre}`;
+        origen.append(option);
+    }
     $('#equiv-revision-contexto').textContent =
         `Pedido ${pendiente.tickets.join(', ')}: ${pendiente.producto_nombre} ` +
         `para ${pendiente.sucursal_receptora_nombre}. Elige la ficha correcta y confirma.`;
-    $('#equiv-origen').value = String(pendiente.producto_id);
+    origen.value = String(pendiente.producto_id);
     $('#equiv-sucursal').value = String(pendiente.sucursal_receptora_id);
     $('#equiv-destino').value = '';
     $('#equiv-buscar-destino').value = pendiente.producto_nombre;
@@ -1444,15 +1453,11 @@ async function revisarPedidosEquivalenciasPendientes() {
                 <table class="data-table">
                     <thead><tr><th>Pedido</th><th>Producto</th><th>Recibe</th><th>Qué hacer</th></tr></thead>
                     <tbody>${pendientes.map((p, index) => {
-            const puedeConfigurar = $('#equiv-origen').querySelector(
-                `option[value="${p.producto_id}"]`);
             return `<tr>
                 <td>${esc(p.tickets.join(', '))}</td>
                 <td>${esc(p.producto_nombre)} (${esc(p.producto_unidad || 'unidad')})</td>
                 <td>${esc(p.sucursal_receptora_nombre)}</td>
-                <td>${puedeConfigurar
-                    ? `<button class="btn btn-primary btn-sm" type="button" data-configurar-equivalencia="${index}">Resolver</button>`
-                    : 'Pedir a administración revisar el producto proveedor'}</td>
+                <td><button class="btn btn-primary btn-sm" type="button" data-configurar-equivalencia="${index}">Resolver</button></td>
             </tr>`;
         }).join('')}</tbody>
                 </table>
@@ -5430,7 +5435,7 @@ function provDeProducto(p) {
 async function loadPedidos() {
     try {
         await loadCatalogos();
-        if (esCentral()) {
+        if (puedeRevisarEquivalencias()) {
             try {
                 if (!equivalenciasCargadas) {
                     await loadEquivalencias();
@@ -5509,7 +5514,10 @@ async function loadPedidos() {
 let pestanaPedidos = puedeVerBandeja() ? 'realizados' : 'mis-pedidos';
 
 function esGestionPed() { return window.ROL === 'superadmin' || window.ROL === 'admin'; }
-function puedeRevisarEquivalencias() { return esCentral() || !!window.RECEPTOR; }
+function puedeRevisarEquivalencias() {
+    return esCentral() || !!window.RECEPTOR
+        || (window.ROL === 'encargado' && !!window.SUCURSAL_ID);
+}
 
 // ¿Esta sucursal abastece a otras? Se respeta la configuración guardada; los
 // almacenes AS y principales son proveedores por su tipo.

@@ -896,7 +896,7 @@
             <div class="panel" id="panel-equivalencias" style="display:none">
                 <button class="btn" id="btn-volver-pedidos" type="button">← Volver a Pedidos</button>
                 <h2>Pedidos que necesitan una ficha</h2>
-                <p class="scan-hint">Solo aparecen pedidos abiertos con este problema. Si solo ves America, no hay otros pedidos pendientes de resolver.</p>
+                <p class="scan-hint">Solo aparecen pedidos abiertos con este problema. El encargado puede revisar las fichas de pedidos dirigidos a su propio almacén. El nombre parecido no crea una equivalencia automáticamente: confirma la ficha correcta y su unidad.</p>
                 <button class="btn" id="btn-revisar-equivalencias-pendientes" type="button">Actualizar lista</button>
                 <div id="equivalencias-pendientes-resultado" aria-live="polite"></div>
                 <details id="equiv-configuracion-manual" style="margin-top:14px">
@@ -1584,7 +1584,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=20261029-entrega-por-proveedor"></script>
+    <script src="/static/app.js?v=20261029-equivalencia-encargado-receptor"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

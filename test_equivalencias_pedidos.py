@@ -351,6 +351,55 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         self.assertEqual(ids_productos, {661, 662, 663})
         self.assertEqual(data["sucursales"], [{"id": 35, "nombre": "Simon Lopez"}])
 
+    def test_encargado_receptor_ve_origenes_pendientes_de_su_sucursal(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE sucursales (id INTEGER PRIMARY KEY, nombre TEXT);
+            CREATE TABLE categorias (id INTEGER PRIMARY KEY, nombre TEXT);
+            CREATE TABLE productos (
+                id INTEGER PRIMARY KEY, nombre TEXT, unidad TEXT,
+                sucursal_id INTEGER, categoria_id INTEGER, activo INTEGER
+            );
+            CREATE TABLE equivalencias_productos (
+                id INTEGER PRIMARY KEY, producto_origen_id INTEGER,
+                sucursal_destino_id INTEGER, producto_destino_id INTEGER
+            );
+            CREATE TABLE pedidos (
+                id INTEGER PRIMARY KEY, sucursal_id INTEGER,
+                destino_id INTEGER, estado TEXT
+            );
+            CREATE TABLE pedido_detalle (
+                id INTEGER PRIMARY KEY, pedido_id INTEGER,
+                producto_id INTEGER, destino_id INTEGER
+            );
+            INSERT INTO sucursales VALUES
+                (35, 'Simon Lopez'), (49, 'Almacen Principal 1');
+            INSERT INTO categorias VALUES (1, 'Empaques');
+            INSERT INTO productos VALUES
+                (19, 'BOLSA 17X34', 'unidad', 49, 1, 1),
+                (20, 'BOLSA 17X34', 'unidad', 35, 1, 1),
+                (21, 'OTRA BOLSA', 'unidad', 35, 1, 1);
+            INSERT INTO pedidos VALUES (10, 35, 49, 'pendiente');
+            INSERT INTO pedido_detalle VALUES (20, 10, 19, NULL);
+        """)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context("/api/equivalencias-productos"):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=False), \
+                    patch.object(productos, "sucursal_actual", return_value=35):
+                respuesta = productos.equivalencias_productos()
+
+        data = respuesta.get_json()["data"]
+        ids_productos = {producto["id"] for producto in data["productos"]}
+        self.assertEqual(ids_productos, {19, 20, 21})
+        self.assertEqual(data["sucursales"], [{"id": 35, "nombre": "Simon Lopez"}])
+
     def test_receptor_resuelve_equivalencia_661_a_662(self):
         conn = _FilaConn({
             "sucursal_origen_id": 49,
@@ -646,7 +695,26 @@ class EquivalenciasPedidosTest(unittest.TestCase):
                 respuesta = pedidos.pedidos_equivalencias_pendientes()
 
         self.assertIn("COALESCE(d.destino_id, p.destino_id) = ?", conn.sql)
-        self.assertEqual(conn.params, (49,))
+        self.assertEqual(conn.params, (49, 49))
+        self.assertEqual(respuesta.get_json()["data"]["total"], 0)
+        self.assertTrue(conn.closed)
+
+    def test_encargado_ve_equivalencias_pendientes_de_su_sucursal_receptora(self):
+        app = Flask(__name__)
+        app.secret_key = "test"
+        conn = _PendientesConn([])
+        with app.test_request_context("/api/pedidos/equivalencias-pendientes"):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(pedidos, "get_conn", return_value=conn), \
+                    patch.object(pedidos, "es_gestion", return_value=False), \
+                    patch.object(pedidos, "es_encargado_almacen", return_value=False), \
+                    patch.object(pedidos, "es_receptor", return_value=False), \
+                    patch.object(pedidos, "sucursal_actual", return_value=35):
+                respuesta = pedidos.pedidos_equivalencias_pendientes()
+
+        self.assertIn("AND p.sucursal_id = ?", conn.sql)
+        self.assertEqual(conn.params, (35,))
         self.assertEqual(respuesta.get_json()["data"]["total"], 0)
         self.assertTrue(conn.closed)
 
@@ -755,6 +823,28 @@ class EquivalenciasPedidosTest(unittest.TestCase):
         self.assertEqual(conn.inserts[-1][1][:3], (661, 35, 662))
         self.assertTrue(conn.closed)
 
+    def test_encargado_puede_confirmar_equivalencia_para_pedido_recibido(self):
+        conn = _EquivalenciaApiConn(sucursal_origen=49)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos", method="POST",
+                json={"producto_origen_id": 661, "sucursal_destino_id": 35,
+                      "producto_destino_id": 662}):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=False), \
+                    patch.object(productos, "sucursal_actual", return_value=35), \
+                    patch.object(productos, "registrar_auditoria"):
+                respuesta = productos.equivalencias_productos()
+
+        self.assertTrue(respuesta.get_json()["ok"])
+        self.assertEqual(conn.inserts[-1][1][:3], (661, 35, 662))
+        self.assertTrue(conn.closed)
+
     def test_as_no_puede_confirmar_equivalencia_de_otro_almacen(self):
         conn = _EquivalenciaApiConn(sucursal_origen=88)
         app = Flask(__name__)
@@ -826,6 +916,33 @@ class EquivalenciasPedidosTest(unittest.TestCase):
                     patch.object(productos, "es_encargado_almacen", return_value=False), \
                     patch.object(productos, "es_receptor", return_value=True), \
                     patch.object(productos, "sucursal_actual", return_value=49), \
+                    patch.object(productos, "registrar_auditoria"), \
+                    patch.object(productos, "registrar_movimiento"):
+                respuesta = productos.equivalencia_producto_crear_ficha()
+
+        self.assertTrue(respuesta.get_json()["ok"])
+        self.assertEqual(conn.commits, 1)
+        self.assertEqual(len(conn.inserts), 2)
+        self.assertTrue(conn.closed)
+
+    def test_encargado_puede_crear_ficha_para_pedido_recibido(self):
+        conn = _CrearFichaEquivalenciaConn(sucursal_origen=49)
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context(
+                "/api/equivalencias-productos/crear-ficha", method="POST",
+                json={
+                    "producto_origen_id": 661, "sucursal_destino_id": 35,
+                    "nombre": "Aceite Grisol", "categoria_id": "sin",
+                    "confirmar_no_existe": True,
+                }):
+            session["user_id"] = 1
+            session["rol"] = "encargado"
+            with patch.object(productos, "get_conn", return_value=conn), \
+                    patch.object(productos, "es_gestion", return_value=False), \
+                    patch.object(productos, "es_encargado_almacen", return_value=False), \
+                    patch.object(productos, "es_receptor", return_value=False), \
+                    patch.object(productos, "sucursal_actual", return_value=35), \
                     patch.object(productos, "registrar_auditoria"), \
                     patch.object(productos, "registrar_movimiento"):
                 respuesta = productos.equivalencia_producto_crear_ficha()

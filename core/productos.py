@@ -1262,16 +1262,32 @@ def equivalencias_productos():
     conn = get_conn()
     puede_gestionar_todos = es_gestion() or es_encargado_almacen(conn)
     es_as_limitado = es_receptor() and not puede_gestionar_todos
+    es_encargado_limitado = (
+        session.get("rol") == "encargado"
+        and not puede_gestionar_todos
+        and bool(sucursal_actual()))
     sucursal_as = sucursal_actual() if es_as_limitado else None
-    if not (puede_gestionar_todos or (es_as_limitado and sucursal_as)):
+    sucursal_encargado = (
+        sucursal_actual() if es_encargado_limitado else None)
+    if not (puede_gestionar_todos
+            or (es_as_limitado and sucursal_as)
+            or sucursal_encargado):
         conn.close()
         return err(
-            "Solo administración, Almacenes Principales y usuarios AS "
+            "Solo administración, Almacenes Principales y encargados "
             "autorizados pueden confirmar equivalencias", 403)
 
     if request.method == "GET":
-        filtro_as = " WHERE origen.sucursal_id = ?" if es_as_limitado else ""
-        parametros_as = (sucursal_as,) if es_as_limitado else ()
+        if es_encargado_limitado:
+            filtros_equivalencias = ["e.sucursal_destino_id = ?"]
+            parametros_as = [sucursal_encargado]
+            if es_as_limitado:
+                filtros_equivalencias.append("origen.sucursal_id = ?")
+                parametros_as.append(sucursal_as)
+            filtro_as = " WHERE (" + " OR ".join(filtros_equivalencias) + ")"
+        else:
+            filtro_as = " WHERE origen.sucursal_id = ?" if es_as_limitado else ""
+            parametros_as = [sucursal_as] if es_as_limitado else []
         equivalencias = conn.execute("""
             SELECT e.id, e.producto_origen_id, e.sucursal_destino_id,
                    e.producto_destino_id, origen.nombre AS origen_nombre,
@@ -1291,26 +1307,90 @@ def equivalencias_productos():
             JOIN sucursales destino_sucursal ON destino_sucursal.id = e.sucursal_destino_id
         """ + filtro_as + """
             ORDER BY origen_sucursal.nombre, origen.nombre, destino_sucursal.nombre
-        """, parametros_as).fetchall()
-        filtro_productos_as = """
-            AND (
-                p.sucursal_id = ?
-                OR EXISTS (
-                    SELECT 1
-                    FROM pedidos pedido
-                    JOIN pedido_detalle detalle ON detalle.pedido_id = pedido.id
-                    JOIN productos proveedor ON proveedor.id = detalle.producto_id
-                    WHERE pedido.sucursal_id = p.sucursal_id
-                      AND COALESCE(detalle.destino_id, pedido.destino_id) = ?
-                      AND proveedor.sucursal_id = ?
-                      AND pedido.estado IN ('pendiente', 'en_camino')
-                      AND pedido.sucursal_id <> ?
+        """, tuple(parametros_as)).fetchall()
+        if es_encargado_limitado:
+            if es_as_limitado:
+                filtro_productos_as = """
+                    AND (
+                        p.sucursal_id = ?
+                        OR EXISTS (
+                            SELECT 1
+                            FROM pedidos pedido
+                            JOIN pedido_detalle detalle
+                              ON detalle.pedido_id = pedido.id
+                            JOIN productos proveedor
+                              ON proveedor.id = detalle.producto_id
+                            WHERE pedido.sucursal_id = p.sucursal_id
+                              AND COALESCE(
+                                  detalle.destino_id, pedido.destino_id
+                              ) = ?
+                              AND proveedor.sucursal_id = ?
+                              AND pedido.estado IN ('pendiente', 'en_camino')
+                              AND pedido.sucursal_id <> ?
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM pedidos pedido
+                            JOIN pedido_detalle detalle
+                              ON detalle.pedido_id = pedido.id
+                            WHERE pedido.sucursal_id = ?
+                              AND COALESCE(
+                                  detalle.destino_id, pedido.destino_id
+                              ) <> pedido.sucursal_id
+                              AND detalle.producto_id = p.id
+                              AND pedido.estado IN ('pendiente', 'en_camino')
+                        )
+                    )
+                """
+                parametros_productos_as = (
+                    sucursal_as, sucursal_as, sucursal_as, sucursal_as,
+                    sucursal_encargado)
+            else:
+                filtro_productos_as = """
+                    AND (
+                        p.sucursal_id = ?
+                        OR EXISTS (
+                            SELECT 1
+                            FROM pedidos pedido
+                            JOIN pedido_detalle detalle
+                              ON detalle.pedido_id = pedido.id
+                            WHERE pedido.sucursal_id = ?
+                              AND COALESCE(
+                                  detalle.destino_id, pedido.destino_id
+                              ) <> pedido.sucursal_id
+                              AND detalle.producto_id = p.id
+                              AND pedido.estado IN ('pendiente', 'en_camino')
+                        )
+                    )
+                """
+                parametros_productos_as = (
+                    sucursal_encargado, sucursal_encargado)
+        elif es_as_limitado:
+            filtro_productos_as = """
+                AND (
+                    p.sucursal_id = ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM pedidos pedido
+                        JOIN pedido_detalle detalle
+                          ON detalle.pedido_id = pedido.id
+                        JOIN productos proveedor
+                          ON proveedor.id = detalle.producto_id
+                        WHERE pedido.sucursal_id = p.sucursal_id
+                          AND COALESCE(
+                              detalle.destino_id, pedido.destino_id
+                          ) = ?
+                          AND proveedor.sucursal_id = ?
+                          AND pedido.estado IN ('pendiente', 'en_camino')
+                          AND pedido.sucursal_id <> ?
+                    )
                 )
-            )
-        """ if es_as_limitado else ""
-        parametros_productos_as = (
-            (sucursal_as, sucursal_as, sucursal_as, sucursal_as)
-            if es_as_limitado else ())
+            """
+            parametros_productos_as = (
+                sucursal_as, sucursal_as, sucursal_as, sucursal_as)
+        else:
+            filtro_productos_as = ""
+            parametros_productos_as = ()
         productos = conn.execute("""
             SELECT p.id, p.nombre, p.unidad, p.sucursal_id, p.categoria_id,
                    c.nombre AS categoria_nombre,
@@ -1322,7 +1402,29 @@ def equivalencias_productos():
         """ + filtro_productos_as + """
             ORDER BY s.nombre, p.nombre
         """, parametros_productos_as).fetchall()
-        if es_as_limitado:
+        if es_encargado_limitado:
+            condiciones_pedidos = []
+            parametros_sucursales = []
+            if es_as_limitado:
+                condiciones_pedidos.append(
+                    "(COALESCE(detalle.destino_id, pedido.destino_id) = ? "
+                    "AND pedido.sucursal_id <> ?)")
+                parametros_sucursales.extend((sucursal_as, sucursal_as))
+            condiciones_pedidos.append(
+                "(pedido.sucursal_id = ? AND "
+                "COALESCE(detalle.destino_id, pedido.destino_id) <> ?)")
+            parametros_sucursales.extend(
+                (sucursal_encargado, sucursal_encargado))
+            sucursales = conn.execute("""
+                SELECT DISTINCT s.id, s.nombre
+                FROM sucursales s
+                JOIN pedidos pedido ON pedido.sucursal_id = s.id
+                JOIN pedido_detalle detalle ON detalle.pedido_id = pedido.id
+                WHERE (""" + " OR ".join(condiciones_pedidos) + """)
+                  AND pedido.estado IN ('pendiente', 'en_camino')
+                ORDER BY s.nombre
+            """, tuple(parametros_sucursales)).fetchall()
+        elif es_as_limitado:
             sucursales = conn.execute("""
                 SELECT DISTINCT s.id, s.nombre
                 FROM sucursales s
@@ -1366,24 +1468,36 @@ def equivalencias_productos():
     if not origen or not destino or not sucursal:
         conn.close()
         return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
-    if es_as_limitado:
-        if origen["sucursal_id"] != sucursal_as:
-            conn.close()
-            return err("Solo puedes revisar productos de tu propio almacén AS", 403)
-        pedido_abierto = conn.execute("""
-            SELECT 1
-            FROM pedidos p
-            JOIN pedido_detalle d ON d.pedido_id = p.id
-            WHERE p.sucursal_id = ?
-              AND COALESCE(d.destino_id, p.destino_id) = ?
-              AND d.producto_id = ?
-              AND p.estado IN ('pendiente', 'en_camino')
-            LIMIT 1
-        """, (sucursal_destino_id, sucursal_as, producto_origen_id)).fetchone()
+    if es_as_limitado or es_encargado_limitado:
+        pedido_abierto = None
+        if es_as_limitado and origen["sucursal_id"] == sucursal_as:
+            pedido_abierto = conn.execute("""
+                SELECT 1
+                FROM pedidos p
+                JOIN pedido_detalle d ON d.pedido_id = p.id
+                WHERE p.sucursal_id = ?
+                  AND COALESCE(d.destino_id, p.destino_id) = ?
+                  AND d.producto_id = ?
+                  AND p.estado IN ('pendiente', 'en_camino')
+                LIMIT 1
+            """, (sucursal_destino_id, sucursal_as, producto_origen_id)).fetchone()
+        if (not pedido_abierto and es_encargado_limitado
+                and sucursal_destino_id == sucursal_encargado):
+            pedido_abierto = conn.execute("""
+                SELECT 1
+                FROM pedidos p
+                JOIN pedido_detalle d ON d.pedido_id = p.id
+                WHERE p.sucursal_id = ?
+                  AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
+                  AND d.producto_id = ?
+                  AND p.estado IN ('pendiente', 'en_camino')
+                LIMIT 1
+            """, (sucursal_encargado, producto_origen_id)).fetchone()
         if not pedido_abierto:
             conn.close()
             return err(
-                "Solo puedes confirmar fichas para pedidos abiertos de tu almacén AS",
+                "Solo puedes confirmar fichas para pedidos abiertos relacionados "
+                "con tu almacén",
                 403)
     if destino["sucursal_id"] != sucursal_destino_id:
         conn.close()
@@ -1417,11 +1531,19 @@ def equivalencia_producto_crear_ficha():
     conn = get_conn()
     puede_gestionar_todos = es_gestion() or es_encargado_almacen(conn)
     es_as_limitado = es_receptor() and not puede_gestionar_todos
+    es_encargado_limitado = (
+        session.get("rol") == "encargado"
+        and not puede_gestionar_todos
+        and bool(sucursal_actual()))
     sucursal_as = sucursal_actual() if es_as_limitado else None
-    if not (puede_gestionar_todos or (es_as_limitado and sucursal_as)):
+    sucursal_encargado = (
+        sucursal_actual() if es_encargado_limitado else None)
+    if not (puede_gestionar_todos
+            or (es_as_limitado and sucursal_as)
+            or sucursal_encargado):
         conn.close()
         return err(
-            "Solo administración, Almacenes Principales y usuarios AS "
+            "Solo administración, Almacenes Principales y encargados "
             "autorizados pueden crear fichas receptoras", 403)
 
     data = request.get_json() or {}
@@ -1459,27 +1581,48 @@ def equivalencia_producto_crear_ficha():
     if not sucursal or not origen:
         conn.close()
         return err("El producto o la sucursal seleccionada no existe o está inactiva", 404)
-    if es_as_limitado and origen["sucursal_id"] != sucursal_as:
+    if (es_as_limitado and origen["sucursal_id"] != sucursal_as
+            and not (es_encargado_limitado
+                     and sucursal_destino_id == sucursal_encargado)):
         conn.close()
-        return err("Solo puedes resolver pedidos de productos de tu propio almacén AS", 403)
+        return err("Solo puedes resolver pedidos relacionados con tu almacén", 403)
 
-    filtro_proveedor_as = (
-        " AND COALESCE(d.destino_id, p.destino_id) = ?"
-        if es_as_limitado else "")
-    parametros_solicitud = (sucursal_destino_id, producto_origen_id)
-    if es_as_limitado:
-        parametros_solicitud += (sucursal_as,)
-    solicitud = conn.execute("""
-        SELECT 1
-        FROM pedidos p
-        JOIN pedido_detalle d ON d.pedido_id = p.id
-        WHERE p.sucursal_id = ?
-          AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
-          AND d.producto_id = ?
-          AND p.estado IN ('pendiente', 'en_camino')
-    """ + filtro_proveedor_as + """
-        LIMIT 1
-    """, parametros_solicitud).fetchone()
+    solicitud = None
+    if es_as_limitado and origen["sucursal_id"] == sucursal_as:
+        solicitud = conn.execute("""
+            SELECT 1
+            FROM pedidos p
+            JOIN pedido_detalle d ON d.pedido_id = p.id
+            WHERE p.sucursal_id = ?
+              AND COALESCE(d.destino_id, p.destino_id) = ?
+              AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
+              AND d.producto_id = ?
+              AND p.estado IN ('pendiente', 'en_camino')
+            LIMIT 1
+        """, (sucursal_destino_id, sucursal_as, producto_origen_id)).fetchone()
+    if (not solicitud and es_encargado_limitado
+            and sucursal_destino_id == sucursal_encargado):
+        solicitud = conn.execute("""
+            SELECT 1
+            FROM pedidos p
+            JOIN pedido_detalle d ON d.pedido_id = p.id
+            WHERE p.sucursal_id = ?
+              AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
+              AND d.producto_id = ?
+              AND p.estado IN ('pendiente', 'en_camino')
+            LIMIT 1
+        """, (sucursal_encargado, producto_origen_id)).fetchone()
+    if not (es_as_limitado or es_encargado_limitado):
+        solicitud = conn.execute("""
+            SELECT 1
+            FROM pedidos p
+            JOIN pedido_detalle d ON d.pedido_id = p.id
+            WHERE p.sucursal_id = ?
+              AND COALESCE(d.destino_id, p.destino_id) <> p.sucursal_id
+              AND d.producto_id = ?
+              AND p.estado IN ('pendiente', 'en_camino')
+            LIMIT 1
+        """, (sucursal_destino_id, producto_origen_id)).fetchone()
     if not solicitud:
         conn.close()
         return err("Este producto no tiene un pedido abierto para esa sucursal", 409)

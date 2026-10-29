@@ -1714,17 +1714,36 @@ def pedidos_equivalencias_pendientes():
     conn = get_conn()
     puede_gestionar_todos = es_gestion() or es_encargado_almacen(conn)
     es_as_limitado = es_receptor() and not puede_gestionar_todos
-    if not (puede_gestionar_todos or
-            (es_as_limitado and sucursal_actual())):
+    es_encargado_limitado = (
+        session.get("rol") == "encargado"
+        and not puede_gestionar_todos
+        and bool(sucursal_actual()))
+    sucursal_as = sucursal_actual() if es_as_limitado else None
+    sucursal_encargado = (
+        sucursal_actual() if es_encargado_limitado else None)
+    if not (puede_gestionar_todos
+            or (es_as_limitado and sucursal_as)
+            or sucursal_encargado):
         conn.close()
         return err(
-            "Solo administración, Almacenes Principales y usuarios AS "
+            "Solo administración, Almacenes Principales y encargados "
             "autorizados pueden revisar equivalencias", 403)
 
-    filtro_proveedor = (
-        " AND COALESCE(d.destino_id, p.destino_id) = ?"
-        if es_as_limitado else "")
-    params = (sucursal_actual(),) if es_as_limitado else ()
+    if es_encargado_limitado:
+        if es_as_limitado:
+            filtro_proveedor = (
+                " AND (COALESCE(d.destino_id, p.destino_id) = ? "
+                "OR p.sucursal_id = ?)")
+            params = (sucursal_as, sucursal_encargado)
+        else:
+            filtro_proveedor = " AND p.sucursal_id = ?"
+            params = (sucursal_encargado,)
+    elif es_as_limitado:
+        filtro_proveedor = " AND COALESCE(d.destino_id, p.destino_id) = ?"
+        params = (sucursal_as,)
+    else:
+        filtro_proveedor = ""
+        params = ()
     filas = conn.execute("""
         SELECT p.nro_ticket, p.estado,
                d.producto_id, pr.nombre AS producto_nombre,
