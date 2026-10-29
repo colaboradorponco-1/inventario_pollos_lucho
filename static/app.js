@@ -6008,31 +6008,39 @@ function pintarEtapaEnModal(p, puedeGestionar) {
     const rol = window.ROL || '';
     const esAS = !!window.RECEPTOR;
     const esPreparador = rol === 'preparador';
-    const esGestorAlmacen = rol === 'admin' || esAlmacenPpal();
+    const esGestorAlmacen = rol === 'admin' || rol === 'encargado';
     const b = (txt, sig, dark) =>
         `<button class="btn btn-sm" style="${dark ? 'background:#0F3D2E;color:#fff' : ''}" onclick="avanzarEtapa(${p.id}, '${sig}')">${txt}</button>`;
     if (etapa === 'pendiente') {
         if (rol === 'repartidor') {
             box.innerHTML = '<span class="respaldo-txt">El preparador debe marcar «En camino» primero.</span>';
         } else if (esAS) {
-            const listo = p.miProveedorPreparado
-                ? '<span class="respaldo-txt">Tu parte está lista. El pedido avanzará cuando terminen los demás proveedores.</span>'
-                : b('Marcar mi parte lista', 'en_camino', true);
+            const listo = p.miProveedorEntregado
+                ? '<span class="respaldo-txt">Tu parte ya se entregó; el pedido espera a los demás proveedores.</span>'
+                : p.miProveedorPreparado
+                    ? b('Entregar mi parte', 'entregado', true)
+                        + '<span class="respaldo-txt">El estado general espera a los demás almacenes.</span>'
+                    : b('Marcar mi parte lista', 'en_camino', true);
             box.innerHTML = listo
-                + `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`;
+                + (p.miProveedorEntregado ? '' :
+                    `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`);
         } else if (esPreparador) {
             const listo = p.miProveedorPreparado
-                ? '<span class="respaldo-txt">Tu parte está lista. El pedido avanzará cuando terminen los demás proveedores.</span>'
+                ? '<span class="respaldo-txt">Tu parte está lista; cada proveedor puede entregar la suya sin esperar a los demás.</span>'
                 : b('Marcar mi parte lista', 'en_camino', true);
             box.innerHTML = listo;
         } else if (esGestorAlmacen) {
-            const listo = p.miProveedorPreparado
-                ? '<span class="respaldo-txt">Tu parte está lista. El pedido avanzará cuando terminen los demás proveedores.</span>'
-                : b('Marcar mi parte lista', 'en_camino', true);
+            const listo = p.miProveedorEntregado
+                ? '<span class="respaldo-txt">Tu parte ya se entregó; el pedido espera a los demás proveedores.</span>'
+                : p.miProveedorPreparado
+                    ? b('Entregar mi parte', 'entregado', true)
+                        + '<span class="respaldo-txt">El estado general espera a los demás almacenes.</span>'
+                    : b('Marcar mi parte lista', 'en_camino', true);
             box.innerHTML = listo
-                + `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`;
+                + (p.miProveedorEntregado ? '' :
+                    `<button class="btn btn-sm" style="background:#b91c1c;color:#fff" onclick="avanzarEtapa(${p.id}, 'rechazado')">Rechazar</button>`);
         } else {
-            box.innerHTML = '<span class="respaldo-txt">El AS debe preparar este pedido.</span>';
+            box.innerHTML = '<span class="respaldo-txt">El almacén responsable debe preparar este pedido.</span>';
         }
     } else if (etapa === 'en_camino') {
         box.innerHTML = esPreparador
@@ -6114,7 +6122,7 @@ window.verPedido = async (id, accionables = true) => {
                 || (window.ROL === 'admin' && esDestinoMio)
                 || (window.ROL === 'superadmin'
                     && etapaActual === 'entregado' && Number(p.stock_movido) === 0)
-                || (esAlmacenPpal() && esDestinoMio);
+                || (window.ROL === 'encargado' && esDestinoMio);
         if (accionables) {
             pintarEtapaEnModal(p, puedeGestionarEtapa);
         } else {

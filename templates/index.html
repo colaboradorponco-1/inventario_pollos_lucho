@@ -879,7 +879,7 @@
             <div class="view-header" style="flex-direction:row; justify-content:space-between; align-items:center; flex-wrap:wrap;">
                 <div>
                     <h2>Gestión de Pedidos y Despachos</h2>
-                    <p>Cada proveedor solo prepara y confirma la entrega de las líneas que abastece su almacén. El pedido pasa a «En camino» cuando todos los proveedores preparan su parte y a «Entregado» cuando todos confirman la entrega; cada confirmación mueve únicamente el stock de ese proveedor. El preparador solo marca su parte lista. Administración y encargados gestionan los pedidos de sus almacenes, sin cambiar líneas de otros proveedores. Las sucursales y Sazonador crean solicitudes desde «Mis pedidos».</p>
+                    <p>Cada proveedor solo prepara y confirma la entrega de las líneas que abastece su almacén. Puede entregar su parte en cuanto la marque lista, sin esperar a los demás; cada confirmación mueve únicamente el stock de ese proveedor. El pedido muestra «En camino» cuando todos prepararon y «Entregado» cuando todos entregaron. El preparador solo marca su parte lista. Administración y encargados gestionan los pedidos de sus almacenes, sin cambiar líneas de otros proveedores. Las sucursales y Sazonador crean solicitudes desde «Mis pedidos».</p>
                 </div>
                 <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                     <button class="btn btn-primary" id="btn-abrir-equivalencias" type="button" style="display:none">
@@ -1584,7 +1584,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <script src="/static/app.js?v=20261025-estados-por-proveedor"></script>
+    <script src="/static/app.js?v=20261029-entrega-por-proveedor"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function () {

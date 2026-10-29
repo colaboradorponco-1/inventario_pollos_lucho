@@ -107,6 +107,16 @@ def _lineas_entregadas(detalle):
     return bool(detalle) and all(bool(linea.get("entregado")) for linea in detalle)
 
 
+def _etapa_general_pedido(detalle, pedido):
+    """Calcula el estado global a partir del avance de todas las líneas."""
+    if _lineas_entregadas(detalle):
+        return "entregado"
+    if ((pedido.get("etapa") or pedido.get("estado")) == "en_camino"
+            or _proveedores_preparados(detalle, pedido)):
+        return "en_camino"
+    return "pendiente"
+
+
 def _producto_receptor(conn, producto_origen_id, sucursal_destino_id):
     """Resuelve una ficha explícitamente vinculada; nunca infiere por nombre."""
     equivalente = conn.execute("""
@@ -1347,15 +1357,18 @@ def pedido_etapa(pedido_id):
     sid = sucursal_actual()
     es_as = es_receptor()
     es_preparador = rol == "preparador"
+    es_encargado_sucursal = rol == "encargado"
     es_encargado_almacen_actual = not es_as and es_encargado_almacen(conn)
     puede_gestionar_todos = rol == "admin" or es_encargado_almacen_actual
+    puede_gestionar_proveedor = (
+        es_as or es_encargado_sucursal or puede_gestionar_todos)
     actual_etapa = pedido["etapa"] or "pendiente"
     reparar_stock_entregado = (
         destino_etapa == "entregado"
         and actual_etapa == "entregado"
         and not pedido["stock_movido"]
     )
-    if not (es_preparador or es_as or rol == "repartidor" or puede_gestionar_todos
+    if not (es_preparador or puede_gestionar_proveedor or rol == "repartidor"
             or (es_superadmin() and reparar_stock_entregado)):
         conn.close()
         return err("No tienes permisos para cambiar el estado de este pedido.", 403)
@@ -1365,7 +1378,8 @@ def pedido_etapa(pedido_id):
 
     # Los proveedores actúan únicamente sobre sus propias líneas.
     es_proveedor = any((d["destino_id"] or pedido["destino_id"]) == sid for d in detalle)
-    if not es_superadmin() and (es_as or es_preparador or puede_gestionar_todos) \
+    if not es_superadmin() and (
+            es_as or es_preparador or es_encargado_sucursal or puede_gestionar_todos) \
             and not es_proveedor:
         conn.close()
         return err("Ese pedido no corresponde al almacén de tu sucursal", 403)
@@ -1378,7 +1392,7 @@ def pedido_etapa(pedido_id):
         conn.close()
         return ok(message=f"El pedido ya estaba en {_ETIQUETA_ETAPA[actual_etapa]}")
 
-    if (es_preparador or es_as or puede_gestionar_todos) \
+    if (es_preparador or puede_gestionar_proveedor) \
             and destino_etapa == "en_camino" \
             and actual_etapa == "pendiente":
         conn.execute(
@@ -1404,18 +1418,19 @@ def pedido_etapa(pedido_id):
         registrar_auditoria(
             "Proveedor preparó pedido",
             f"{pedido['nro_ticket']} listo en sucursal ID {sid}")
-        return ok(message="Tu parte quedó lista. El pedido pasará a «En camino» "
-                          "cuando los demás proveedores terminen.")
+        return ok(message="Tu parte quedó lista. Ya puedes confirmar la entrega "
+                          "de las líneas de tu almacén; el estado general pasará "
+                          "a «En camino» cuando los demás almacenes preparen su parte.")
 
     if destino_etapa == "entregado":
         puede_reparar_global = es_superadmin() and reparar_stock_entregado
         if (es_preparador or rol == "repartidor"
-                or not (es_as or puede_gestionar_todos or puede_reparar_global)):
+                or not (puede_gestionar_proveedor or puede_reparar_global)):
             conn.close()
             return err("Solo el proveedor puede confirmar la entrega de sus líneas.", 403)
-        if actual_etapa != "en_camino" and not reparar_stock_entregado:
+        if actual_etapa not in ("pendiente", "en_camino") and not reparar_stock_entregado:
             conn.close()
-            return err("El pedido debe estar en camino antes de entregar una parte.", 403)
+            return err("No se puede entregar una parte de un pedido rechazado o cerrado.", 403)
 
         lineas_proveedor = [
             d for d in detalle
@@ -1426,6 +1441,10 @@ def pedido_etapa(pedido_id):
         if not pendientes:
             conn.close()
             return ok(message="La parte de tu almacén ya estaba entregada.")
+        if (actual_etapa == "pendiente" and not reparar_stock_entregado
+                and not all(d.get("preparado") for d in lineas_proveedor)):
+            conn.close()
+            return err("Primero marca como lista la parte de tu almacén.")
 
         movido = _despachar_stock(conn, pedido, detalle=pendientes, origen_propio=False)
         if movido[0] == "error":
@@ -1447,8 +1466,8 @@ def pedido_etapa(pedido_id):
         detalle = conn.execute(
             "SELECT * FROM pedido_detalle WHERE pedido_id = ? FOR UPDATE",
             (pedido_id,)).fetchall()
-        todas_entregadas = _lineas_entregadas(detalle)
-        etapa_general = "entregado" if todas_entregadas else actual_etapa
+        etapa_general = _etapa_general_pedido(detalle, pedido)
+        todas_entregadas = etapa_general == "entregado"
         conn.execute(
             "UPDATE pedidos SET etapa = ?, estado = ?, total = COALESCE(total, 0) + ?, "
             "stock_movido = ? WHERE id = ?",
@@ -1474,18 +1493,18 @@ def pedido_etapa(pedido_id):
         return err("El preparador solo puede marcar en camino.", 403)
     # El preparador solo marca en camino. AS y administración del almacén
     # pueden además rechazar desde pendiente.
-    if destino_etapa == "rechazado" and (es_as or puede_gestionar_todos):
+    if destino_etapa == "rechazado" and puede_gestionar_proveedor:
         permitido = "rechazado" if actual_etapa == "pendiente" else None
     elif es_preparador:
         permitido = _AVANCE_PREPARADOR.get(actual_etapa)
-    elif es_as or puede_gestionar_todos:
+    elif puede_gestionar_proveedor:
         permitido = _AVANCE_AS_GESTION.get(actual_etapa)
     else:
         permitido = None
 
     if permitido != destino_etapa and not reparar_stock_entregado:
         conn.close()
-        if (es_preparador or es_as or puede_gestionar_todos) \
+        if (es_preparador or puede_gestionar_proveedor) \
                 and actual_etapa != "pendiente":
             esperado = _AVANCE_PREPARADOR.get(actual_etapa)
             if esperado is None:
@@ -1496,6 +1515,9 @@ def pedido_etapa(pedido_id):
 
     # Rechazo: desde pendiente, sin tocar stock.
     if destino_etapa == "rechazado":
+        if any(d.get("entregado") for d in detalle):
+            conn.close()
+            return err("No se puede rechazar el pedido porque ya se entregó una parte.", 409)
         conn.execute(
             "UPDATE pedido_detalle SET rechazado = 1 "
             "WHERE pedido_id = ? AND COALESCE(destino_id, ?) = ?",

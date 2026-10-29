@@ -114,16 +114,18 @@ for nombre in ("pedido_despachar", "pedido_estado"):
 check("preparador limitado a su sucursal proveedora",
       'rol == "preparador"' in fuente_etapa and "not es_proveedor" in fuente_etapa)
 check("AS y administración del almacén se limitan a sus proveedores",
-      "es_as or es_preparador or puede_gestionar_todos" in fuente_etapa
+      "es_as or es_preparador or es_encargado_sucursal or puede_gestionar_todos"
+      in fuente_etapa
       and "UPDATE pedido_detalle SET preparado = 1" in fuente_etapa)
 check("repartidor limitado a su sucursal solicitante",
       'rol == "repartidor" and pedido["sucursal_id"] != sid' in fuente_etapa)
 check("AS puede confirmar estados del pedido de su sucursal",
-      "elif es_as or puede_gestionar_todos:" in fuente_etapa)
+      "elif puede_gestionar_proveedor:" in fuente_etapa)
 check("el sistema registra por separado si el stock de un pedido ya se movió",
       'pedido["stock_movido"]' in fuente_etapa
       and "SET entregado = 1" in fuente_etapa
-      and "_lineas_entregadas(detalle)" in fuente_etapa)
+      and "_etapa_general_pedido(detalle, pedido)" in fuente_etapa
+      and "_lineas_entregadas(detalle)" in inspect.getsource(ped._etapa_general_pedido))
 check("un pedido entregado sin movimiento permite una recuperación protegida",
       "reparar_stock_entregado" in fuente_etapa
       and "if reparar_stock_entregado and es_preparador" in fuente_etapa)
@@ -220,6 +222,10 @@ check("un pedido avanza cuando todos los proveedores confirmaron",
           [{"destino_id": 20, "preparado": 1},
            {"destino_id": 21, "preparado": 1}],
           {"destino_id": None}))
+check("un pedido En camino no retrocede por marcas históricas faltantes",
+      ped._etapa_general_pedido(
+          [{"destino_id": 20, "preparado": 0, "entregado": 0}],
+          {"etapa": "en_camino"}) == "en_camino")
 
 
 class _TicketConn:
@@ -388,6 +394,75 @@ try:
           and despachos_por_proveedor == [[1], [2]])
 
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.pedido["stock_movido"] = 0
+    despachos_por_proveedor.clear()
+    conn_multi.detalle = [
+        {"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0, "rechazado": 0},
+        {"id": 2, "destino_id": 21, "preparado": 0, "entregado": 0, "rechazado": 0},
+    ]
+
+    def avanzar_como(rol, proveedor_id, receptor, etapa):
+        with app_pruebas.test_request_context(
+                "/api/pedidos/11/etapa", method="PUT", json={"etapa": etapa}):
+            session["user_id"] = proveedor_id
+            session["rol"] = rol
+            session["sucursal_id"] = proveedor_id
+            session["receptor"] = receptor
+            return cuerpo_respuesta(ped.pedido_etapa(11))
+
+    despachos_por_proveedor.clear()
+    marca_encargado_20 = avanzar_como("encargado", 20, False, "en_camino")
+    entrega_encargado_20 = avanzar_como("encargado", 20, False, "entregado")
+    check("encargados de cualquier almacén gestionan su parte sin permiso receptor",
+          marca_encargado_20["ok"] and entrega_encargado_20["ok"]
+          and conn_multi.pedido["etapa"] == "pendiente"
+          and conn_multi.detalle[0]["entregado"]
+          and not conn_multi.detalle[1]["entregado"]
+          and despachos_por_proveedor == [[1]])
+    marca_encargado_21 = avanzar_como("encargado", 21, False, "en_camino")
+    entrega_encargado_21 = avanzar_como("encargado", 21, False, "entregado")
+    check("el último encargado completa el ticket sin mover stock ajeno",
+          marca_encargado_21["ok"] and entrega_encargado_21["ok"]
+          and conn_multi.pedido["etapa"] == "entregado"
+          and conn_multi.pedido["stock_movido"] == 1
+          and despachos_por_proveedor == [[1], [2]])
+
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
+    conn_multi.pedido["stock_movido"] = 0
+    conn_multi.detalle = [
+        {"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0, "rechazado": 0},
+        {"id": 2, "destino_id": 21, "preparado": 0, "entregado": 0, "rechazado": 0},
+    ]
+    despachos_por_proveedor.clear()
+    preparar_principal = avanzar_como("encargado", 20, True, "en_camino")
+    entregar_principal_primero = avanzar_como("encargado", 20, True, "entregado")
+    check("el almacén mueve su stock al entregar sin esperar a otros proveedores",
+          preparar_principal["ok"] and entregar_principal_primero["ok"]
+          and conn_multi.pedido["etapa"] == "pendiente"
+          and conn_multi.pedido["stock_movido"] == 0
+          and conn_multi.detalle[0]["entregado"]
+          and not conn_multi.detalle[1]["entregado"]
+          and despachos_por_proveedor == [[1]])
+
+    rechazo_despues_de_entrega = avanzar_como("encargado", 21, True, "rechazado")
+    entrega_segundo_sin_preparar = avanzar_como("encargado", 21, True, "entregado")
+    check("no se rechaza el ticket ni se entrega una parte no preparada",
+          not rechazo_despues_de_entrega["ok"]
+          and not entrega_segundo_sin_preparar["ok"]
+          and conn_multi.pedido["etapa"] == "pendiente"
+          and not conn_multi.detalle[1]["entregado"]
+          and despachos_por_proveedor == [[1]])
+
+    preparar_segundo = avanzar_como("encargado", 21, True, "en_camino")
+    entregar_segundo = avanzar_como("encargado", 21, True, "entregado")
+    check("el ticket se completa cuando el último proveedor entrega su parte",
+          preparar_segundo["ok"] and entregar_segundo["ok"]
+          and conn_multi.pedido["etapa"] == "entregado"
+          and conn_multi.pedido["stock_movido"] == 1
+          and all(linea["entregado"] for linea in conn_multi.detalle)
+          and despachos_por_proveedor == [[1], [2]])
+
+    conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
     conn_multi.detalle = [
         {"id": 2, "destino_id": 21, "preparado": 0, "entregado": 0, "rechazado": 0},
     ]
@@ -461,6 +536,7 @@ try:
     ped.es_encargado_almacen = lambda _conn: True
     conn_multi.pedido["etapa"] = conn_multi.pedido["estado"] = "pendiente"
     conn_multi.pedido["stock_movido"] = 0
+    despachos_por_proveedor.clear()
     conn_multi.detalle = [
         {"id": 1, "destino_id": 20, "preparado": 0, "entregado": 0},
         {"id": 2, "destino_id": 21, "preparado": 0, "entregado": 0},
@@ -622,9 +698,13 @@ check("sin controles duplicados de cambio de estado",
           "window.despacharPedido", "window.cambiarEstadoPedido")))
 check("acciones centralizadas en el detalle",
       "function pintarEtapaEnModal" in app_js and "verPedido(${p.id}, true)" in app_js)
-check("el encargado ve la acción para marcar su parte lista",
+check("el encargado puede marcar lista y entregar su parte",
   "b('Marcar mi parte lista', 'en_camino', true)" in app_js
-  and "b('Entregar mi parte', 'entregado', true)" in app_js)
+  and "b('Entregar mi parte', 'entregado', true)" in app_js
+  and "(window.ROL === 'encargado' && esDestinoMio)" in app_js)
+check("el mensaje de preparación indica que puede entregar sin esperar",
+  "Ya puedes confirmar la entrega" in fuente_etapa
+  and "cuando los demás almacenes preparen su parte" in fuente_etapa)
 
 print("\n" + "=" * 70)
 print("FALLOS:", fallos)
