@@ -300,6 +300,30 @@ class _PedidoSinEquivalenciaConn:
 
 
 class EquivalenciasPedidosTest(unittest.TestCase):
+    def test_stock_catalogo_por_sucursal_no_suma_lotes_de_otra_sucursal(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript("""
+            CREATE TABLE productos (id INTEGER PRIMARY KEY, sucursal_id INTEGER);
+            CREATE TABLE lotes (
+                id INTEGER PRIMARY KEY, producto_id INTEGER,
+                sucursal_id INTEGER, cantidad REAL
+            );
+            INSERT INTO productos VALUES (19, 10);
+            INSERT INTO lotes VALUES
+                (1, 19, 10, 115998),
+                (2, 19, 20, 1000);
+        """)
+        join_stock, _ = productos._stock_join_sucursal_propia()
+        fila = conn.execute(
+            "SELECT COALESCE(s.cantidad, 0) AS stock FROM productos p "
+            + join_stock + " WHERE p.id = ?",
+            (19,),
+        ).fetchone()
+
+        self.assertEqual(fila["stock"], 115998)
+        conn.close()
+
     def test_stock_disponible_no_reserva_lineas_ya_entregadas_o_rechazadas(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row

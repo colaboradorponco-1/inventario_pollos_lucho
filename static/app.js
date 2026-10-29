@@ -1058,6 +1058,7 @@ async function loadProductos() {
         if (proveedor) qs.set('proveedor', proveedor);
         if (estado) qs.set('estado', estado);
         if (_prodSuc !== '') qs.set('sucursal', _prodSuc);
+        qs.set('stock_por_sucursal', '1');
         if (window.ROL !== 'sasonador') qs.set('incluir_sazonador', '1');
         qs.set('por_pagina', 1000);
         const resp = await request(apiProductos() + '?' + qs.toString());
@@ -5130,6 +5131,7 @@ function renderTarjetasPedido() {
                     <div class="prod-card-info">
                         <div class="prod-card-nombre">${esc(p.nombre)}</div>
                         <div class="prod-card-meta">${esc(p.unidad || 'unidad')} · <span class="${falta ? 'disp-falta' : (max > 0 ? 'disp-ok' : 'disp-no')}">${falta ? '⚠ ' + esc(quien) + ' no tiene stock' : (max > 0 ? 'disponible: ' + fmtNum(max) + ' ' + esc(p.unidad || 'unidad') : '❌ Sin stock disponible')}</span></div>
+                        ${Number(p.stock_reservado || 0) > 0 ? `<div class="prod-card-meta">En este almacén: ${fmtNum(p.destino_stock || 0)} ${esc(p.unidad || 'unidad')} · reservado en pedidos abiertos: ${fmtNum(p.stock_reservado)} ${esc(p.unidad || 'unidad')}</div>` : ''}
                         ${parseFloat(p.unidad_tacho || 0) > 0 ? `<div class="prod-card-meta">1 tacho = ${fmtNum(p.unidad_tacho)} ${esc(p.unidad || 'unidad')}</div>` : (p.pide_tacho ? '<div class="prod-card-meta">Se pide por tachos</div>' : '')}
                         <div class="aviso-stock ${falta ? 'aviso-falta' : ''}" style="display:${falta || excede ? '' : 'none'}">${falta ? `${esc(quien)} no tiene stock de este producto. Podés pedir igual: el pedido va ahi y queda avisado.` : `Excede cantidad existente (máximo: ${fmtNum(max)})`}</div>
                     </div>

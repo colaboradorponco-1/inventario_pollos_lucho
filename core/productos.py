@@ -230,6 +230,16 @@ def _stock_sucursal_permitido(conn, ver_todo, sid):
     return pedido, None
 
 
+def _stock_join_sucursal_propia():
+    return (
+        "LEFT JOIN (SELECT l.producto_id, SUM(l.cantidad) AS cantidad "
+        "FROM lotes l JOIN productos pr2 ON pr2.id = l.producto_id "
+        "WHERE l.cantidad > 0 AND l.sucursal_id = pr2.sucursal_id "
+        "GROUP BY l.producto_id) s ON s.producto_id = p.id",
+        " AND l2.sucursal_id = p.sucursal_id",
+    )
+
+
 def scope_productos(ver_todo, sid, scope, solo_sucursal_ids=None, para_pedido=False):
     """(condición_sql, params) para filtrar productos por ámbito de visibilidad.
 
@@ -411,10 +421,10 @@ def productos():
         join_stock = ("LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad "
                       "FROM lotes WHERE sucursal_id IN (" + ph_in + ") GROUP BY producto_id) s ON s.producto_id = p.id")
         lote_cond = " AND l2.sucursal_id IN (" + ph_in + ")"
-    elif sucursal is not None:
+    elif sucursal is not None or request.args.get("stock_por_sucursal") == "1":
         # Pestaña/sucursal elegida: el stock de cada producto es el de SU PROPIA
-        # sucursal registrada (la papa que pasó a proveer vive en el AS y se ve
-        # con lo que hay ahí; del otro lado, la tienda muestra lo suyo).
+        # sucursal registrada. El catálogo agrupado por sucursales aplica esto
+        # también en "Todas", para no mostrar stock de otras tiendas en esa fila.
         join_own_sucursal = True
     elif not ver_todo and sid is not None:
         # Filial sin pestaña: cada producto muestra el stock del almacén donde
@@ -426,11 +436,7 @@ def productos():
         # cuando en realidad la AS baja y la venta sube.
         join_own_sucursal = True
     if join_own_sucursal:
-        join_stock = ("LEFT JOIN (SELECT l.producto_id, SUM(l.cantidad) AS cantidad "
-                      "FROM lotes l JOIN productos pr2 ON pr2.id = l.producto_id "
-                      "WHERE l.cantidad > 0 AND l.sucursal_id = pr2.sucursal_id "
-                      "GROUP BY l.producto_id) s ON s.producto_id = p.id")
-        lote_cond = " AND l2.sucursal_id = p.sucursal_id"
+        join_stock, lote_cond = _stock_join_sucursal_propia()
     elif stock_sid is None:
         join_stock = "LEFT JOIN (SELECT producto_id, SUM(cantidad) AS cantidad FROM lotes GROUP BY producto_id) s ON s.producto_id = p.id"
         lote_cond = ""
@@ -614,6 +620,7 @@ def productos():
     for r in rows:
         r["stock_prov"] = prov.get(r["id"], 0)
         r["destino_stock"] = None
+        r["stock_reservado"] = 0.0
         r["destino_nombre"] = ""
         # El proveedor (quien distribuye) no tiene stock de este producto. El
         # pedido se puede hacer IGUAL y queda avisado; no es "agotado".
@@ -628,14 +635,25 @@ def productos():
             r["destino_id"] = sid_dest
             r["destino_nombre"] = nombres.get(sid_dest, "")
             if sid_dest:
-                disp = stock_dest - reservas.get((int(r["id"]), sid_dest), 0.0)
+                reservado = reservas.get((int(r["id"]), sid_dest), 0.0)
+                disp = stock_dest - reservado
                 r["stock_prov"] = max(0.0, disp)
                 r["destino_stock"] = stock_dest
+                r["stock_reservado"] = reservado
                 r["sin_stock"] = stock_dest <= 0
             else:
                 r["stock_prov"] = 0.0
         else:
             r["destino_id"] = destino
+            if para_pedido and destino:
+                r["stock_reservado"] = reservas.get(
+                    (int(r["id"]), destino), 0.0)
+                r["destino_stock"] = next(
+                    (stock for sid, stock, _ in destinos.get(r["id"], [])
+                     if sid == destino),
+                    0.0,
+                )
+                r["sin_stock"] = r["destino_stock"] <= 0
             # Con "Todo a X" el destino es el elegido, así que también se
             # muestra ese nombre y no el del catálogo.
             r["destino_nombre"] = nombres.get(destino, "") if para_pedido else ""
