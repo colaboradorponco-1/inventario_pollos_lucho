@@ -91,6 +91,18 @@ def norm_nombre(texto):
     return re.sub(r"[^a-z0-9]", "", s)
 
 
+def _normalizar_mostaza_galon(conn, nombre, categoria_id):
+    """Mantiene la misma ficha y categoría para MOSTAZA GALON."""
+    nombre_normalizado = norm_nombre(nombre)
+    if (("mostaza" in nombre_normalizado or "mostasa" in nombre_normalizado)
+            and "galon" in nombre_normalizado):
+        insumos = conn.execute(
+            "SELECT id FROM categorias "
+            "WHERE LOWER(TRIM(nombre)) = 'insumos' LIMIT 1").fetchone()
+        return "MOSTAZA GALON", insumos["id"] if insumos else categoria_id
+    return nombre, categoria_id
+
+
 def _norm_nombre_tokens(texto):
     s = unicodedata.normalize("NFKD", str(texto or ""))
     s = "".join(c for c in s if not unicodedata.combining(c)).lower()
@@ -316,6 +328,8 @@ def productos():
         if not nombre:
             conn.close()
             return err("El nombre del producto es obligatorio", 400)
+        nombre, categoria_normalizada = _normalizar_mostaza_galon(
+            conn, nombre, data.get("categoria_id"))
         if len(nombre) > 255:
             conn.close()
             return err("El nombre del producto no puede superar 255 caracteres", 400)
@@ -348,8 +362,8 @@ def productos():
             INSERT INTO productos (codigo, nombre, marca, categoria_id, unidad, stock_minimo, costo_promedio,
                                    precio_venta, vencimiento, almacen_id, proveedor_id, sucursal_id, unidad_tacho, pide_tacho, para_proveer, activo)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 1)
-        """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
-              data.get("categoria_id"),
+        """, (codigo, nombre, (data.get("marca") or "").strip() or None,
+              categoria_normalizada,
               data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
               data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
               data.get("almacen_id"), proveedor_id, sid, _tacho_unidad(data), _pide_tacho(data),
@@ -830,6 +844,8 @@ def producto(prod_id):
     if not nombre:
         conn.close()
         return err("El nombre del producto es obligatorio", 400)
+    nombre, categoria_normalizada = _normalizar_mostaza_galon(
+        conn, nombre, data.get("categoria_id"))
     sid_p = fila["sucursal_id"] if not es_gestion() else (data.get("sucursal_id") or fila["sucursal_id"])
     if not sid_p:
         conn.close()
@@ -872,8 +888,8 @@ def producto(prod_id):
                costo_promedio=?, precio_venta=?, almacen_id=?, proveedor_id=?, sucursal_id=?,
                unidad_tacho=?, pide_tacho=?, para_proveer=?
         WHERE id=?
-    """, (codigo, data["nombre"].strip(), (data.get("marca") or "").strip() or None,
-          data.get("categoria_id"),
+    """, (codigo, nombre, (data.get("marca") or "").strip() or None,
+          categoria_normalizada,
           data.get("unidad", "unidad"), data.get("stock_minimo", 0) or 0,
           data.get("costo_promedio", 0) or 0, data.get("precio_venta", 0) or 0,
           data.get("almacen_id"), data.get("proveedor_id"), sid_p,
@@ -1862,6 +1878,8 @@ def importar_productos():
                 nombre = str(rd.get(h_nombre) or "").strip() if h_nombre else ""
                 if not nombre:
                     continue
+                nombre, categoria_importada = _normalizar_mostaza_galon(
+                    conn, nombre, cat_fallback)
                 codigo = str(rd.get(h_codigo) or "").strip() if h_codigo else ""
                 if not codigo:
                     codigo = siguiente_codigo(conn)
@@ -1889,6 +1907,8 @@ def importar_productos():
                         cat_id = f["id"]
                 if cat_id is None and cat_fallback:
                     cat_id = cat_fallback
+                if nombre == "MOSTAZA GALON":
+                    cat_id = categoria_importada
 
                 prov_id = None
                 if proveedor:
